@@ -28,5 +28,3 @@ native-host/*.local.json
 # optional local build artifacts
 native-helper/bin/
 native-helper/*.exe
-docs/
-docs/
