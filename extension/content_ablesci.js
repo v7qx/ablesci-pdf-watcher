@@ -3,14 +3,15 @@
 
   const BTN_ID = 'ablesci-native-oneclick-pdf-btn';
   const LOG_ID = 'ablesci-native-oneclick-pdf-log';
-  const DEFAULT_UI_OPTIONS = {
+  const DEFAULT_PAGE_OPTIONS = {
+    smartRecommendPush: true,
     buttonLabel: '上传PDF',
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
     buttonPosition: 'end'
   };
   let currentUploadPort = null;
-  let uiOptions = { ...DEFAULT_UI_OPTIONS };
+  let pageOptions = { ...DEFAULT_PAGE_OPTIONS };
 
   function $(sel, root = document) { return root.querySelector(sel); }
 
@@ -106,7 +107,7 @@
 
   function normalizeButtonLabel(value) {
     const s = String(value || '').trim();
-    return (s.slice(0, 20) || DEFAULT_UI_OPTIONS.buttonLabel);
+    return (s.slice(0, 20) || DEFAULT_PAGE_OPTIONS.buttonLabel);
   }
 
   function isSafeHexColor(value) {
@@ -119,28 +120,29 @@
 
   function normalizeUiOptions(opts) {
     return {
+      smartRecommendPush: opts?.smartRecommendPush !== false,
       buttonLabel: normalizeButtonLabel(opts?.buttonLabel),
-      buttonColor: isSafeHexColor(opts?.buttonColor) ? opts.buttonColor : DEFAULT_UI_OPTIONS.buttonColor,
-      buttonTextColor: isSafeHexColor(opts?.buttonTextColor) ? opts.buttonTextColor : DEFAULT_UI_OPTIONS.buttonTextColor,
+      buttonColor: isSafeHexColor(opts?.buttonColor) ? opts.buttonColor : DEFAULT_PAGE_OPTIONS.buttonColor,
+      buttonTextColor: isSafeHexColor(opts?.buttonTextColor) ? opts.buttonTextColor : DEFAULT_PAGE_OPTIONS.buttonTextColor,
       buttonPosition: normalizeButtonPosition(opts?.buttonPosition)
     };
   }
 
   async function loadUiOptions() {
-    const keys = Object.keys(DEFAULT_UI_OPTIONS);
+    const keys = Object.keys(DEFAULT_PAGE_OPTIONS);
     const local = await chrome.storage.local.get(keys);
-    if (keys.some(k => local[k] !== undefined)) return normalizeUiOptions({ ...DEFAULT_UI_OPTIONS, ...local });
-    const legacy = await chrome.storage.sync.get(DEFAULT_UI_OPTIONS);
-    return normalizeUiOptions({ ...DEFAULT_UI_OPTIONS, ...legacy });
+    if (keys.some(k => local[k] !== undefined)) return normalizeUiOptions({ ...DEFAULT_PAGE_OPTIONS, ...local });
+    const legacy = await chrome.storage.sync.get(DEFAULT_PAGE_OPTIONS);
+    return normalizeUiOptions({ ...DEFAULT_PAGE_OPTIONS, ...legacy });
   }
 
   function idleButtonText() {
-    return uiOptions.buttonLabel || DEFAULT_UI_OPTIONS.buttonLabel;
+    return pageOptions.buttonLabel || DEFAULT_PAGE_OPTIONS.buttonLabel;
   }
 
   function applyButtonAppearance(btn) {
     if (!btn) return;
-    const opts = normalizeUiOptions(uiOptions);
+    const opts = normalizeUiOptions(pageOptions);
     btn.style.setProperty('--ablesci-btn-bg', opts.buttonColor);
     btn.style.setProperty('--ablesci-btn-fg', opts.buttonTextColor);
   }
@@ -148,7 +150,7 @@
   function placeButton(found, btn, log) {
     const mount = found?.mount;
     if (!mount || !btn || !log) return;
-    if (found.kind === 'quick-assist' && uiOptions.buttonPosition === 'start') {
+    if (found.kind === 'quick-assist' && pageOptions.buttonPosition === 'start') {
       mount.insertBefore(log, mount.firstChild);
       mount.insertBefore(btn, mount.firstChild);
       return;
@@ -384,7 +386,12 @@
       if (msg.type === 'progress') setStatus(msg.message, 'busy');
       if (msg.type === 'done') {
         setStatus(msg.message || '上传成功', msg.blocked ? 'blocked' : (msg.downloadOnly ? 'downloadOnly' : 'ok'));
-        if (!msg.downloadOnly) showSiteLikeCompletion(msg);
+        if (!msg.downloadOnly) {
+          const completionMsg = pageOptions.smartRecommendPush
+            ? msg
+            : { ...msg, message: '上传成功', html: '上传成功', recomend: false, recommend: false };
+          showSiteLikeCompletion(completionMsg);
+        }
         if (currentUploadPort === port) currentUploadPort = null;
         try { port.disconnect(); } catch (_) {}
       }
@@ -435,16 +442,16 @@
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
-    const keys = Object.keys(DEFAULT_UI_OPTIONS);
+    const keys = Object.keys(DEFAULT_PAGE_OPTIONS);
     if (!keys.some(k => changes[k])) return;
     loadUiOptions().then(opts => {
-      uiOptions = opts;
+      pageOptions = opts;
       updateExistingButton();
     }).catch(() => {});
   });
 
   loadUiOptions().then(opts => {
-    uiOptions = opts;
+    pageOptions = opts;
     addButton();
     setTimeout(addButton, 1000);
     setTimeout(addButton, 3000);

@@ -13,6 +13,7 @@ const DEFAULT_OPTIONS = {
   maxAutoUploadMB: 99,
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false,
+  smartRecommendPush: true,
   buttonLabel: '上传PDF',
   buttonColor: '#FF5722',
   buttonTextColor: '#ffffff',
