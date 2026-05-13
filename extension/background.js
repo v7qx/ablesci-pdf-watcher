@@ -184,17 +184,6 @@ async function saveErrorDiagnostic(payload, err) {
   } catch (_) {}
 }
 
-function isHtmlExtension(pathOrName) {
-  const ext = extensionOf(pathOrName || '');
-  return ext === '.html' || ext === '.htm';
-}
-
-function canRemoveHtmlDownloadItem(item) {
-  if (!item || !item.id) return false;
-  if (!isHtmlExtension(item.filename || '')) return false;
-  return isHtmlDownloadItem(item);
-}
-
 function isNonPdfAccessPageError(err) {
   const raw = err && err.message ? err.message : String(err || '');
   return raw.includes(HTML_DOWNLOAD_MESSAGE) ||
@@ -380,10 +369,12 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer = null;
+    let statePoller = null;
     let abortListener = null;
 
     function cleanup() {
       if (timer) clearTimeout(timer);
+      if (statePoller) clearInterval(statePoller);
       if (abortListener && signal) signal.removeEventListener('abort', abortListener);
       chrome.downloads.onChanged.removeListener(listener);
     }
@@ -405,29 +396,43 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
     function checkCurrentState() {
       chrome.downloads.search({ id: downloadId }, items => {
         if (settled) return;
+
         const item = items && items[0];
         if (!item) return;
-        if (item.state === 'complete') return finishOk(item);
-        if (item.state === 'interrupted') return finishError('下载中断：' + (item.error || 'unknown'));
+
+        if (item.state === 'complete') {
+          return finishOk(item);
+        }
+
+        if (item.state === 'interrupted') {
+          return finishError('下载中断：' + (item.error || 'unknown'));
+        }
       });
     }
 
     function listener(delta) {
       if (delta.id !== downloadId) return;
+
       if (delta.state && delta.state.current === 'complete') {
         chrome.downloads.search({ id: downloadId }, items => {
           const item = items && items[0];
           if (!item) return finishError('下载完成但找不到 DownloadItem');
           finishOk(item);
         });
+        return;
       }
+
       if (delta.state && delta.state.current === 'interrupted') {
         chrome.downloads.search({ id: downloadId }, items => {
           const item = items && items[0];
           finishError('下载中断：' + (item?.error || 'unknown'));
         });
+        return;
       }
-      if (delta.error && delta.error.current) finishError('下载失败：' + delta.error.current);
+
+      if (delta.error && delta.error.current) {
+        finishError('下载失败：' + delta.error.current);
+      }
     }
 
     if (signal) {
@@ -435,10 +440,12 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
         try { chrome.downloads.cancel(downloadId); } catch (_) {}
         finishError(abortReason(signal, '任务已取消，已停止等待下载'));
       };
+
       if (signal.aborted) {
         abortListener();
         return;
       }
+
       signal.addEventListener('abort', abortListener, { once: true });
     }
 
@@ -447,9 +454,12 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
     }, timeoutMs);
 
     chrome.downloads.onChanged.addListener(listener);
+
+    // 立即查一次，防止下载已经完成。
     checkCurrentState();
-    setTimeout(checkCurrentState, 300);
-    setTimeout(checkCurrentState, 1200);
+
+    // 持续轮询该 downloadId，防止 onChanged complete 事件漏掉。
+    statePoller = setInterval(checkCurrentState, 1000);
   });
 }
 
