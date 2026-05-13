@@ -1,0 +1,32 @@
+node_modules/
+__pycache__/
+docs/
+dist/
+build/
+release/
+Downloads/
+.local/
+
+*.har
+*.pdf
+*.log
+*.tmp
+*.zip
+*.crdownload
+*.crx
+*.pem
+*.exe
+
+.DS_Store
+Thumbs.db
+.env
+.env.*
+
+# local native host config
+native-host/*.local.json
+
+# optional local build artifacts
+native-helper/bin/
+native-helper/*.exe
+docs/
+docs/

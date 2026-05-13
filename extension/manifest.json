@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Ablesci SD PDF Uploader Beta",
+  "version": "0.10.0",
+  "description": "ScienceDirect 优先测试版：在 Ablesci 求助详情页下载已授权 PDF，校验后上传。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.ablesci.com/*",
+    "https://ablesci.com/*",
+    "https://*.oss-cn-shanghai.aliyuncs.com/*",
+    "https://*.aliyuncs.com/*",
+    "https://doi.org/*",
+    "https://dx.doi.org/*",
+    "https://www.sciencedirect.com/*",
+    "https://sciencedirect.com/*",
+    "https://www.nature.com/*",
+    "https://nature.com/*",
+    "https://pubs.rsc.org/*",
+    "https://xlink.rsc.org/*",
+    "https://link.springer.com/*",
+    "https://pubs.acs.org/*",
+    "https://onlinelibrary.wiley.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.ablesci.com/assist/detail*",
+        "https://ablesci.com/assist/detail*"
+      ],
+      "js": [
+        "adapters.js",
+        "content_ablesci.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.sciencedirect.com/*",
+        "https://sciencedirect.com/*",
+        "https://www.nature.com/*",
+        "https://nature.com/*"
+      ],
+      "js": [
+        "content_publishers.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Ablesci PDF Uploader",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}

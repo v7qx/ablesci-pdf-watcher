@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Ablesci PDF Uploader</title>
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --border-strong: #d1d5db;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --danger: #dc2626;
+      --ok: #15803d;
+      --control-bg: #f9fafb;
+      --shadow: 0 1px 2px rgba(17, 24, 39, .04), 0 8px 24px rgba(17, 24, 39, .04);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .page {
+      width: min(800px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 40px;
+    }
+
+    .header {
+      margin-bottom: 18px;
+    }
+
+    .header h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+
+    .card-title {
+      margin: 0;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 28px;
+      padding: 15px 18px;
+      border-top: 1px solid #f3f4f6;
+    }
+
+    .setting-row:first-of-type { border-top: 0; }
+
+    .setting-copy {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .setting-copy strong {
+      display: block;
+      font-weight: 600;
+    }
+
+    .setting-copy span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .setting-control {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      min-width: 250px;
+      flex: 0 0 340px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--control-bg);
+      color: var(--text);
+      font: inherit;
+      padding: 7px 10px;
+      transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    select:focus {
+      outline: none;
+      border-color: var(--primary);
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+    }
+
+    select {
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position:
+        calc(100% - 16px) 15px,
+        calc(100% - 11px) 15px;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      padding-right: 30px;
+    }
+
+    button {
+      min-height: 36px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      padding: 0 15px;
+      cursor: pointer;
+      transition: background .16s ease, transform .16s ease;
+    }
+
+    button:hover { background: var(--primary-hover); }
+    button:active { transform: translateY(1px); }
+
+    button.secondary {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--primary);
+    }
+
+    button.secondary:hover { background: #f9fafb; }
+
+    .toggle {
+      position: relative;
+      display: inline-flex;
+      width: 42px;
+      height: 24px;
+      flex: none;
+    }
+
+    .toggle input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .toggle span {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #cbd5e1;
+      transition: background .18s ease;
+    }
+
+    .toggle span::before {
+      content: "";
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 2px;
+      top: 2px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, .24);
+      transition: transform .18s ease;
+    }
+
+    .toggle input:checked + span { background: var(--primary); }
+    .toggle input:checked + span::before { transform: translateX(18px); }
+    .toggle input:focus-visible + span { box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
+
+    .range {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .range span,
+    .color-pair span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .color-pair {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .color-pair label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    input[type="color"] {
+      width: 42px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--control-bg);
+      padding: 3px;
+      cursor: pointer;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      max-width: 220px;
+      border-radius: 999px;
+      background: #f3f4f6;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 0 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill.ok {
+      background: #dcfce7;
+      color: var(--ok);
+    }
+
+    .pill.error {
+      background: #fee2e2;
+      color: var(--danger);
+    }
+
+    details.card summary {
+      position: relative;
+      list-style: none;
+      cursor: pointer;
+      padding: 15px 44px 15px 18px;
+      font-size: 15px;
+      font-weight: 650;
+      user-select: none;
+    }
+
+    details.card summary::-webkit-details-marker { display: none; }
+
+    details.card summary::after {
+      content: "";
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: translateY(-60%) rotate(45deg);
+      transition: transform .16s ease;
+    }
+
+    details.card[open] summary {
+      border-bottom: 1px solid var(--border);
+    }
+
+    details.card[open] summary::after {
+      transform: translateY(-35%) rotate(225deg);
+    }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-top: 6px;
+    }
+
+    #status {
+      color: var(--ok);
+      font-size: 13px;
+    }
+
+    @media (max-width: 680px) {
+      .page {
+        width: min(100vw - 20px, 800px);
+        padding-top: 22px;
+      }
+
+      .setting-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .setting-control {
+        justify-content: flex-start;
+        min-width: 0;
+        flex: 1 1 auto;
+        width: 100%;
+      }
+
+      .range { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <h1>Ablesci PDF Uploader</h1>
+      <p>设置下载、上传和按钮显示。</p>
+    </header>
+
+    <section class="card">
+      <h2 class="card-title">安装检查</h2>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>浏览器下载设置</strong>
+          <span>关闭下载前询问，并设置 PDF 直接下载。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="已完成浏览器下载设置">
+            <input id="browserDownloadConfigured" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>Native Helper</strong>
+          <span>测试本地 Helper 是否可用。</span>
+        </div>
+        <div class="setting-control">
+          <button id="testNative" class="secondary" type="button">测试</button>
+          <span id="nativeStatus" class="pill">未测试</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">上传规则</h2>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>自动上传范围</strong>
+          <span>超出范围时只下载和校验。最大值填 0 表示不限制。</span>
+        </div>
+        <div class="setting-control">
+          <div class="range">
+            <input id="minAutoUploadMB" type="number" min="0" step="0.1" value="1" aria-label="最小体积 MB">
+            <span>到</span>
+            <input id="maxAutoUploadMB" type="number" min="0" step="1" value="99" aria-label="最大体积 MB">
+            <span>MB</span>
+          </div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>上传完成后删除本地 PDF</strong>
+          <span>关闭时会保留本地 PDF。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="上传完成后删除本地 PDF">
+            <input id="deleteAfterUpload" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>调试模式</strong>
+          <span>只下载并校验 PDF，不自动上传；完成时显示准备上传的文件信息。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="调试模式：仅下载不上传">
+            <input id="debugDownloadOnly" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">按钮外观</h2>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>显示名称</strong>
+          <span>显示在 Ablesci 页面按钮上的文字。</span>
+        </div>
+        <div class="setting-control">
+          <input id="buttonLabel" type="text" maxlength="20" placeholder="上传PDF">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>颜色</strong>
+          <span>默认状态下的按钮背景和文字颜色。</span>
+        </div>
+        <div class="setting-control">
+          <div class="color-pair">
+            <label><span>背景</span><input id="buttonColor" type="color" value="#FF5722"></label>
+            <label><span>文字</span><input id="buttonTextColor" type="color" value="#ffffff"></label>
+          </div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>显示位置</strong>
+          <span>没有快捷应助区域时，回退到 DOI 区域最后。</span>
+        </div>
+        <div class="setting-control">
+          <select id="buttonPosition">
+            <option value="end">现有快捷应助按钮之后</option>
+            <option value="start">现有快捷应助按钮之前</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <details class="card">
+      <summary>高级设置</summary>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>Native Host 名称</strong>
+          <span>默认无需修改。</span>
+        </div>
+        <div class="setting-control">
+          <input id="nativeHostName" type="text" value="com.ablesci.pdf_uploader">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>保留浏览器下载记录</strong>
+          <span>异常 HTML 下载会保留记录，便于确认。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="保留浏览器下载记录">
+            <input id="keepDownloadHistory" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>自动删除 HTML 错误页</strong>
+          <span>默认关闭。开启后，下载到 HTML/登录页/错误页时会尝试删除本地异常文件。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="自动删除 HTML 错误页">
+            <input id="autoRemoveHtmlDownloads" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>诊断信息</strong>
+          <span>复制最近一次脱敏诊断信息。</span>
+        </div>
+        <div class="setting-control">
+          <button id="copyDiagnostic" class="secondary" type="button">复制</button>
+          <span id="diagnosticStatus" class="pill">未复制</span>
+        </div>
+      </div>
+    </details>
+
+    <footer class="footer">
+      <button id="save" type="button">保存</button>
+      <span id="status"></span>
+    </footer>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>
