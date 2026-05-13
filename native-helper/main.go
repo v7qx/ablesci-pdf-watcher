@@ -155,17 +155,28 @@ func handleStatPDF(req Request) error {
 	})
 }
 
+func isPDFPath(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), ".pdf")
+}
+
 func handleDeleteFile(req Request) error {
 	path, err := cleanExistingPath(req.Path)
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+
+	if !isPDFPath(path) {
 		return errors.New("refuse to delete non-pdf file")
 	}
+
+	if _, _, err := inspectPDF(path); err != nil {
+		return fmt.Errorf("refuse to delete file that is not a valid PDF: %w", err)
+	}
+
 	if err := os.Remove(path); err != nil {
 		return err
 	}
+
 	return writeResponse(Response{OK: true, Action: "delete_file", Path: path, Deleted: true})
 }
 
@@ -240,6 +251,14 @@ func handleUploadOSS(req Request) error {
 	}
 	deleted := false
 	if req.Delete {
+		if !isPDFPath(path) {
+			return errors.New("refuse to delete non-pdf file after upload")
+		}
+
+		if _, _, err := inspectPDF(path); err != nil {
+			return fmt.Errorf("refuse to delete file that is not a valid PDF after upload: %w", err)
+		}
+
 		if err := os.Remove(path); err != nil {
 			return err
 		}

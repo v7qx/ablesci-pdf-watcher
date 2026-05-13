@@ -184,11 +184,15 @@ async function saveErrorDiagnostic(payload, err) {
   } catch (_) {}
 }
 
-function isHtmlDownloadItem(item) {
-  const mime = String(item?.mime || '').toLowerCase();
-  const ext = extensionOf(item?.filename || '');
-  if (mime.includes('text/html') || mime.includes('application/xhtml+xml')) return true;
-  return ext === '.htm' || ext === '.html';
+function isHtmlExtension(pathOrName) {
+  const ext = extensionOf(pathOrName || '');
+  return ext === '.html' || ext === '.htm';
+}
+
+function canRemoveHtmlDownloadItem(item) {
+  if (!item || !item.id) return false;
+  if (!isHtmlExtension(item.filename || '')) return false;
+  return isHtmlDownloadItem(item);
 }
 
 function isNonPdfAccessPageError(err) {
@@ -198,31 +202,50 @@ function isNonPdfAccessPageError(err) {
 }
 
 async function removeDownloadArtifact(item) {
-  if (!item || !item.id) return false;
-  let removed = false;
+  if (!canRemoveHtmlDownloadItem(item)) {
+    console.warn(
+      '[Ablesci PDF Uploader] refuse to remove non-html download artifact',
+      sanitizeDownloadItem(item)
+    );
+    return false;
+  }
+
   try {
     await chrome.downloads.removeFile(item.id);
-    removed = true;
-  } catch (_) {}
-  return removed;
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function stopForNonPdfDownload(port, diag, item, downloadMeta, stage, reason, opts = {}) {
   let removed = false;
+  let removeReason = 'autoRemoveHtmlDownloads disabled';
+
   if (opts.autoRemoveHtmlDownloads) {
-    removed = await removeDownloadArtifact(item);
+    if (canRemoveHtmlDownloadItem(item)) {
+      removed = await removeDownloadArtifact(item);
+      removeReason = removed
+        ? 'removed html/htm download artifact'
+        : 'failed to remove html/htm download artifact';
+    } else {
+      removeReason = 'refuse to remove non-html download artifact';
+    }
   }
+
   const message = HTML_DOWNLOAD_MESSAGE + (removed
-    ? ' 已删除本地异常文件，并保留浏览器下载记录。'
+    ? ' 已删除本地 HTML 异常文件，并保留浏览器下载记录。'
     : ' 已保留本地异常文件，未自动删除。');
+
   await saveDiagnostic({
     ...diag,
     stage,
     downloadItem: downloadMeta || sanitizeDownloadItem(item),
     error: reason || HTML_DOWNLOAD_MESSAGE,
     removedDownloadFile: removed,
-    removeReason: opts.autoRemoveHtmlDownloads ? 'autoRemoveHtmlDownloads enabled' : 'autoRemoveHtmlDownloads disabled'
+    removeReason
   });
+
   post(port, 'done', message, {
     html: escapeHtml(message),
     recomend: false,
