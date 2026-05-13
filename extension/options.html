@@ -213,7 +213,42 @@
       gap: 8px;
       width: 100%;
     }
+    .setting-row-tall {
+      align-items: flex-start;
+    }
 
+    .setting-code-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .setting-code-list code {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0 10px;
+      background: #f9fafb;
+      color: var(--primary);
+      font-size: 12px;
+      user-select: all;
+    }
+
+    .manual-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      color: var(--text);
+    }
+
+    .manual-check input {
+      width: 16px;
+      height: 16px;
+    }
     .range span,
     .color-pair span {
       color: var(--muted);
@@ -345,18 +380,14 @@
 
     <section class="card">
       <h2 class="card-title">安装检查</h2>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>浏览器下载设置</strong>
-          <span>关闭下载前询问，并设置 PDF 直接下载。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="已完成浏览器下载设置">
-            <input id="browserDownloadConfigured" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-      </div>
+			<div class="setting-row">
+			  <div class="setting-copy">
+				<strong>浏览器下载设置</strong>
+				<span>
+				  请手动关闭“下载前询问保存位置”，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。
+				</span>
+			  </div>
+			</div>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>Native Helper</strong>

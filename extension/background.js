@@ -201,6 +201,28 @@ function isNonPdfAccessPageError(err) {
     /file header is not %PDF-|likely html\/login\/error page/i.test(raw);
 }
 
+function isHtmlDownloadItem(item) {
+  const mime = String(item?.mime || '').toLowerCase();
+  const ext = extensionOf(item?.filename || '');
+
+  if (mime.includes('text/html') || mime.includes('application/xhtml+xml')) {
+    return true;
+  }
+
+  return ext === '.htm' || ext === '.html';
+}
+
+function isHtmlExtension(pathOrName) {
+  const ext = extensionOf(pathOrName || '');
+  return ext === '.html' || ext === '.htm';
+}
+
+function canRemoveHtmlDownloadItem(item) {
+  if (!item || !item.id) return false;
+  if (!isHtmlExtension(item.filename || '')) return false;
+  return isHtmlDownloadItem(item);
+}
+
 async function removeDownloadArtifact(item) {
   if (!canRemoveHtmlDownloadItem(item)) {
     console.warn(
@@ -782,7 +804,7 @@ function debugDownloadOnlyDone(port, stat) {
   const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
   const size = Number(stat?.size || 0);
   const md5 = stat?.md5 || '';
-  const message = `调试模式已开启：仅下载并校验 PDF，未自动上传。准备上传文件：${name}；大小：${size} bytes；MD5：${md5}`;
+  const message = `调试模式已开启，未自动上传。准备上传文件：${name}`;
   post(port, 'done', message, {
     html: escapeHtml(message),
     recomend: false,
