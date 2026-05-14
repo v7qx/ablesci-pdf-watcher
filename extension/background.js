@@ -16,6 +16,7 @@ const DEFAULT_OPTIONS = {
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
+const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
@@ -138,11 +139,54 @@ function makeDiagnosticBase(payload, opts) {
     time: new Date().toISOString(),
     assistId: maskId(payload?.assistId),
     doi: payload?.doi || '',
+    journalName: payload?.journalName || '',
     publisherHost: hostnameOf(payload?.pdfUrl || ''),
     pickedUrl: urlHostPath(payload?.pdfUrl || ''),
     source: payload?.pdfUrlSource || '',
     downloadMode: opts?.downloadMode || 'auto'
   };
+}
+
+async function recordJournalAccessResult(payload, result) {
+  const journal = String(payload?.journalName || '').trim();
+  if (!journal) return;
+
+  const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
+  const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
+  const item = stats[journal] || {
+    failCount: 0,
+    successCount: 0,
+    lastFailAt: '',
+    lastSuccessAt: '',
+    lastReason: '',
+    lastDoi: '',
+    lastTitle: ''
+  };
+
+  if (result?.ok) {
+    item.successCount += 1;
+    item.lastSuccessAt = new Date().toISOString();
+  } else {
+    item.failCount += 1;
+    item.lastFailAt = new Date().toISOString();
+    item.lastReason = result?.reason || 'unknown';
+    item.lastDoi = payload?.doi || '';
+    item.lastTitle = payload?.title || payload?.suggestedFilename || '';
+  }
+
+  stats[journal] = item;
+  await chrome.storage.local.set({ [JOURNAL_ACCESS_STATS_KEY]: stats });
+}
+
+function classifyJournalAccessFailureReason(err) {
+  const raw = String(err?.message || err || '');
+  if (!raw) return '';
+  if (raw.includes(HTML_DOWNLOAD_MESSAGE)) return 'html_login_or_error_page';
+  if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
+  if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
+  if (/等待出版商页面触发 PDF 下载超时/i.test(raw)) return 'publisher_timeout';
+  if (/下载中断/i.test(raw)) return 'download_interrupted';
+  return '';
 }
 
 function sanitizeDownloadItem(item) {
@@ -256,6 +300,10 @@ async function stopForNonPdfDownload(port, diag, item, downloadMeta, stage, reas
     removedDownloadFile: removed,
     removeReason
   });
+  await recordJournalAccessResult(diag, {
+    ok: false,
+    reason: 'html_login_or_error_page'
+  });
 
   post(port, 'done', message, {
     html: escapeHtml(message),
@@ -270,6 +318,20 @@ function isScienceDirectUrl(url) {
   return /(^|\.)sciencedirect\.com$/i.test(hostnameOf(url));
 }
 
+function extractScienceDirectPii(url) {
+  const s = String(url || '');
+  return (
+    s.match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] ||
+    s.match(/\/1-s2\.0-([^/?#]+)\/main\.pdf/i)?.[1] ||
+    s.match(/1-s2\.0-([^/?#-]+)(?:-main)?\.pdf/i)?.[1] ||
+    ''
+  );
+}
+
+function isDoiHost(host) {
+  return /^(dx\.)?doi\.org$/i.test(host || '');
+}
+
 function isNatureUrl(url) {
   return /(^|\.)nature\.com$/i.test(hostnameOf(url));
 }
@@ -279,7 +341,7 @@ function isRscDirectPdfUrl(url) {
 }
 
 function isScienceDirectPdfUrl(url) {
-  return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/pdfft/i.test(url || '');
+  return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)/i.test(url || '');
 }
 
 function isDoiUrl(url) {
@@ -288,6 +350,11 @@ function isDoiUrl(url) {
 
 function isScienceDirectRelatedHost(h) {
   return /(^|\.)(sciencedirect\.com|sciencedirectassets\.com|elsevier\.com|els-cdn\.com)$/i.test(h || '');
+}
+
+function isScienceDirectAssetPdfUrl(url) {
+  return /(^|\.)sciencedirectassets\.com$/i.test(hostnameOf(url)) &&
+    /\/1-s2\.0-[^/?#]+\/main\.pdf(?:[?#]|$)/i.test(String(url || ''));
 }
 
 function natureArticleUrlFromPdfUrl(url) {
@@ -313,6 +380,18 @@ function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
 
   const itemUrl = item.finalUrl || item.url || '';
   const h = hostnameOf(itemUrl);
+  const expectedPii = extractScienceDirectPii(sourceUrl);
+  const itemPii = extractScienceDirectPii(itemUrl) || extractScienceDirectPii(item.filename || '');
+
+  if (expectedPii && itemPii && expectedPii !== itemPii) {
+    console.warn('[Ablesci PDF Uploader] reject ScienceDirect PDF with mismatched PII', {
+      expectedPii,
+      itemPii,
+      item: sanitizeDownloadItem(item)
+    });
+    return false;
+  }
+
   const haystack = [
     item.url || '',
     item.finalUrl || '',
@@ -345,10 +424,22 @@ function isExpectedPublisherPage(pending, pageUrl) {
   const expectedArticle = pending.articleUrl || pending.pdfUrl || '';
   const expectedHost = hostnameOf(expectedArticle);
   const actualHost = hostnameOf(pageUrl);
-  if (!expectedHost || !actualHost || expectedHost !== actualHost) return false;
+  if (!expectedHost || !actualHost) return false;
+
+  if (isDoiHost(expectedHost)) {
+    if (isScienceDirectUrl(pageUrl) || isNatureUrl(pageUrl)) {
+      pending.articleUrl = pageUrl;
+      pending.publisher = isScienceDirectUrl(pageUrl) ? 'sciencedirect' : 'nature';
+      if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(pageUrl);
+      return true;
+    }
+  }
+
+  if (expectedHost !== actualHost) return false;
+
   if (isScienceDirectUrl(expectedArticle)) {
-    const expectedPii = String(expectedArticle).match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] || '';
-    const actualPii = String(pageUrl).match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] || '';
+    const expectedPii = extractScienceDirectPii(expectedArticle);
+    const actualPii = extractScienceDirectPii(pageUrl);
     return !expectedPii || !actualPii || expectedPii === actualPii;
   }
   return true;
@@ -361,7 +452,7 @@ function searchRecentDownloads(query) {
 }
 
 function scienceDirectArticleUrlFromPdfUrl(url) {
-  const m = String(url || '').match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/[^/?#]+)(?:\/pdfft(?:[?#].*)?|[?#].*)?$/i);
+  const m = String(url || '').match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/[^/?#]+)(?:\/(?:pdf|pdfft)(?:[?#].*)?|[?#].*)?$/i);
   return m ? m[1] : url;
 }
 
@@ -951,6 +1042,7 @@ async function handleUpload(port, payload, signal = null) {
     if (opts.deleteAfterUpload) {
       try { await sendNativeMessage(opts.nativeHostName, { action: 'delete_file', path: stat.path }); } catch (e) { console.warn(e); }
     }
+    await recordJournalAccessResult(payload, { ok: true });
     postDoneFromSiteResponse(port, permit, '上传成功');
     return;
   }
@@ -981,9 +1073,11 @@ async function handleUpload(port, payload, signal = null) {
   }
   if (parsed && parsed.msg) {
     await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+    await recordJournalAccessResult(payload, { ok: true });
     postDoneFromSiteResponse(port, parsed, '上传成功');
   } else {
     await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+    await recordJournalAccessResult(payload, { ok: true });
     post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
       html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
       recomend: false,
@@ -1032,6 +1126,13 @@ function processQueue() {
     } catch (err) {
       if (!task.cancelled) {
         await saveErrorDiagnostic(payload, err);
+        const failureReason = classifyJournalAccessFailureReason(err);
+        if (failureReason) {
+          await recordJournalAccessResult(payload, {
+            ok: false,
+            reason: failureReason
+          });
+        }
         if (isNonPdfAccessPageError(err)) {
           post(port, 'done', HTML_DOWNLOAD_MESSAGE, {
             html: escapeHtml(HTML_DOWNLOAD_MESSAGE),
@@ -1086,6 +1187,36 @@ chrome.runtime.onConnect.addListener(port => {
     if (!msg || msg.type !== 'startUpload') return;
     enqueueUpload(port, msg.payload);
   });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const pending = pendingPublisherTabs.get(tabId);
+  if (!pending) return;
+
+  const url = changeInfo.url || tab?.url || '';
+  if (!url) return;
+
+  const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
+
+  if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url))) {
+    pending.articleUrl = url;
+    pending.publisher = isScienceDirectUrl(url) ? 'sciencedirect' : 'nature';
+    if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
+    return;
+  }
+
+  if (isScienceDirectAssetPdfUrl(url)) {
+    const expectedPii = extractScienceDirectPii(pending.articleUrl || pending.pdfUrl || '');
+    const actualPii = extractScienceDirectPii(url);
+
+    if (expectedPii && actualPii && expectedPii !== actualPii) {
+      pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPii}，实际 ${actualPii}`));
+      return;
+    }
+
+    if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
+    pending.lastNativePdfUrl = url;
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
