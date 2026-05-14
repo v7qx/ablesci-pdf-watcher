@@ -6,6 +6,7 @@
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const DEFAULT_PAGE_OPTIONS = {
     smartRecommendPush: true,
+    openAssistLinksInCurrentTab: false,
     buttonLabel: '上传PDF',
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
@@ -124,6 +125,7 @@
   function normalizeUiOptions(opts) {
     return {
       smartRecommendPush: opts?.smartRecommendPush !== false,
+      openAssistLinksInCurrentTab: opts?.openAssistLinksInCurrentTab === true,
       buttonLabel: normalizeButtonLabel(opts?.buttonLabel),
       buttonColor: isSafeHexColor(opts?.buttonColor) ? opts.buttonColor : DEFAULT_PAGE_OPTIONS.buttonColor,
       buttonTextColor: isSafeHexColor(opts?.buttonTextColor) ? opts.buttonTextColor : DEFAULT_PAGE_OPTIONS.buttonTextColor,
@@ -221,6 +223,46 @@
     }, delay);
   }
 
+  function isAssistDetailUrl(rawUrl) {
+    try {
+      const url = new URL(rawUrl, location.href);
+      return (url.hostname === 'ablesci.com' || url.hostname === 'www.ablesci.com') &&
+        url.pathname.startsWith('/assist/detail');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function shouldKeepDefaultClick(event) {
+    return event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;
+  }
+
+  function attachCurrentTabAssistLinkBehavior(root) {
+    if (!root || root.dataset.ablesciCurrentTabAssistBound === '1') return;
+    root.dataset.ablesciCurrentTabAssistBound = '1';
+
+    const anchors = Array.from(root.querySelectorAll('a[href]'));
+    for (const anchor of anchors) {
+      const href = anchor.href || anchor.getAttribute('href');
+      if (!isAssistDetailUrl(href)) continue;
+      anchor.removeAttribute('target');
+      anchor.rel = 'noopener noreferrer';
+    }
+
+    root.addEventListener('click', event => {
+      if (!pageOptions.openAssistLinksInCurrentTab) return;
+      if (shouldKeepDefaultClick(event)) return;
+      const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+      if (!anchor) return;
+      const href = anchor.href || anchor.getAttribute('href');
+      if (!isAssistDetailUrl(href)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      location.assign(new URL(href, location.href).href);
+    }, true);
+  }
+
   function showSiteLikeCompletion(msg) {
     const rawHtml = msg.html || msg.message || '上传成功';
     const plain = stripHtml(rawHtml) || '上传成功';
@@ -247,6 +289,7 @@
     const content = document.createElement('div');
     content.className = 'ablesci-native-layer-content layui-layer-content';
     content.innerHTML = rawHtml;
+    attachCurrentTabAssistLinkBehavior(content);
 
     const btnBar = document.createElement('div');
     btnBar.className = 'ablesci-native-layer-btn';
