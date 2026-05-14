@@ -160,7 +160,6 @@
 
     const articleUrl = makeScienceDirectArticleUrl();
     if (!articleUrl) return;
-
     const nativePdfHref = findNativePdfHref();
     if (nativePdfHref) {
       viewPdfTriggered = true;

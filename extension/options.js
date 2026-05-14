@@ -24,6 +24,7 @@ const DEFAULT_OPTIONS = {
 
 const ids = Object.keys(DEFAULT_OPTIONS);
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
+const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 
 function el(id) { return document.getElementById(id); }
 
@@ -176,7 +177,13 @@ async function copyDiagnostic() {
   }
 }
 
+async function clearJournalAccessStats() {
+  await chrome.storage.local.remove(JOURNAL_ACCESS_STATS_KEY);
+  showText('status', '已清除本地期刊失败记录。');
+}
+
 document.addEventListener('DOMContentLoaded', load);
 el('save').addEventListener('click', save);
 el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
+el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);

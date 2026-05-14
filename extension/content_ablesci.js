@@ -3,6 +3,7 @@
 
   const BTN_ID = 'ablesci-native-oneclick-pdf-btn';
   const LOG_ID = 'ablesci-native-oneclick-pdf-log';
+  const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const DEFAULT_PAGE_OPTIONS = {
     smartRecommendPush: true,
     buttonLabel: '上传PDF',
@@ -94,6 +95,8 @@
       #${BTN_ID}.warn:hover { color:#334155 !important; }
       #${BTN_ID}.err { background:#a94442 !important; border-color:#a94442 !important; }
       #${LOG_ID} { display:inline-block; margin-left:8px; color:#777; font-size:12px; vertical-align:middle; max-width:520px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #ablesci-journal-access-hint,
+      .ablesci-journal-access-hint { display:inline-block; margin-left:8px; color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:3px; padding:1px 6px; font-size:12px; line-height:20px; vertical-align:middle; }
       .ablesci-native-layer-shade { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 2147483000; }
       .ablesci-native-layer { position: fixed; left: 50%; top: 12%; transform: translateX(-50%); width: min(680px, calc(100vw - 48px)); background: #fff; border-radius: 2px; box-shadow: 1px 1px 50px rgba(0,0,0,.3); z-index: 2147483001; font-size: 14px; color: #222; }
       .ablesci-native-layer-content { padding: 20px 28px; max-height: 62vh; overflow: auto; line-height: 1.65; }
@@ -175,6 +178,7 @@
         !btn.classList.contains('err')) {
       btn.textContent = idleButtonText();
     }
+    renderJournalAccessHint(btn).catch(() => {});
   }
 
   function setStatus(msg, type) {
@@ -331,6 +335,67 @@
     };
   }
 
+  function cleanJournalName(value) {
+    return String(value || '')
+      .replace(/^期刊[:：]\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function extractJournalName() {
+    const rows = Array.from(document.querySelectorAll('.assist-detail tr'));
+    for (const tr of rows) {
+      const cells = Array.from(tr.children || []);
+      const label = cleanJournalName(visibleText(cells[0]));
+      const value = cleanJournalName(visibleText(cells[1]));
+      if (!label || !value) continue;
+      if (/^(期刊|刊名|journal)$/i.test(label)) return value;
+    }
+
+    const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    const match = bodyText.match(/期刊[:：]\s*([A-Za-z0-9&.,:;()'\/\- ]{3,160})/);
+    return match ? cleanJournalName(match[1]) : '';
+  }
+
+  async function getJournalAccessHint(journalName) {
+    const journal = cleanJournalName(journalName);
+    if (!journal) return null;
+
+    const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
+    const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
+    const item = stats[journal];
+    if (!item) return null;
+
+    const failCount = Number(item.failCount || 0);
+    const successCount = Number(item.successCount || 0);
+    if (failCount >= 2 && failCount > successCount) {
+      return {
+        level: 'warn',
+        text: `本地记录：该期刊近期下载失败 ${failCount} 次，可能无权限，建议先手动确认。`
+      };
+    }
+    return null;
+  }
+
+  async function renderJournalAccessHint(anchorEl) {
+    if (!anchorEl) return;
+    const journalName = extractJournalName();
+    const hint = await getJournalAccessHint(journalName);
+    const existing = document.getElementById('ablesci-journal-access-hint');
+    if (!hint) {
+      existing?.remove();
+      return;
+    }
+    if (existing) return;
+
+    const span = document.createElement('span');
+    span.id = 'ablesci-journal-access-hint';
+    span.className = 'ablesci-journal-access-hint';
+    span.textContent = '该期刊近期多次失败，可能无权限';
+    span.title = hint.text;
+    anchorEl.insertAdjacentElement('afterend', span);
+  }
+
   function collectPayload() {
     if (isUploadBlocked()) {
       throw new Error('当前页面看起来已经有人上传、待确认、已完成或已关闭，已停止。');
@@ -342,6 +407,8 @@
     const assistId = getAssistId();
     const doi = window.AblesciPdfAdapters.getFullDoiFromDocument(document);
     const suggestedFilename = window.AblesciPdfAdapters.makePdfFilename(document);
+    const title = visibleText($('.assist-title')) || document.title || suggestedFilename;
+    const journalName = extractJournalName();
     const risk = detectPageRisk();
 
     return {
@@ -350,6 +417,8 @@
       csrfToken,
       assistId,
       doi,
+      title,
+      journalName,
       pdfUrl: picked.url,
       pdfUrlSource: picked.source,
       suggestedFilename,
@@ -438,11 +507,16 @@
     log.id = LOG_ID;
 
     placeButton(found, btn, log);
+    renderJournalAccessHint(btn).catch(() => {});
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     const keys = Object.keys(DEFAULT_PAGE_OPTIONS);
+    if (changes[JOURNAL_ACCESS_STATS_KEY]) {
+      const btn = $('#' + BTN_ID);
+      if (btn) renderJournalAccessHint(btn).catch(() => {});
+    }
     if (!keys.some(k => changes[k])) return;
     loadUiOptions().then(opts => {
       pageOptions = opts;

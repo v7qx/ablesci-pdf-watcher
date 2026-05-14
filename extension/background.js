@@ -18,6 +18,7 @@ const DEFAULT_OPTIONS = {
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
+const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
@@ -169,11 +170,55 @@ function makeDiagnosticBase(payload, opts) {
     time: new Date().toISOString(),
     assistId: maskId(payload?.assistId),
     doi: payload?.doi || '',
+    journalName: payload?.journalName || '',
     publisherHost: hostnameOf(payload?.pdfUrl || ''),
     pickedUrl: urlHostPath(payload?.pdfUrl || ''),
     source: payload?.pdfUrlSource || '',
     downloadMode: opts?.downloadMode || 'auto'
   };
+}
+
+async function recordJournalAccessResult(payload, result) {
+  const journal = String(payload?.journalName || '').trim();
+  if (!journal) return;
+
+  const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
+  const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
+  const item = stats[journal] || {
+    failCount: 0,
+    successCount: 0,
+    lastFailAt: '',
+    lastSuccessAt: '',
+    lastReason: '',
+    lastDoi: '',
+    lastTitle: ''
+  };
+
+  if (result?.ok) {
+    item.successCount += 1;
+    item.lastSuccessAt = new Date().toISOString();
+  } else {
+    item.failCount += 1;
+    item.lastFailAt = new Date().toISOString();
+    item.lastReason = result?.reason || 'unknown';
+    item.lastDoi = payload?.doi || '';
+    item.lastTitle = payload?.title || payload?.suggestedFilename || '';
+  }
+
+  stats[journal] = item;
+  await chrome.storage.local.set({ [JOURNAL_ACCESS_STATS_KEY]: stats });
+}
+
+function classifyJournalAccessFailureReason(err) {
+  const raw = String(err?.message || err || '');
+  if (!raw) return '';
+  if (/任务已取消|Ablesci 页面已关闭或刷新|页面已关闭|已停止等待下载/i.test(raw)) return 'user_cancelled';
+  if (raw.includes(HTML_DOWNLOAD_MESSAGE)) return 'html_login_or_error_page';
+  if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
+  if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
+  if (/等待出版商页面触发 PDF 下载超时/i.test(raw)) return 'publisher_timeout';
+  if (/下载中断/i.test(raw)) return 'download_interrupted';
+  return '';
 }
 
 function sanitizeDownloadItem(item) {
@@ -286,6 +331,10 @@ async function stopForNonPdfDownload(port, diag, item, downloadMeta, stage, reas
     error: reason || HTML_DOWNLOAD_MESSAGE,
     removedDownloadFile: removed,
     removeReason
+  });
+  await recordJournalAccessResult(diag, {
+    ok: false,
+    reason: 'html_login_or_error_page'
   });
 
   post(port, 'done', message, {
@@ -1040,6 +1089,7 @@ async function handleUpload(port, payload, signal = null) {
     if (opts.deleteAfterUpload) {
       try { await sendNativeMessage(opts.nativeHostName, { action: 'delete_file', path: stat.path }); } catch (e) { console.warn(e); }
     }
+    await recordJournalAccessResult(payload, { ok: true });
     postDoneFromSiteResponse(port, permit, '上传成功');
     return;
   }
@@ -1080,9 +1130,11 @@ async function handleUpload(port, payload, signal = null) {
   }
   if (parsed && parsed.msg) {
     await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+    await recordJournalAccessResult(payload, { ok: true });
     postDoneFromSiteResponse(port, parsed, '上传成功');
   } else {
     await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+    await recordJournalAccessResult(payload, { ok: true });
     post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
       html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
       recomend: false,
@@ -1129,6 +1181,14 @@ function processQueue() {
     try {
       await handleUpload(port, payload, abortController.signal);
     } catch (err) {
+      const failureReason = classifyJournalAccessFailureReason(err);
+      if (failureReason) {
+        await recordJournalAccessResult(payload, {
+          ok: false,
+          reason: failureReason
+        });
+      }
+
       if (!task.cancelled) {
         await saveErrorDiagnostic(payload, err);
         if (isNonPdfAccessPageError(err)) {
