@@ -34,7 +34,13 @@ let activeTask = null;
 let nextTaskId = 1;
 
 function post(port, type, message, extra = {}) {
-  try { port.postMessage({ type, message, ...extra }); } catch (e) { console.error(e); }
+  try {
+    port.postMessage({ type, message, ...extra });
+  } catch (e) {
+    const text = String(e?.message || e || '');
+    if (/disconnected port object/i.test(text)) return;
+    console.error(e);
+  }
 }
 
 function makeAbortError(reason) {
@@ -917,6 +923,22 @@ function postDoneFromSiteResponse(port, res, fallbackMsg) {
   });
 }
 
+function isAssistStateChangedMessage(text) {
+  const plain = stripHtml(text || '');
+  return /该求助状态已经发生改变|请刷新页面查看或下载|已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭/.test(plain);
+}
+
+function postAssistStateChangedDone(port, text) {
+  const plain = stripHtml(text || '该求助状态已经发生改变，请刷新页面查看或下载。');
+  post(port, 'done', plain, {
+    html: escapeHtml(plain),
+    recomend: false,
+    reload: true,
+    blocked: true,
+    stateChanged: true
+  });
+}
+
 function downloadOnlyDone(port, reasons, stat) {
   const reasonText = Array.isArray(reasons) && reasons.length
     ? reasons.join('；')
@@ -1086,6 +1108,11 @@ async function handleUpload(port, payload, signal = null) {
   }
 
   if (permit.code !== 0) {
+    if (isAssistStateChangedMessage(permit.msg || '')) {
+      await saveDiagnostic({ ...diag, stage: 'assist-state-changed-before-upload', downloadItem: downloadMeta, fileSize: size });
+      postAssistStateChangedDone(port, permit.msg || '该求助状态已经发生改变，请刷新页面查看或下载。');
+      return;
+    }
     throw new Error(stripHtml(permit.msg || 'upload-request 未允许上传'));
   }
 
@@ -1104,6 +1131,11 @@ async function handleUpload(port, payload, signal = null) {
   let parsed = null;
   try { parsed = JSON.parse(ossRes.body || '{}'); } catch (_) {}
   if (parsed && parsed.code === 1) {
+    if (isAssistStateChangedMessage(parsed.msg || '')) {
+      await saveDiagnostic({ ...diag, stage: 'assist-state-changed-after-upload', downloadItem: downloadMeta, fileSize: size });
+      postAssistStateChangedDone(port, parsed.msg || '该求助状态已经发生改变，请刷新页面查看或下载。');
+      return;
+    }
     throw new Error(stripHtml(parsed.msg || 'OSS 回调返回上传失败'));
   }
   if (opts.deleteAfterUpload) {
