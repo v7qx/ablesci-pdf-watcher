@@ -208,7 +208,7 @@
 
     .range {
       display: grid;
-      grid-template-columns: 1fr auto 1fr auto;
+      grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr) auto auto;
       align-items: center;
       gap: 8px;
       width: 100%;
@@ -332,7 +332,7 @@
         width: 100%;
       }
 
-      .range { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+      .range { grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr) auto auto; }
     }
   </style>
 </head>
@@ -374,10 +374,18 @@
         </div>
         <div class="setting-control">
           <div class="range">
-            <input id="minAutoUploadMB" type="number" min="0" step="0.1" value="1" aria-label="最小体积 MB">
+            <input id="minAutoUploadMB" type="number" min="0" step="0.1" value="1" aria-label="最小体积">
+            <select id="minAutoUploadUnit" aria-label="最小体积单位">
+              <option value="KB">KB</option>
+              <option value="MB">MB</option>
+            </select>
             <span>到</span>
-            <input id="maxAutoUploadMB" type="number" min="0" step="1" value="99" aria-label="最大体积 MB">
-            <span>MB</span>
+            <input id="maxAutoUploadMB" type="number" min="0" step="0.1" value="99" aria-label="最大体积">
+            <select id="maxAutoUploadUnit" aria-label="最大体积单位">
+              <option value="KB">KB</option>
+              <option value="MB">MB</option>
+            </select>
+            <span>0 为不限</span>
           </div>
         </div>
       </div>

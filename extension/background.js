@@ -10,7 +10,9 @@ const DEFAULT_OPTIONS = {
   keepDownloadHistory: true,
   browserDownloadConfigured: false,
   minAutoUploadMB: 1,
+  minAutoUploadUnit: 'MB',
   maxAutoUploadMB: 99,
+  maxAutoUploadUnit: 'MB',
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false
 };
@@ -59,7 +61,9 @@ async function getOptions() {
     downloadSubdir: '',
     moveToDir: '',
     downloadMode: 'auto',
-    scienceDirectTabMode: 'silent_then_visible'
+    scienceDirectTabMode: 'silent_then_visible',
+    minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
+    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit)
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -79,6 +83,27 @@ function sanitizePathPart(s) {
     .replace(/\/+/g, '/')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeSizeUnit(value) {
+  return String(value || '').toUpperCase() === 'KB' ? 'KB' : 'MB';
+}
+
+function formatBytes(size) {
+  const value = Number(size || 0);
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 2 : 1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatConfiguredSize(value, unit) {
+  const n = Number(value);
+  const normalizedUnit = normalizeSizeUnit(unit);
+  if (!Number.isFinite(n) || n < 0) return `0 ${normalizedUnit}`;
+  const digits = normalizedUnit === 'KB' ? 0 : (Number.isInteger(n) ? 0 : 1);
+  return `${n.toFixed(digits)} ${normalizedUnit}`;
 }
 
 function sanitizeFilename(s) {
@@ -181,6 +206,7 @@ async function recordJournalAccessResult(payload, result) {
 function classifyJournalAccessFailureReason(err) {
   const raw = String(err?.message || err || '');
   if (!raw) return '';
+  if (/任务已取消|Ablesci 页面已关闭或刷新|页面已关闭|已停止等待下载/i.test(raw)) return 'user_cancelled';
   if (raw.includes(HTML_DOWNLOAD_MESSAGE)) return 'html_login_or_error_page';
   if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
   if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
@@ -822,10 +848,12 @@ function sendNativeMessage(hostName, message) {
   });
 }
 
-function mbToBytes(value, fallback) {
+function sizeToBytes(value, unit, fallback, fallbackUnit = 'MB') {
   const n = Number(value);
-  const mb = Number.isFinite(n) && n >= 0 ? n : fallback;
-  return Math.round(mb * 1024 * 1024);
+  const size = Number.isFinite(n) && n >= 0 ? n : fallback;
+  const normalizedUnit = normalizeSizeUnit(unit || fallbackUnit);
+  const factor = normalizedUnit === 'KB' ? 1024 : 1024 * 1024;
+  return Math.round(size * factor);
 }
 
 function formatTaskError(err) {
@@ -992,7 +1020,7 @@ async function handleUpload(port, payload, signal = null) {
       size: Number(stat.size || 0)
     }
   });
-  post(port, 'progress', `PDF 校验通过：${stat.filename}，${stat.size} bytes，MD5=${stat.md5}`);
+  post(port, 'progress', `PDF 校验通过：${stat.filename}，${formatBytes(stat.size)}，MD5=${stat.md5}`);
   const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length
     ? payload.riskReasons.slice()
     : [];
@@ -1010,20 +1038,30 @@ async function handleUpload(port, payload, signal = null) {
       },
       message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
     });
-    post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${size} bytes，MD5=${stat.md5}；已跳过自动上传。`);
+    post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
     debugDownloadOnlyDone(port, stat);
     return;
   }
-  const minAutoUploadBytes = mbToBytes(opts.minAutoUploadMB, DEFAULT_OPTIONS.minAutoUploadMB);
-  const maxAutoUploadBytes = mbToBytes(opts.maxAutoUploadMB, DEFAULT_OPTIONS.maxAutoUploadMB);
+  const minAutoUploadBytes = sizeToBytes(
+    opts.minAutoUploadMB,
+    opts.minAutoUploadUnit,
+    DEFAULT_OPTIONS.minAutoUploadMB,
+    DEFAULT_OPTIONS.minAutoUploadUnit
+  );
+  const maxAutoUploadBytes = sizeToBytes(
+    opts.maxAutoUploadMB,
+    opts.maxAutoUploadUnit,
+    DEFAULT_OPTIONS.maxAutoUploadMB,
+    DEFAULT_OPTIONS.maxAutoUploadUnit
+  );
   if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
-    downloadOnlyReasons.push(`PDF 文件小于 ${opts.minAutoUploadMB || DEFAULT_OPTIONS.minAutoUploadMB} MB（${size} bytes），已改为仅下载。`);
+    downloadOnlyReasons.push(`PDF 文件小于 ${formatConfiguredSize(opts.minAutoUploadMB || DEFAULT_OPTIONS.minAutoUploadMB, opts.minAutoUploadUnit || DEFAULT_OPTIONS.minAutoUploadUnit)}（当前 ${formatBytes(size)}），已改为仅下载。`);
     await saveDiagnostic({ ...diag, stage: 'download-only-small-file', downloadItem: downloadMeta, fileSize: size });
     downloadOnlyDone(port, downloadOnlyReasons, stat);
     return;
   }
   if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
-    downloadOnlyReasons.push(`PDF 文件大于 ${opts.maxAutoUploadMB || DEFAULT_OPTIONS.maxAutoUploadMB} MB（${size} bytes），超过自动上传范围，已改为仅下载。`);
+    downloadOnlyReasons.push(`PDF 文件大于 ${formatConfiguredSize(opts.maxAutoUploadMB || DEFAULT_OPTIONS.maxAutoUploadMB, opts.maxAutoUploadUnit || DEFAULT_OPTIONS.maxAutoUploadUnit)}（当前 ${formatBytes(size)}），超过自动上传范围，已改为仅下载。`);
     await saveDiagnostic({ ...diag, stage: 'download-only-large-file', downloadItem: downloadMeta, fileSize: size });
     downloadOnlyDone(port, downloadOnlyReasons, stat);
     return;
@@ -1124,15 +1162,16 @@ function processQueue() {
     try {
       await handleUpload(port, payload, abortController.signal);
     } catch (err) {
+      const failureReason = classifyJournalAccessFailureReason(err);
+      if (failureReason) {
+        await recordJournalAccessResult(payload, {
+          ok: false,
+          reason: failureReason
+        });
+      }
+
       if (!task.cancelled) {
         await saveErrorDiagnostic(payload, err);
-        const failureReason = classifyJournalAccessFailureReason(err);
-        if (failureReason) {
-          await recordJournalAccessResult(payload, {
-            ok: false,
-            reason: failureReason
-          });
-        }
         if (isNonPdfAccessPageError(err)) {
           post(port, 'done', HTML_DOWNLOAD_MESSAGE, {
             html: escapeHtml(HTML_DOWNLOAD_MESSAGE),
