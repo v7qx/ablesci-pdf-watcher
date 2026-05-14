@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ablesci SD PDF Uploader Beta",
+  "name": "Ablesci PDF Uploader",
   "version": "0.10.0",
-  "description": "ScienceDirect 优先测试版：在 Ablesci 求助详情页下载已授权 PDF，校验后上传。",
+  "description": "在 Ablesci 求助详情页下载 PDF，校验后上传。",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -36,6 +36,16 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://www.ablesci.com/assist*",
+        "https://ablesci.com/assist*"
+      ],
+      "js": [
+        "content_ablesci_navigation.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://www.ablesci.com/assist/detail*",

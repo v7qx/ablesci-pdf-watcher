@@ -16,6 +16,7 @@ const DEFAULT_OPTIONS = {
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false,
   smartRecommendPush: true,
+  openAssistLinksInCurrentTab: false,
   buttonLabel: '上传PDF',
   buttonColor: '#FF5722',
   buttonTextColor: '#ffffff',

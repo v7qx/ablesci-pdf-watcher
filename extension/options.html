@@ -107,6 +107,11 @@
       flex: 0 0 340px;
     }
 
+    .setting-control-wide {
+      min-width: 340px;
+      flex-basis: 420px;
+    }
+
     input[type="text"],
     input[type="number"],
     select {
@@ -208,7 +213,7 @@
 
     .range {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr) auto auto;
+      grid-template-columns: minmax(72px, 1fr) minmax(72px, auto) auto minmax(72px, 1fr) minmax(72px, auto) auto;
       align-items: center;
       gap: 8px;
       width: 100%;
@@ -218,6 +223,10 @@
     .color-pair span {
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .range span {
+      white-space: nowrap;
     }
 
     .color-pair {
@@ -332,7 +341,8 @@
         width: 100%;
       }
 
-      .range { grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr) auto auto; }
+      .range { grid-template-columns: minmax(0, 1fr) minmax(72px, auto) auto; }
+      .range > :nth-child(4) { grid-column: 1; }
     }
   </style>
 </head>
@@ -372,7 +382,7 @@
           <strong>自动上传范围</strong>
           <span>超出范围时只下载和校验。最大值填 0 表示不限制。</span>
         </div>
-        <div class="setting-control">
+        <div class="setting-control setting-control-wide">
           <div class="range">
             <input id="minAutoUploadMB" type="number" min="0" step="0.1" value="1" aria-label="最小体积">
             <select id="minAutoUploadUnit" aria-label="最小体积单位">
@@ -465,7 +475,7 @@
     </section>
 
     <details class="card">
-      <summary>高级设置</summary>
+      <summary>更多设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>Native Host 名称</strong>
@@ -483,6 +493,18 @@
         <div class="setting-control">
           <label class="toggle" title="保留浏览器下载记录">
             <input id="keepDownloadHistory" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>求助链接当前窗口打开</strong>
+          <span>开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="求助链接当前窗口打开">
+            <input id="openAssistLinksInCurrentTab" type="checkbox">
             <span></span>
           </label>
         </div>
