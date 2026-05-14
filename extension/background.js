@@ -873,7 +873,7 @@ function postDoneFromSiteResponse(port, res, fallbackMsg) {
 
 function isAssistStateChangedMessage(text) {
   const plain = stripHtml(text || '');
-  return /该求助状态已经发生改变|请刷新页面查看或下载|已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭/.test(plain);
+  return /该求助状态已经发生改变|请刷新页面查看或下载|已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭|不在求助中|已被修改状态|状态.*发生改变/.test(plain);
 }
 
 function postAssistStateChangedDone(port, text) {
