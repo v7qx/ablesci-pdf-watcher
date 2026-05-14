@@ -10,7 +10,9 @@ const DEFAULT_OPTIONS = {
   keepDownloadHistory: true,
   browserDownloadConfigured: false,
   minAutoUploadMB: 1,
+  minAutoUploadUnit: 'MB',
   maxAutoUploadMB: 99,
+  maxAutoUploadUnit: 'MB',
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false,
   smartRecommendPush: true,
@@ -39,6 +41,10 @@ function normalizeButtonPosition(value) {
   return value === 'start' ? 'start' : 'end';
 }
 
+function normalizeSizeUnit(value) {
+  return String(value || '').toUpperCase() === 'KB' ? 'KB' : 'MB';
+}
+
 async function loadOptions() {
   const local = await chrome.storage.local.get(ids);
   const normalizeOptions = opts => ({
@@ -47,6 +53,8 @@ async function loadOptions() {
     moveToDir: '',
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
+    minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
+    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
     buttonLabel: normalizeButtonLabel(opts.buttonLabel),
     buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),
     buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
@@ -72,11 +80,14 @@ async function load() {
 }
 
 function validateOptions(opts) {
-  const minMB = Number(opts.minAutoUploadMB);
-  const maxMB = Number(opts.maxAutoUploadMB);
-  if (!Number.isFinite(minMB) || minMB < 0) throw new Error('最小体积必须大于或等于 0。');
-  if (!Number.isFinite(maxMB) || maxMB < 0) throw new Error('最大体积必须大于或等于 0。');
-  if (maxMB > 0 && minMB > maxMB) throw new Error('最小体积不能大于最大体积。');
+  const minValue = Number(opts.minAutoUploadMB);
+  const maxValue = Number(opts.maxAutoUploadMB);
+  if (!Number.isFinite(minValue) || minValue < 0) throw new Error('最小体积必须大于或等于 0。');
+  if (!Number.isFinite(maxValue) || maxValue < 0) throw new Error('最大体积必须大于或等于 0。');
+  const unitFactor = unit => normalizeSizeUnit(unit) === 'KB' ? 1024 : 1024 * 1024;
+  const minBytes = Math.round(minValue * unitFactor(opts.minAutoUploadUnit));
+  const maxBytes = Math.round(maxValue * unitFactor(opts.maxAutoUploadUnit));
+  if (maxBytes > 0 && minBytes > maxBytes) throw new Error('最小体积不能大于最大体积。');
 }
 
 async function save() {
@@ -92,7 +103,9 @@ async function save() {
   opts.downloadMode = 'auto';
   opts.scienceDirectTabMode = 'silent_then_visible';
   opts.minAutoUploadMB = Number(opts.minAutoUploadMB);
+  opts.minAutoUploadUnit = normalizeSizeUnit(opts.minAutoUploadUnit);
   opts.maxAutoUploadMB = Number(opts.maxAutoUploadMB);
+  opts.maxAutoUploadUnit = normalizeSizeUnit(opts.maxAutoUploadUnit);
   opts.buttonLabel = normalizeButtonLabel(opts.buttonLabel);
   opts.buttonColor = normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor);
   opts.buttonTextColor = normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor);

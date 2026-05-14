@@ -10,7 +10,9 @@ const DEFAULT_OPTIONS = {
   keepDownloadHistory: true,
   browserDownloadConfigured: false,
   minAutoUploadMB: 1,
+  minAutoUploadUnit: 'MB',
   maxAutoUploadMB: 99,
+  maxAutoUploadUnit: 'MB',
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false
 };
@@ -31,7 +33,13 @@ let activeTask = null;
 let nextTaskId = 1;
 
 function post(port, type, message, extra = {}) {
-  try { port.postMessage({ type, message, ...extra }); } catch (e) { console.error(e); }
+  try {
+    port.postMessage({ type, message, ...extra });
+  } catch (e) {
+    const text = String(e?.message || e || '');
+    if (/disconnected port object/i.test(text)) return;
+    console.error(e);
+  }
 }
 
 function makeAbortError(reason) {
@@ -58,7 +66,9 @@ async function getOptions() {
     downloadSubdir: '',
     moveToDir: '',
     downloadMode: 'auto',
-    scienceDirectTabMode: 'silent_then_visible'
+    scienceDirectTabMode: 'silent_then_visible',
+    minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
+    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit)
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -78,6 +88,27 @@ function sanitizePathPart(s) {
     .replace(/\/+/g, '/')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeSizeUnit(value) {
+  return String(value || '').toUpperCase() === 'KB' ? 'KB' : 'MB';
+}
+
+function formatBytes(size) {
+  const value = Number(size || 0);
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 2 : 1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatConfiguredSize(value, unit) {
+  const n = Number(value);
+  const normalizedUnit = normalizeSizeUnit(unit);
+  if (!Number.isFinite(n) || n < 0) return `0 ${normalizedUnit}`;
+  const digits = normalizedUnit === 'KB' ? 0 : (Number.isInteger(n) ? 0 : 1);
+  return `${n.toFixed(digits)} ${normalizedUnit}`;
 }
 
 function sanitizeFilename(s) {
@@ -270,6 +301,20 @@ function isScienceDirectUrl(url) {
   return /(^|\.)sciencedirect\.com$/i.test(hostnameOf(url));
 }
 
+function extractScienceDirectPii(url) {
+  const s = String(url || '');
+  return (
+    s.match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] ||
+    s.match(/\/1-s2\.0-([^/?#]+)\/main\.pdf/i)?.[1] ||
+    s.match(/1-s2\.0-([^/?#-]+)(?:-main)?\.pdf/i)?.[1] ||
+    ''
+  );
+}
+
+function isDoiHost(host) {
+  return /^(dx\.)?doi\.org$/i.test(host || '');
+}
+
 function isNatureUrl(url) {
   return /(^|\.)nature\.com$/i.test(hostnameOf(url));
 }
@@ -279,7 +324,7 @@ function isRscDirectPdfUrl(url) {
 }
 
 function isScienceDirectPdfUrl(url) {
-  return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/pdfft/i.test(url || '');
+  return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)/i.test(url || '');
 }
 
 function isDoiUrl(url) {
@@ -288,6 +333,11 @@ function isDoiUrl(url) {
 
 function isScienceDirectRelatedHost(h) {
   return /(^|\.)(sciencedirect\.com|sciencedirectassets\.com|elsevier\.com|els-cdn\.com)$/i.test(h || '');
+}
+
+function isScienceDirectAssetPdfUrl(url) {
+  return /(^|\.)sciencedirectassets\.com$/i.test(hostnameOf(url)) &&
+    /\/1-s2\.0-[^/?#]+\/main\.pdf(?:[?#]|$)/i.test(String(url || ''));
 }
 
 function natureArticleUrlFromPdfUrl(url) {
@@ -313,6 +363,18 @@ function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
 
   const itemUrl = item.finalUrl || item.url || '';
   const h = hostnameOf(itemUrl);
+  const expectedPii = extractScienceDirectPii(sourceUrl);
+  const itemPii = extractScienceDirectPii(itemUrl) || extractScienceDirectPii(item.filename || '');
+
+  if (expectedPii && itemPii && expectedPii !== itemPii) {
+    console.warn('[Ablesci PDF Uploader] reject ScienceDirect PDF with mismatched PII', {
+      expectedPii,
+      itemPii,
+      item: sanitizeDownloadItem(item)
+    });
+    return false;
+  }
+
   const haystack = [
     item.url || '',
     item.finalUrl || '',
@@ -345,10 +407,19 @@ function isExpectedPublisherPage(pending, pageUrl) {
   const expectedArticle = pending.articleUrl || pending.pdfUrl || '';
   const expectedHost = hostnameOf(expectedArticle);
   const actualHost = hostnameOf(pageUrl);
-  if (!expectedHost || !actualHost || expectedHost !== actualHost) return false;
+  if (!expectedHost || !actualHost) return false;
+  if (isDoiHost(expectedHost)) {
+    if (isScienceDirectUrl(pageUrl) || isNatureUrl(pageUrl)) {
+      pending.articleUrl = pageUrl;
+      pending.publisher = isScienceDirectUrl(pageUrl) ? 'sciencedirect' : 'nature';
+      if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(pageUrl);
+      return true;
+    }
+  }
+  if (expectedHost !== actualHost) return false;
   if (isScienceDirectUrl(expectedArticle)) {
-    const expectedPii = String(expectedArticle).match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] || '';
-    const actualPii = String(pageUrl).match(/\/science\/article\/pii\/([^/?#]+)/i)?.[1] || '';
+    const expectedPii = extractScienceDirectPii(expectedArticle);
+    const actualPii = extractScienceDirectPii(pageUrl);
     return !expectedPii || !actualPii || expectedPii === actualPii;
   }
   return true;
@@ -361,7 +432,7 @@ function searchRecentDownloads(query) {
 }
 
 function scienceDirectArticleUrlFromPdfUrl(url) {
-  const m = String(url || '').match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/[^/?#]+)(?:\/pdfft(?:[?#].*)?|[?#].*)?$/i);
+  const m = String(url || '').match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/[^/?#]+)(?:\/(?:pdf|pdfft)(?:[?#].*)?|[?#].*)?$/i);
   return m ? m[1] : url;
 }
 
@@ -731,10 +802,12 @@ function sendNativeMessage(hostName, message) {
   });
 }
 
-function mbToBytes(value, fallback) {
+function sizeToBytes(value, unit, fallback, fallbackUnit = 'MB') {
   const n = Number(value);
-  const mb = Number.isFinite(n) && n >= 0 ? n : fallback;
-  return Math.round(mb * 1024 * 1024);
+  const size = Number.isFinite(n) && n >= 0 ? n : fallback;
+  const normalizedUnit = normalizeSizeUnit(unit || fallbackUnit);
+  const factor = normalizedUnit === 'KB' ? 1024 : 1024 * 1024;
+  return Math.round(size * factor);
 }
 
 function formatTaskError(err) {
@@ -795,6 +868,22 @@ function postDoneFromSiteResponse(port, res, fallbackMsg) {
     recomend: isRecommendResponse(res),
     reload: true,
     responseCode: res && res.code
+  });
+}
+
+function isAssistStateChangedMessage(text) {
+  const plain = stripHtml(text || '');
+  return /该求助状态已经发生改变|请刷新页面查看或下载|已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭/.test(plain);
+}
+
+function postAssistStateChangedDone(port, text) {
+  const plain = stripHtml(text || '该求助状态已经发生改变，请刷新页面查看或下载。');
+  post(port, 'done', plain, {
+    html: escapeHtml(plain),
+    recomend: false,
+    reload: true,
+    blocked: true,
+    stateChanged: true
   });
 }
 
@@ -901,7 +990,7 @@ async function handleUpload(port, payload, signal = null) {
       size: Number(stat.size || 0)
     }
   });
-  post(port, 'progress', `PDF 校验通过：${stat.filename}，${stat.size} bytes，MD5=${stat.md5}`);
+  post(port, 'progress', `PDF 校验通过：${stat.filename}，${formatBytes(stat.size)}，MD5=${stat.md5}`);
   const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length
     ? payload.riskReasons.slice()
     : [];
@@ -919,20 +1008,20 @@ async function handleUpload(port, payload, signal = null) {
       },
       message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
     });
-    post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${size} bytes，MD5=${stat.md5}；已跳过自动上传。`);
+    post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
     debugDownloadOnlyDone(port, stat);
     return;
   }
-  const minAutoUploadBytes = mbToBytes(opts.minAutoUploadMB, DEFAULT_OPTIONS.minAutoUploadMB);
-  const maxAutoUploadBytes = mbToBytes(opts.maxAutoUploadMB, DEFAULT_OPTIONS.maxAutoUploadMB);
+  const minAutoUploadBytes = sizeToBytes(opts.minAutoUploadMB, opts.minAutoUploadUnit, DEFAULT_OPTIONS.minAutoUploadMB, DEFAULT_OPTIONS.minAutoUploadUnit);
+  const maxAutoUploadBytes = sizeToBytes(opts.maxAutoUploadMB, opts.maxAutoUploadUnit, DEFAULT_OPTIONS.maxAutoUploadMB, DEFAULT_OPTIONS.maxAutoUploadUnit);
   if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
-    downloadOnlyReasons.push(`PDF 文件小于 ${opts.minAutoUploadMB || DEFAULT_OPTIONS.minAutoUploadMB} MB（${size} bytes），已改为仅下载。`);
+    downloadOnlyReasons.push(`PDF 文件小于 ${formatConfiguredSize(opts.minAutoUploadMB || DEFAULT_OPTIONS.minAutoUploadMB, opts.minAutoUploadUnit || DEFAULT_OPTIONS.minAutoUploadUnit)}（当前 ${formatBytes(size)}），已改为仅下载。`);
     await saveDiagnostic({ ...diag, stage: 'download-only-small-file', downloadItem: downloadMeta, fileSize: size });
     downloadOnlyDone(port, downloadOnlyReasons, stat);
     return;
   }
   if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
-    downloadOnlyReasons.push(`PDF 文件大于 ${opts.maxAutoUploadMB || DEFAULT_OPTIONS.maxAutoUploadMB} MB（${size} bytes），超过自动上传范围，已改为仅下载。`);
+    downloadOnlyReasons.push(`PDF 文件大于 ${formatConfiguredSize(opts.maxAutoUploadMB || DEFAULT_OPTIONS.maxAutoUploadMB, opts.maxAutoUploadUnit || DEFAULT_OPTIONS.maxAutoUploadUnit)}（当前 ${formatBytes(size)}），超过自动上传范围，已改为仅下载。`);
     await saveDiagnostic({ ...diag, stage: 'download-only-large-file', downloadItem: downloadMeta, fileSize: size });
     downloadOnlyDone(port, downloadOnlyReasons, stat);
     return;
@@ -956,6 +1045,11 @@ async function handleUpload(port, payload, signal = null) {
   }
 
   if (permit.code !== 0) {
+    if (isAssistStateChangedMessage(permit.msg || '')) {
+      await saveDiagnostic({ ...diag, stage: 'assist-state-changed-before-upload', downloadItem: downloadMeta, fileSize: size });
+      postAssistStateChangedDone(port, permit.msg || '该求助状态已经发生改变，请刷新页面查看或下载。');
+      return;
+    }
     throw new Error(stripHtml(permit.msg || 'upload-request 未允许上传'));
   }
 
@@ -974,6 +1068,11 @@ async function handleUpload(port, payload, signal = null) {
   let parsed = null;
   try { parsed = JSON.parse(ossRes.body || '{}'); } catch (_) {}
   if (parsed && parsed.code === 1) {
+    if (isAssistStateChangedMessage(parsed.msg || '')) {
+      await saveDiagnostic({ ...diag, stage: 'assist-state-changed-after-upload', downloadItem: downloadMeta, fileSize: size });
+      postAssistStateChangedDone(port, parsed.msg || '该求助状态已经发生改变，请刷新页面查看或下载。');
+      return;
+    }
     throw new Error(stripHtml(parsed.msg || 'OSS 回调返回上传失败'));
   }
   if (opts.deleteAfterUpload) {
@@ -1086,6 +1185,36 @@ chrome.runtime.onConnect.addListener(port => {
     if (!msg || msg.type !== 'startUpload') return;
     enqueueUpload(port, msg.payload);
   });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const pending = pendingPublisherTabs.get(tabId);
+  if (!pending) return;
+
+  const url = changeInfo.url || tab?.url || '';
+  if (!url) return;
+
+  const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
+
+  if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url))) {
+    pending.articleUrl = url;
+    pending.publisher = isScienceDirectUrl(url) ? 'sciencedirect' : 'nature';
+    if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
+    return;
+  }
+
+  if (isScienceDirectAssetPdfUrl(url)) {
+    const expectedPii = extractScienceDirectPii(pending.articleUrl || pending.pdfUrl || '');
+    const actualPii = extractScienceDirectPii(url);
+
+    if (expectedPii && actualPii && expectedPii !== actualPii) {
+      pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPii}，实际 ${actualPii}`));
+      return;
+    }
+
+    if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
+    pending.lastNativePdfUrl = url;
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

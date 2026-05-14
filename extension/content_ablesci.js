@@ -385,11 +385,11 @@
       if (!msg) return;
       if (msg.type === 'progress') setStatus(msg.message, 'busy');
       if (msg.type === 'done') {
-        setStatus(msg.message || '上传成功', msg.blocked ? 'blocked' : (msg.downloadOnly ? 'downloadOnly' : 'ok'));
+        const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush)
+          ? { ...msg, message: '上传成功', html: '上传成功', recomend: false, recommend: false }
+          : msg;
+        setStatus(completionMsg.message || '上传成功', completionMsg.blocked ? 'blocked' : (completionMsg.downloadOnly ? 'downloadOnly' : 'ok'));
         if (!msg.downloadOnly) {
-          const completionMsg = pageOptions.smartRecommendPush
-            ? msg
-            : { ...msg, message: '上传成功', html: '上传成功', recomend: false, recommend: false };
           showSiteLikeCompletion(completionMsg);
         }
         if (currentUploadPort === port) currentUploadPort = null;

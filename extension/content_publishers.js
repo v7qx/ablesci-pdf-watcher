@@ -54,8 +54,14 @@
     return location.origin + '/science/article/pii/' + pii;
   }
 
-  function isScienceDirectPdfftPage() {
-    return /\/science\/article\/pii\/[^/?#]+\/pdfft(?:[/?#]|$)/i.test(location.pathname + location.search);
+  function makeScienceDirectPdfUrl() {
+    const pii = getScienceDirectPii();
+    if (!pii) return null;
+    return location.origin + '/science/article/pii/' + pii + '/pdf';
+  }
+
+  function isScienceDirectPdfLandingPage() {
+    return /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)(?:[/?#]|$)/i.test(location.pathname + location.search);
   }
 
   function hasScienceDirectContentError() {
@@ -71,14 +77,14 @@
     return rect.width > 0 && rect.height > 0;
   }
 
-  function findNativePdfftHref() {
+  function findNativePdfHref() {
     const currentPii = getScienceDirectPii();
-    const links = Array.from(document.querySelectorAll('a[href*="/pdfft"]'))
+    const links = Array.from(document.querySelectorAll('a[href*="/pdfft"], a[href*="/pdf"]'))
       .map(a => {
         const href = decodeHtmlUrl(a.getAttribute('href') || a.href);
         const text = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
         const classes = a.className || '';
-        const piiMatch = href.match(/\/science\/article\/pii\/([^/?#]+)\/pdfft/i);
+        const piiMatch = href.match(/\/science\/article\/pii\/([^/?#]+)\/(?:pdf|pdfft)/i);
         const sameArticle = !!currentPii && !!piiMatch && piiMatch[1] === currentPii;
         const looksLikeNativeViewPdf = /View PDF|Download PDF/i.test(text) ||
           /accessbar|utility|link-button|ViewPDF/i.test(`${classes} ${a.id || ''}`) ||
@@ -142,7 +148,7 @@
       return;
     }
 
-    if (isScienceDirectPdfftPage()) {
+    if (isScienceDirectPdfLandingPage()) {
       if (hasScienceDirectContentError()) {
         sendScienceDirectMessage({
           error: 'ScienceDirect 返回错误页：There was a problem providing the content you requested。'
@@ -155,13 +161,25 @@
     const articleUrl = makeScienceDirectArticleUrl();
     if (!articleUrl) return;
 
-    const pdfftHref = findNativePdfftHref();
-    if (pdfftHref) {
+    const nativePdfHref = findNativePdfHref();
+    if (nativePdfHref) {
       viewPdfTriggered = true;
       sendScienceDirectMessage({
         articleUrl,
-        pdfUrl: pdfftHref,
+        pdfUrl: nativePdfHref,
         source: 'native_view_pdf_href'
+      });
+      stopScienceDirectObserver();
+      return;
+    }
+
+    const constructedPdfUrl = makeScienceDirectPdfUrl();
+    if (constructedPdfUrl) {
+      viewPdfTriggered = true;
+      sendScienceDirectMessage({
+        articleUrl,
+        pdfUrl: constructedPdfUrl,
+        source: 'constructed_current_pii_pdf'
       });
       stopScienceDirectObserver();
       return;
@@ -186,7 +204,7 @@
     const startedAt = Date.now();
     const tick = () => {
       notifyScienceDirectReady();
-      if (Date.now() - startedAt < timeoutMs && !viewPdfTriggered && !isScienceDirectPdfftPage()) {
+      if (Date.now() - startedAt < timeoutMs && !viewPdfTriggered && !isScienceDirectPdfLandingPage()) {
         setTimeout(tick, 1000);
       }
     };
