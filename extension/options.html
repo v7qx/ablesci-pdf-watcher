@@ -857,6 +857,20 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>Telegram 验证提醒</strong>
+          <span>可选。遇到 CF / challenge 时通过 Native Helper 读取本地配置并发送机器人消息。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <label class="toggle-option" title="启用 Telegram 验证提醒">
+            <span class="toggle"><input id="watcherTelegramNotifyEnabled" type="checkbox"><span></span></span>
+            <span class="toggle-text">启用</span>
+          </label>
+          <input id="watcherTelegramConfigPath" type="text" placeholder="D:\AblesciConfig\telegram.local.json">
+          <div class="setting-hint">配置文件只放本地，不提交仓库；留空时 Helper 会尝试读取自身目录下的 telegram.local.json。</div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>失败期刊、提醒与日报</strong>
           <span>跳过近期多次失败的期刊；提醒优先走 Native Helper；日报由 Helper 直接写入本地。</span>
         </div>

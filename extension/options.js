@@ -46,6 +46,8 @@ const DEFAULT_OPTIONS = {
   watcherDailyReportEnabled: true,
   watcherReportDir: '',
   watcherNotifyMode: 'native',
+  watcherTelegramNotifyEnabled: false,
+  watcherTelegramConfigPath: '',
   watcherCfPauseThreshold: 3,
   watcherQuantSchedulerEnabled: true,
   watcherAdvancedSchedulerEnabled: false,
@@ -170,6 +172,8 @@ async function loadOptions() {
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+    watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
+    watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
     watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
     watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
@@ -282,6 +286,8 @@ async function save() {
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
+  opts.watcherTelegramNotifyEnabled = opts.watcherTelegramNotifyEnabled === true;
+  opts.watcherTelegramConfigPath = String(opts.watcherTelegramConfigPath || '').trim();
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherQuantSchedulerEnabled !== false;
   opts.watcherAdvancedSchedulerEnabled = opts.watcherAdvancedSchedulerEnabled === true;

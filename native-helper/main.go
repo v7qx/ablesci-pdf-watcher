@@ -23,20 +23,21 @@ import (
 const allowedOSSHost = "https://ables1.oss-cn-shanghai.aliyuncs.com/"
 
 type Request struct {
-	Action    string            `json:"action"`
-	Path      string            `json:"path"`
-	MoveToDir string            `json:"move_to_dir,omitempty"`
-	Delete    bool              `json:"delete,omitempty"`
-	Title     string            `json:"title,omitempty"`
-	Message   string            `json:"message,omitempty"`
-	Content   string            `json:"content,omitempty"`
-	Filename  string            `json:"filename,omitempty"`
-	Dir       string            `json:"dir,omitempty"`
-	CSRFParam string            `json:"csrf_param,omitempty"`
-	CSRFToken string            `json:"csrf_token,omitempty"`
-	AssistID  string            `json:"assist_id,omitempty"`
-	OSS       OSSFields         `json:"oss,omitempty"`
-	Extra     map[string]string `json:"extra,omitempty"`
+	Action     string            `json:"action"`
+	Path       string            `json:"path"`
+	ConfigPath string            `json:"config_path,omitempty"`
+	MoveToDir  string            `json:"move_to_dir,omitempty"`
+	Delete     bool              `json:"delete,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Message    string            `json:"message,omitempty"`
+	Content    string            `json:"content,omitempty"`
+	Filename   string            `json:"filename,omitempty"`
+	Dir        string            `json:"dir,omitempty"`
+	CSRFParam  string            `json:"csrf_param,omitempty"`
+	CSRFToken  string            `json:"csrf_token,omitempty"`
+	AssistID   string            `json:"assist_id,omitempty"`
+	OSS        OSSFields         `json:"oss,omitempty"`
+	Extra      map[string]string `json:"extra,omitempty"`
 }
 
 type OSSFields struct {
@@ -92,6 +93,8 @@ func run() error {
 		return handleDeleteFile(req)
 	case "notify_user":
 		return handleNotifyUser(req)
+	case "send_telegram":
+		return handleSendTelegram(req)
 	case "write_text_file":
 		return handleWriteTextFile(req)
 	default:
@@ -202,6 +205,103 @@ func handleNotifyUser(req Request) error {
 	}
 	fmt.Fprint(os.Stderr, "\a")
 	return writeResponse(Response{OK: true, Action: "notify_user"})
+}
+
+type TelegramConfig struct {
+	Enabled             bool   `json:"enabled"`
+	BotToken            string `json:"bot_token"`
+	ChatID              string `json:"chat_id"`
+	MessageThreadID     string `json:"message_thread_id"`
+	ReplyToMessageID    string `json:"reply_to_message_id"`
+	ParseMode           string `json:"parse_mode"`
+	DisableNotification bool   `json:"disable_notification"`
+}
+
+func handleSendTelegram(req Request) error {
+	cfg, err := loadTelegramConfig(req.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
+		return writeResponse(Response{OK: false, Action: "send_telegram", Error: "telegram config disabled"})
+	}
+	if strings.TrimSpace(cfg.BotToken) == "" {
+		return errors.New("telegram bot_token is empty")
+	}
+	if strings.TrimSpace(cfg.ChatID) == "" {
+		return errors.New("telegram chat_id is empty")
+	}
+	title := limitText(firstNonEmpty(req.Title, "Ablesci PDF Watcher"), 80)
+	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 1000)
+	text := title + "\n" + message
+
+	form := url.Values{}
+	form.Set("chat_id", cfg.ChatID)
+	form.Set("text", text)
+	if cfg.MessageThreadID != "" {
+		form.Set("message_thread_id", cfg.MessageThreadID)
+	}
+	if cfg.ReplyToMessageID != "" {
+		form.Set("reply_to_message_id", cfg.ReplyToMessageID)
+	}
+	if cfg.ParseMode != "" {
+		form.Set("parse_mode", cfg.ParseMode)
+	}
+	if cfg.DisableNotification {
+		form.Set("disable_notification", "true")
+	}
+
+	endpoint := "https://api.telegram.org/bot" + cfg.BotToken + "/sendMessage"
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.PostForm(endpoint, form)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return writeResponse(Response{OK: false, Action: "send_telegram", Status: resp.StatusCode, Body: string(body), Error: fmt.Sprintf("telegram send failed: http %d", resp.StatusCode)})
+	}
+	return writeResponse(Response{OK: true, Action: "send_telegram", Status: resp.StatusCode, Body: string(body)})
+}
+
+func loadTelegramConfig(configPath string) (TelegramConfig, error) {
+	candidates := []string{}
+	if strings.TrimSpace(configPath) != "" {
+		candidates = append(candidates, configPath)
+	}
+	if env := strings.TrimSpace(os.Getenv("ABLESCI_WATCHER_TG_CONFIG")); env != "" {
+		candidates = append(candidates, env)
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "telegram.local.json"))
+	}
+	candidates = append(candidates, "telegram.local.json")
+
+	for _, path := range candidates {
+		path = strings.Trim(path, "\" ")
+		if path == "" {
+			continue
+		}
+		if runtime.GOOS == "windows" {
+			path = strings.ReplaceAll(path, "/", `\`)
+		}
+		if !filepath.IsAbs(path) {
+			if abs, err := filepath.Abs(path); err == nil {
+				path = abs
+			}
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var cfg TelegramConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return TelegramConfig{}, fmt.Errorf("decode telegram config failed: %w", err)
+		}
+		return cfg, nil
+	}
+	return TelegramConfig{}, errors.New("telegram config not found")
 }
 
 func handleWriteTextFile(req Request) error {

@@ -129,6 +129,8 @@
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+      watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
+      watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
       watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
       watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
@@ -320,6 +322,29 @@
     if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
   }
 
+  async function notifyCfChallengeTelegram(opts, listUrl, streak, paused) {
+    if (!opts.watcherTelegramNotifyEnabled || !deps.sendNativeMessage) return { ok: false, reason: 'telegram_disabled' };
+    const title = paused ? 'Ablesci 值守已因验证暂停' : 'Ablesci 值守遇到验证';
+    const hostPath = deps.urlHostPath(listUrl || '');
+    const message = [
+      `CF / challenge detected`,
+      `streak: ${streak}`,
+      `paused: ${paused ? 'yes' : 'no'}`,
+      `url: ${hostPath?.host || ''}${hostPath?.path || ''}`
+    ].join('\n');
+    try {
+      return await deps.sendNativeMessage(opts.nativeHostName, {
+        action: 'send_telegram',
+        config_path: opts.watcherTelegramConfigPath || '',
+        title,
+        message
+      });
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] telegram notify failed', err);
+      return { ok: false, reason: err?.message || String(err) };
+    }
+  }
+
   async function getWatcherState() {
     const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
     return stored[AUTO_WATCHER_STATE_KEY] || { processed: {}, daily: {} };
@@ -358,6 +383,14 @@
     if (reached) {
       await notifyWatcherNeedsAttention(`连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`, listUrl);
       await incrementDaily('notified');
+    }
+    const tg = await notifyCfChallengeTelegram(opts, listUrl, state.cfChallengeStreak, reached);
+    if (tg?.ok) {
+      await appendWatcherLog({
+        detailUrl: listUrl,
+        status: 'notified',
+        reason: reached ? 'telegram_cf_paused' : 'telegram_cf_challenge'
+      });
     }
     return reached;
   }
@@ -744,7 +777,8 @@
       source: item.source,
       score: item.score,
       estimatedSuccessRate: item.estimatedSuccessRate,
-      demandPressure: item.demandPressure
+      demandPressure: item.demandPressure,
+      sourceTrend: item.sourceTrend
     }));
     return picked.map(item => item.candidate);
   }
@@ -1144,18 +1178,85 @@
     const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
       .filter(log => formatBeijingDateTime(log.time, true) === date);
 
+    const csvHeader = [
+      'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
+      'marketRegime', 'totalSeeking', 'supplementCount', 'publisher', 'open', 'high', 'low', 'close', 'delta',
+      'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
+      'targetError', 'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
+      'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend'
+    ];
+    const baseReportFields = {
+      marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
+      workTimeProgressRatio: state.workTimeProgressRatio || '',
+      expectedDone: state.expectedDone || '',
+      actualDone: state.actualDone || state.monthDone || '',
+      targetError: state.targetError || state.lag || '',
+      rateMultiplier: state.rateMultiplier || '',
+      riskUsed: daily.riskUsed || state.riskUsed || '',
+      riskLimit: state.riskLimit || '',
+      sessionSize: state.lastSession?.targetSessionSize || '',
+      sessionHandledCount: state.lastSession?.handledCount || '',
+      sessionDurationMs: state.lastSession?.sessionDurationMs || ''
+    };
+    function reportRow(type, values = {}) {
+      const row = { record_type: type, ...baseReportFields, ...values };
+      return csvHeader.map(key => row[key] ?? '');
+    }
     const csvRows = [
-      ['time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason'],
-      ...logs.map(log => [
-        formatBeijingDateTime(log.time),
-        log.sessionId || '',
-        log.assistId || '',
-        log.doi || '',
-        log.journalName || '',
-        reportDetailValue(log),
-        log.status || '',
-        log.reason || ''
-      ])
+      csvHeader,
+      reportRow('summary', {
+        time: formatBeijingDateTime(new Date()),
+        status: state.schedulerModelMode || 'simple',
+        reason: `checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`,
+        totalSeeking: state.lastDemandSnapshot?.totalSeeking || '',
+        supplementCount: state.lastDemandSnapshot?.supplementCount || '',
+        delta: state.recentH1DemandDelta || state.marketData?.h1Delta || ''
+      }),
+      reportRow('session', {
+        time: formatBeijingDateTime(state.lastSession?.finishedAt || state.lastSession?.startedAt || new Date()),
+        sessionId: state.lastSession?.id || '',
+        status: state.lastSession?.status || '',
+        reason: state.lastSession?.cooldownMinutes ? `cooldown=${state.lastSession.cooldownMinutes}m` : ''
+      }),
+      ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
+        time: formatBeijingDateTime(new Date()),
+        publisher: item.source || '',
+        score: item.score || '',
+        estimatedSuccessRate: item.estimatedSuccessRate || '',
+        demandPressure: item.demandPressure || '',
+        sourceTrend: item.sourceTrend || ''
+      })),
+      ...demandSnapshots.map(item => reportRow('demand_sample', {
+        time: formatBeijingDateTime(item.timestamp),
+        status: item.regime || '',
+        reason: item.demandAnomaly ? item.anomalyType || 'anomaly' : '',
+        totalSeeking: item.totalSeeking || '',
+        supplementCount: item.supplementCount || '',
+        publisher: Object.entries(item.publisherCounts || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0)).slice(0, 8).map(([name, count]) => `${name}:${count}`).join(';')
+      })),
+      ...['m15', 'h1', 'd1'].flatMap(frame => (state.marketData?.candles?.[frame] || []).slice(0, frame === 'm15' ? 96 : 24).map(candle => reportRow(`candle_${frame}`, {
+        time: formatBeijingDateTime(candle.start),
+        status: frame,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        delta: candle.delta,
+        range: candle.range,
+        absMove: candle.absMove,
+        sampleCount: candle.sampleCount,
+        validSampleCount: candle.validSampleCount
+      }))),
+      ...logs.map(log => reportRow('log', {
+        time: formatBeijingDateTime(log.time),
+        sessionId: log.sessionId || '',
+        assistId: log.assistId || '',
+        doi: log.doi || '',
+        journalName: log.journalName || '',
+        detailUrl: reportDetailValue(log),
+        status: log.status || '',
+        reason: log.reason || ''
+      }))
     ];
     const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
 
@@ -1189,7 +1290,7 @@
       `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
       `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
       '',
-      '## Bandit Top Publishers',
+      '## Bandit',
       '',
       '| Publisher | Score | Estimated Success | Demand Pressure |',
       '| --- | --- | --- | --- |',
@@ -1197,24 +1298,11 @@
         `| ${String(item.source || '').replace(/\|/g, '\\|')} | ${Number(item.score || 0).toFixed(4)} | ${Number(item.estimatedSuccessRate || 0).toFixed(4)} | ${Number(item.demandPressure || 0).toFixed(4)} |`
       ),
       '',
-      '## Demand Snapshots',
-      '',
-      '| Time | Total | Supplement | Regime | Anomaly | Top Publishers |',
-      '| --- | --- | --- | --- | --- | --- |',
-      ...demandSnapshots.slice(0, 20).map(item => {
-        const top = Object.entries(item.publisherCounts || {})
-          .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
-          .slice(0, 5)
-          .map(([name, count]) => `${name}:${count}`)
-          .join(', ');
-        return `| ${formatBeijingDateTime(item.timestamp)} | ${Number(item.totalSeeking || 0)} | ${Number(item.supplementCount || 0)} | ${item.regime || ''} | ${item.demandAnomaly ? item.anomalyType || 'yes' : ''} | ${top.replace(/\|/g, '\\|')} |`;
-      }),
-      '',
-      '## Recent Logs',
+      '## Recent Events',
       '',
       '| Time | Status | Reason | Journal | DOI | Detail |',
       '| --- | --- | --- | --- | --- | --- |',
-      ...logs.slice(0, 80).map(log => [
+      ...logs.slice(0, 12).map(log => [
         formatBeijingDateTime(log.time),
         log.status || '',
         log.reason || '',
