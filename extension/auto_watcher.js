@@ -92,7 +92,9 @@
         if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
         return;
       } catch (err) {
-        console.warn('[Ablesci Auto Watcher] native notify failed, fallback to browser notification', err);
+        console.warn('[Ablesci Auto Watcher] native notify failed', err);
+        if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
+        return;
       }
     }
     try {
@@ -211,7 +213,8 @@
         });
         return;
       } catch (err) {
-        console.warn('[Ablesci Auto Watcher] native report write failed, fallback to downloads', err);
+        console.warn('[Ablesci Auto Watcher] native report write failed', err);
+        return;
       }
     }
     try {
