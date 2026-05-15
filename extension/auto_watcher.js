@@ -4,9 +4,11 @@
   const ALARM_NAME = 'ablesciAutoWatcher';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
+  const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
   const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const MAX_LOGS = 200;
+  const MAX_TRACE_LOGS = 1200;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   const MARKET_TOP_PUBLISHERS = 8;
@@ -110,6 +112,15 @@
       // Keep the configured URL if it cannot be parsed.
     }
     return url;
+  }
+
+  function listUrlsForRun(opts) {
+    const urls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls.slice() : [];
+    for (let i = urls.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [urls[i], urls[j]] = [urls[j], urls[i]];
+    }
+    return urls;
   }
 
   function normalizeOptions(opts) {
@@ -275,15 +286,29 @@
     return low + Math.random() * Math.max(1, high - low);
   }
 
-  async function refreshAutoWatcherAlarm(clearExisting = true) {
+  async function refreshAutoWatcherAlarm(clearExisting = true, reason = 'refresh') {
     const opts = normalizeOptions(await deps.getOptions());
-    if (clearExisting) await chrome.alarms.clear(ALARM_NAME);
-    if (!opts.watcherEnabled) return;
+    await appendWatcherTrace('alarm_refresh_start', { reason, clearExisting, watcherEnabled: opts.watcherEnabled });
+    if (clearExisting) {
+      await chrome.alarms.clear(ALARM_NAME);
+      await appendWatcherTrace('alarm_cleared', { reason });
+    }
+    if (!opts.watcherEnabled) {
+      await appendWatcherTrace('alarm_disabled', { reason });
+      return;
+    }
     const state = await getWatcherState();
     const delay = randomIntervalMinutes(opts, state);
     state.nextScheduledAt = Date.now() + delay * 60 * 1000;
     await saveWatcherState(state);
     await chrome.alarms.create(ALARM_NAME, { delayInMinutes: delay });
+    await appendWatcherTrace('alarm_scheduled', {
+      reason,
+      delayMinutes: Number(delay.toFixed(2)),
+      nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
+      speedMode: state.speedMode || '',
+      rateMultiplier: state.rateMultiplier || ''
+    });
   }
 
   async function notifyWatcherNeedsAttention(reason, url) {
@@ -1064,8 +1089,22 @@
   async function collectDemandIfDue(opts, force = false) {
     const state = await getWatcherState();
     const due = force ? { due: true, slot: 'manual', reason: 'manual' } : shouldObserveDemand(state, opts);
+    await appendWatcherTrace('observe_due_check', {
+      force,
+      due: due.due,
+      slot: due.slot || '',
+      reason: due.reason || '',
+      url: opts.watcherDemandObserveUrl
+    });
     if (!due.due) return null;
     const parsed = await parseListUrl(opts.watcherDemandObserveUrl);
+    await appendWatcherTrace('observe_parsed', {
+      reason: due.reason || '',
+      url: opts.watcherDemandObserveUrl,
+      cfChallenge: parsed.cfChallenge === true,
+      totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
+      candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0
+    });
     if (parsed.cfChallenge) return { ok: false, reason: 'cf_challenge' };
     const snapshot = await recordDemandSnapshot(parsed.demandSnapshot);
     if (snapshot) await markObservedSlot(due.slot);
@@ -1099,6 +1138,7 @@
     const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
     logs.unshift({
       time: new Date().toISOString(),
+      sessionId: normalizeText(entry.sessionId).slice(0, 80),
       assistId: entry.assistId || '',
       title: normalizeText(entry.title).slice(0, 160),
       doi: normalizeText(entry.doi).slice(0, 160),
@@ -1109,6 +1149,57 @@
       reason: normalizeText(entry.reason).slice(0, 160)
     });
     await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: logs.slice(0, MAX_LOGS) });
+  }
+
+  function sanitizeTraceValue(value, depth = 0) {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') {
+      const text = value.length > 500 ? value.slice(0, 500) + '...' : value;
+      if (/^https?:\/\//i.test(text)) return sanitizeReportUrl(text);
+      return text;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) {
+      if (depth >= 2) return `[array:${value.length}]`;
+      return value.slice(0, 20).map(item => sanitizeTraceValue(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+      if (depth >= 2) return '[object]';
+      const output = {};
+      for (const [key, item] of Object.entries(value).slice(0, 30)) {
+        if (/token|cookie|csrf|signature|credential|secret|auth|password/i.test(key)) {
+          output[key] = '<redacted>';
+        } else if (/url$/i.test(key) || key === 'url' || key === 'detailUrl' || key === 'listUrl') {
+          output[key] = sanitizeReportUrl(item);
+        } else {
+          output[key] = sanitizeTraceValue(item, depth + 1);
+        }
+      }
+      return output;
+    }
+    return String(value);
+  }
+
+  async function appendWatcherTrace(step, details = {}) {
+    try {
+      const stored = await chrome.storage.local.get(AUTO_WATCHER_TRACE_KEY);
+      const logs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
+      const url = details.url || details.detailUrl || details.listUrl || '';
+      logs.unshift({
+        time: new Date().toISOString(),
+        step: normalizeText(step).slice(0, 80),
+        reason: normalizeText(details.reason).slice(0, 160),
+        trigger: normalizeText(details.trigger).slice(0, 80),
+        sessionId: normalizeText(details.sessionId).slice(0, 80),
+        tabId: details.tabId ?? '',
+        url: sanitizeReportUrl(url),
+        urlHostPath: deps?.urlHostPath ? deps.urlHostPath(url || '') : null,
+        details: sanitizeTraceValue(details)
+      });
+      await chrome.storage.local.set({ [AUTO_WATCHER_TRACE_KEY]: logs.slice(0, MAX_TRACE_LOGS) });
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] trace append failed', err);
+    }
   }
 
   function csvEscape(value) {
@@ -1170,12 +1261,14 @@
     if (!opts.watcherDailyReportEnabled) return;
 
     const date = todayKey();
-    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, DEMAND_SNAPSHOTS_KEY]);
+    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY]);
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
     const demandSnapshots = (Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [])
       .filter(item => item.dayKey === date);
     const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
+      .filter(log => formatBeijingDateTime(log.time, true) === date);
+    const traces = (Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [])
       .filter(log => formatBeijingDateTime(log.time, true) === date);
 
     const csvHeader = [
@@ -1183,7 +1276,8 @@
       'marketRegime', 'totalSeeking', 'supplementCount', 'publisher', 'open', 'high', 'low', 'close', 'delta',
       'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
       'targetError', 'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
-      'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend'
+      'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
+      'step', 'trigger', 'tabId', 'url', 'details'
     ];
     const baseReportFields = {
       marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
@@ -1256,6 +1350,17 @@
         detailUrl: reportDetailValue(log),
         status: log.status || '',
         reason: log.reason || ''
+      })),
+      ...traces.map(trace => reportRow('trace', {
+        time: formatBeijingDateTime(trace.time),
+        sessionId: trace.sessionId || '',
+        status: trace.step || '',
+        reason: trace.reason || '',
+        step: trace.step || '',
+        trigger: trace.trigger || '',
+        tabId: trace.tabId || '',
+        url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`,
+        details: JSON.stringify(trace.details || {})
       }))
     ];
     const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
@@ -1289,6 +1394,7 @@
       `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
       `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
       `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
+      `- Trace events: ${traces.length}`,
       '',
       '## Bandit',
       '',
@@ -1505,26 +1611,51 @@
     });
   }
 
-  async function openHiddenTab(url) {
-    const tab = await chrome.tabs.create({ url, active: false });
-    await waitForTabComplete(tab.id);
-    return tab;
+  async function openHiddenTab(url, purpose = 'hidden') {
+    await appendWatcherTrace('tab_open_request', { reason: purpose, url });
+    try {
+      const tab = await chrome.tabs.create({ url, active: false });
+      await appendWatcherTrace('tab_opened', { reason: purpose, url: tab.url || url, tabId: tab.id, active: tab.active === true });
+      const completedTab = await waitForTabComplete(tab.id);
+      await appendWatcherTrace('tab_complete', { reason: purpose, url: completedTab?.url || tab.url || url, tabId: tab.id });
+      return tab;
+    } catch (err) {
+      await appendWatcherTrace('tab_open_failed', { reason: purpose, url, error: err?.message || String(err) });
+      throw err;
+    }
   }
 
-  async function closeTabQuietly(tabId) {
-    try { await chrome.tabs.remove(tabId); } catch (_) {}
+  async function closeTabQuietly(tabId, reason = 'cleanup') {
+    if (!tabId) return;
+    await appendWatcherTrace('tab_close_request', { reason, tabId });
+    try {
+      await chrome.tabs.remove(tabId);
+      await appendWatcherTrace('tab_closed', { reason, tabId });
+    } catch (err) {
+      await appendWatcherTrace('tab_close_failed', { reason, tabId, error: err?.message || String(err) });
+    }
   }
 
   async function parseListUrl(url) {
-    const tab = await openHiddenTab(url);
+    const tab = await openHiddenTab(url, 'parse_list');
     try {
       const result = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: parseAssistListPage
       });
-      return result?.[0]?.result || { cfChallenge: false, candidates: [] };
+      const parsed = result?.[0]?.result || { cfChallenge: false, candidates: [] };
+      await appendWatcherTrace('list_parse_result', {
+        reason: 'parse_list',
+        url,
+        tabId: tab.id,
+        cfChallenge: parsed.cfChallenge === true,
+        candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+        totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
+        publisherCount: Object.keys(parsed.demandSnapshot?.publisherCounts || {}).length
+      });
+      return parsed;
     } finally {
-      await closeTabQuietly(tab.id);
+      await closeTabQuietly(tab.id, 'list_parse_finished');
     }
   }
 
@@ -1550,14 +1681,34 @@
   }
 
   async function inspectDetail(candidate) {
-    const tab = await openHiddenTab(candidate.detailUrl);
+    const tab = await openHiddenTab(candidate.detailUrl, 'inspect_detail');
     try {
       const response = await extractDetailPayload(tab.id);
       if (!response?.ok) {
+        await appendWatcherTrace('detail_extract_failed', {
+          reason: response?.error || 'extract_detail_failed',
+          detailUrl: candidate.detailUrl,
+          tabId: tab.id,
+          assistId: candidate.assistId || ''
+        });
         return { ok: false, reason: response?.error || 'extract_detail_failed', tabId: tab.id };
       }
+      await appendWatcherTrace('detail_extract_result', {
+        reason: 'detail_payload_ok',
+        detailUrl: candidate.detailUrl,
+        tabId: tab.id,
+        assistId: response.payload?.assistId || candidate.assistId || '',
+        doi: response.payload?.doi || candidate.doi || '',
+        journalName: response.payload?.journalName || ''
+      });
       return { ok: true, payload: response.payload, tabId: tab.id };
     } catch (err) {
+      await appendWatcherTrace('detail_extract_error', {
+        reason: err?.message || String(err),
+        detailUrl: candidate.detailUrl,
+        tabId: tab.id,
+        assistId: candidate.assistId || ''
+      });
       return { ok: false, reason: err?.message || String(err), tabId: tab.id };
     }
   }
@@ -1574,6 +1725,13 @@
         if (!msg || !context) return;
         if (msg.type === 'error') {
           const durationMs = Date.now() - Number(context.startedAt || Date.now());
+          appendWatcherTrace('queue_message_error', {
+            reason: msg.message || 'upload_failed',
+            detailUrl: context.detailUrl,
+            sessionId: context.sessionId || '',
+            assistId: context.key,
+            durationMs
+          }).catch(() => {});
           updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
           incrementDaily('failed').catch(() => {});
           recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed').catch(() => {});
@@ -1589,6 +1747,13 @@
         }
         if (msg.type === 'done' && msg.blocked) {
           const durationMs = Date.now() - Number(context.startedAt || Date.now());
+          appendWatcherTrace('queue_message_blocked', {
+            reason: msg.message || 'blocked',
+            detailUrl: context.detailUrl,
+            sessionId: context.sessionId || '',
+            assistId: context.key,
+            durationMs
+          }).catch(() => {});
           updateProcessed(context.key, 'failed', msg.message || 'blocked').catch(() => {});
           incrementDaily('failed').catch(() => {});
           recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked').catch(() => {});
@@ -1603,6 +1768,13 @@
           settle({ ok: false, reason: msg.message || 'blocked', durationMs });
         } else if (msg.type === 'done') {
           const durationMs = Date.now() - Number(context.startedAt || Date.now());
+          appendWatcherTrace('queue_message_done', {
+            reason: msg.message || 'done',
+            detailUrl: context.detailUrl,
+            sessionId: context.sessionId || '',
+            assistId: context.key,
+            durationMs
+          }).catch(() => {});
           recordRiskEvent(context.opts || {}, msg.message || 'success', 'success').catch(() => {});
           recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success').catch(() => {});
           settle({ ok: true, reason: msg.message || 'done', durationMs });
@@ -1630,9 +1802,21 @@
     payload.triggeredBy = 'auto_watcher';
     const key = getProcessedKey(candidate, payload);
     const source = candidateSource(candidate, payload);
+    await appendWatcherTrace('candidate_payload_allowed', {
+      reason: 'ready_to_handle',
+      detailUrl: candidate.detailUrl,
+      tabId: detailTabId,
+      sessionId: session?.id || '',
+      assistId: key,
+      source,
+      autoDownload: opts.watcherAutoDownload,
+      autoUpload: opts.watcherAutoUpload,
+      uploadConfirmRequired: opts.watcherUploadConfirmRequired
+    });
 
     if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
-      await closeTabQuietly(detailTabId);
+      await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
+      await closeTabQuietly(detailTabId, 'high_risk_journal');
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await incrementDaily('skipped');
       await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
@@ -1641,6 +1825,7 @@
     }
 
     if (!opts.watcherAutoDownload) {
+      await appendWatcherTrace('candidate_manual_detail_kept', { reason: 'auto_download_disabled', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
       await notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
       await incrementDaily('notified');
       await updateProcessed(key, 'skipped', 'manual_detail_opened');
@@ -1657,6 +1842,7 @@
     }
 
     if (deps.hasActiveTask()) {
+      await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
       await updateProcessed(key, 'skipped', 'active_task');
       await incrementDaily('skipped');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'active_task' });
@@ -1673,8 +1859,17 @@
       startedAt: Date.now()
     };
     const sessionPort = opts.watcherAdvancedSchedulerEnabled ? makeSessionPortContext(portContext) : null;
+    await appendWatcherTrace('candidate_enqueue', {
+      reason: payload.downloadOnly ? 'download_only' : 'auto_upload',
+      detailUrl: candidate.detailUrl,
+      tabId: detailTabId,
+      sessionId: session?.id || '',
+      assistId: key,
+      source,
+      downloadOnly: payload.downloadOnly === true
+    });
     deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
-    if (!payload.downloadOnly) await closeTabQuietly(detailTabId);
+    if (!payload.downloadOnly) await closeTabQuietly(detailTabId, 'auto_upload_enqueued');
     await incrementDaily('downloaded');
     if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
     await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
@@ -1704,11 +1899,29 @@
     };
     stateForTargets.currentSession = session;
     await saveWatcherState(stateForTargets);
+    const runListUrls = listUrlsForRun(opts);
+    await appendWatcherTrace('session_start', {
+      reason: 'advanced_planning',
+      sessionId: session.id,
+      sessionSize: targetSessionSize,
+      listUrlCount: runListUrls.length
+    });
+    await appendWatcherTrace('session_source_order', {
+      reason: 'randomized_publisher_order',
+      sessionId: session.id,
+      listUrls: runListUrls
+    });
 
     const plan = [];
-    for (const listUrl of opts.watcherListUrls) {
-      if (plan.length >= targetSessionSize * 3) break;
+    for (const listUrl of runListUrls) {
+      if (plan.length >= targetSessionSize) break;
       const pickedListUrl = randomizeAssistListUrl(listUrl);
+      await appendWatcherTrace('session_plan_url', {
+        reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
+        sessionId: session.id,
+        listUrl: pickedListUrl,
+        configuredUrl: listUrl
+      });
       stateForTargets.lastPickedListUrl = pickedListUrl;
       await saveWatcherState(stateForTargets);
       await incrementDaily('checked');
@@ -1721,11 +1934,38 @@
       const allowed = [];
       for (const candidate of parsed.candidates || []) {
         const listAllowed = isListCandidateAllowed(candidate, opts);
-        if (!listAllowed.ok) continue;
-        if (await wasRecentlyProcessed(candidate)) continue;
+        if (!listAllowed.ok) {
+          await appendWatcherTrace('candidate_skip_list_filter', {
+            reason: listAllowed.reason,
+            sessionId: session.id,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            title: candidate.title || ''
+          });
+          continue;
+        }
+        if (await wasRecentlyProcessed(candidate)) {
+          await appendWatcherTrace('candidate_skip_processed', {
+            reason: 'processed_before',
+            sessionId: session.id,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || ''
+          });
+          continue;
+        }
         allowed.push(candidate);
       }
-      plan.push(...selectBanditCandidates(allowed, stateForTargets, stateForTargets.marketData, Math.max(targetSessionSize * 2, targetSessionSize)));
+      const selected = selectBanditCandidates(allowed, stateForTargets, stateForTargets.marketData, targetSessionSize);
+      await appendWatcherTrace('session_plan_result', {
+        reason: 'list_candidates_scored',
+        sessionId: session.id,
+        listUrl: pickedListUrl,
+        parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+        allowedCount: allowed.length,
+        selectedCount: selected.length,
+        planSizeBefore: plan.length
+      });
+      plan.push(...selected);
     }
 
     const stateWithPlan = await getWatcherState();
@@ -1736,17 +1976,33 @@
       targetSessionSize
     };
     await saveWatcherState(stateWithPlan);
+    await appendWatcherTrace('session_plan_done', {
+      reason: 'advanced_plan_ready',
+      sessionId: session.id,
+      plannedSize: plan.length,
+      targetSessionSize
+    });
 
     let handledCount = 0;
     const startedMs = Date.now();
     for (const candidate of plan) {
       if (handledCount >= targetSessionSize) break;
       const risk = riskSnapshot(await getWatcherState(), opts);
-      if (risk.exhausted) break;
+      if (risk.exhausted) {
+        await appendWatcherTrace('session_stop_risk_budget', { reason: 'risk_budget_exhausted', sessionId: session.id, riskUsed: risk.used, riskLimit: risk.limit });
+        break;
+      }
 
+      await appendWatcherTrace('session_candidate_start', {
+        reason: 'inspect_planned_candidate',
+        sessionId: session.id,
+        detailUrl: candidate.detailUrl,
+        assistId: candidate.assistId || '',
+        title: candidate.title || ''
+      });
       const detail = await inspectDetail(candidate);
       if (!detail.ok) {
-        await closeTabQuietly(detail.tabId);
+        await closeTabQuietly(detail.tabId, 'detail_extract_failed');
         await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
         await incrementDaily('failed');
         await recordRiskEvent(opts, detail.reason, 'failed');
@@ -1757,14 +2013,15 @@
         const detailAllowed = isDetailAllowedForWatcher(payload, opts);
         const key = getProcessedKey(candidate, payload);
         if (!detailAllowed.ok) {
-          await closeTabQuietly(detail.tabId);
+          await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, sessionId: session.id, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
+          await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
           await updateProcessed(key, 'skipped', detailAllowed.reason);
           await incrementDaily('skipped');
           await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
           await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, status: 'skipped', reason: detailAllowed.reason });
         } else {
           const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session);
-          if (!handled) await closeTabQuietly(detail.tabId);
+          if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
           if (handled) handledCount += 1;
         }
       }
@@ -1780,6 +2037,7 @@
 
       if (handledCount < targetSessionSize && plan.indexOf(candidate) < plan.length - 1) {
         const gap = logNormalMinutes(ADVANCED_ITEM_GAP.median, ADVANCED_ITEM_GAP.min, ADVANCED_ITEM_GAP.max);
+        await appendWatcherTrace('session_item_gap', { reason: 'between_candidates', sessionId: session.id, gapMinutes: Number(gap.toFixed(2)), handledCount, targetSessionSize });
         await sleepMinutes(gap);
       }
     }
@@ -1796,17 +2054,36 @@
     };
     finalState.currentSession = { ...finalState.lastSession };
     await saveWatcherState(finalState);
+    await appendWatcherTrace('session_done', {
+      reason: handledCount ? 'advanced_session_done' : 'advanced_no_candidate',
+      sessionId: session.id,
+      handledCount,
+      targetSessionSize,
+      sessionDurationMs: durationMs,
+      cooldownMinutes: finalState.lastSession.cooldownMinutes
+    });
     return { ok: true, reason: handledCount ? 'advanced_session_done' : (observeResult?.snapshot ? 'observe_only_session' : 'advanced_no_candidate') };
   }
 
   async function runAutoWatcherOnce(trigger = 'alarm') {
-    if (autoWatcherRunning) return { ok: false, reason: 'already_running' };
+    if (autoWatcherRunning) {
+      await appendWatcherTrace('run_skip_already_running', { reason: 'already_running', trigger });
+      return { ok: false, reason: 'already_running' };
+    }
     autoWatcherRunning = true;
     try {
+      await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
       const opts = normalizeOptions(await deps.getOptions());
-      if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') return { ok: false, reason: 'disabled' };
-      if (deps.hasActiveTask()) return { ok: false, reason: 'active_task' };
+      if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') {
+        await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
+        return { ok: false, reason: 'disabled' };
+      }
+      if (deps.hasActiveTask()) {
+        await appendWatcherTrace('run_skip_active_task', { reason: 'active_task', trigger });
+        return { ok: false, reason: 'active_task' };
+      }
       if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
+        await appendWatcherTrace('run_skip_outside_work_schedule', { reason: 'outside_work_schedule', trigger });
         return { ok: true, reason: 'outside_work_schedule' };
       }
 
@@ -1824,6 +2101,7 @@
 
       const stateForTargets = await getWatcherState();
       if (opts.watcherAdvancedSchedulerEnabled && stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
+        await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
         return { ok: false, reason: 'risk_budget_paused' };
       }
       if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
@@ -1832,10 +2110,21 @@
         : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
       Object.assign(stateForTargets, targetState);
       await saveWatcherState(stateForTargets);
+      await appendWatcherTrace('run_target_state', {
+        reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : 'simple_target',
+        trigger,
+        speedMode: targetState.speedMode,
+        todayTarget: targetState.todayTarget,
+        hourTarget: targetState.hourTarget || '',
+        rateMultiplier: targetState.rateMultiplier || '',
+        targetError: targetState.targetError || targetState.lag || ''
+      });
       if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
+        await appendWatcherTrace('run_skip_today_target_reached', { reason: 'today_target_reached', trigger, todayTarget: targetState.todayTarget });
         return { ok: false, reason: 'today_target_reached' };
       }
       if (opts.watcherDailyLimit > 0 && await getDailyCount('downloaded') >= opts.watcherDailyLimit) {
+        await appendWatcherTrace('run_skip_daily_limit', { reason: 'daily_limit', trigger, dailyLimit: opts.watcherDailyLimit });
         return { ok: false, reason: 'daily_limit' };
       }
 
@@ -1843,13 +2132,28 @@
       const targetSessionSize = opts.watcherAdvancedSchedulerEnabled
         ? advancedSessionSize(opts, stateForTargets)
         : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
+      await appendWatcherTrace('run_session_size', { reason: 'session_size_calculated', trigger, targetSessionSize, advanced: opts.watcherAdvancedSchedulerEnabled });
       if (targetSessionSize <= 0) return { ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' };
       if (opts.watcherAdvancedSchedulerEnabled) {
         return await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult);
       }
 
-      for (const listUrl of opts.watcherListUrls) {
+      const runListUrls = listUrlsForRun(opts);
+      await appendWatcherTrace('run_source_order', {
+        reason: 'randomized_publisher_order',
+        trigger,
+        listUrls: runListUrls
+      });
+      for (const listUrl of runListUrls) {
         const pickedListUrl = randomizeAssistListUrl(listUrl);
+        await appendWatcherTrace('list_scan_start', {
+          reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
+          trigger,
+          listUrl: pickedListUrl,
+          configuredUrl: listUrl,
+          handledCount,
+          targetSessionSize
+        });
         stateForTargets.lastPickedListUrl = pickedListUrl;
         await saveWatcherState(stateForTargets);
         await incrementDaily('checked');
@@ -1861,15 +2165,46 @@
         await resetCfChallengeStreak();
 
         const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
+        await appendWatcherTrace('list_scan_candidates', {
+          reason: 'ordered_candidates',
+          trigger,
+          listUrl: pickedListUrl,
+          parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+          orderedCount: candidates.length
+        });
         for (const candidate of candidates) {
           if (handledCount >= targetSessionSize) return { ok: true, reason: 'session_target_reached' };
           const listAllowed = isListCandidateAllowed(candidate, opts);
-          if (!listAllowed.ok) continue;
-          if (await wasRecentlyProcessed(candidate)) continue;
+          if (!listAllowed.ok) {
+            await appendWatcherTrace('candidate_skip_list_filter', {
+              reason: listAllowed.reason,
+              trigger,
+              detailUrl: candidate.detailUrl,
+              assistId: candidate.assistId || '',
+              title: candidate.title || ''
+            });
+            continue;
+          }
+          if (await wasRecentlyProcessed(candidate)) {
+            await appendWatcherTrace('candidate_skip_processed', {
+              reason: 'processed_before',
+              trigger,
+              detailUrl: candidate.detailUrl,
+              assistId: candidate.assistId || ''
+            });
+            continue;
+          }
 
+          await appendWatcherTrace('candidate_detail_start', {
+            reason: 'candidate_passed_list_filter',
+            trigger,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            title: candidate.title || ''
+          });
           const detail = await inspectDetail(candidate);
           if (!detail.ok) {
-            await closeTabQuietly(detail.tabId);
+            await closeTabQuietly(detail.tabId, 'detail_extract_failed');
             await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
             await incrementDaily('failed');
             await appendWatcherLog({ ...candidate, status: 'failed', reason: detail.reason });
@@ -1880,7 +2215,8 @@
           const detailAllowed = isDetailAllowedForWatcher(payload, opts);
           const key = getProcessedKey(candidate, payload);
           if (!detailAllowed.ok) {
-            await closeTabQuietly(detail.tabId);
+            await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
+            await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
             await updateProcessed(key, 'skipped', detailAllowed.reason);
             await incrementDaily('skipped');
             await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: detailAllowed.reason });
@@ -1888,9 +2224,10 @@
           }
 
           const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId);
-          if (!handled) await closeTabQuietly(detail.tabId);
+          if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
           if (handled) {
             handledCount += 1;
+            await appendWatcherTrace('candidate_handled', { reason: 'handled', trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key, handledCount, targetSessionSize });
             if (handledCount >= targetSessionSize || deps.hasActiveTask()) {
               return { ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' };
             }
@@ -1900,12 +2237,14 @@
 
       return { ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' };
     } catch (err) {
+      await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
       await incrementDaily('failed');
       await appendWatcherLog({ status: 'failed', reason: err?.message || String(err) });
       return { ok: false, reason: err?.message || String(err) };
     } finally {
+      await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
       try { await writeDailyReports(); } catch (_) {}
-      if (trigger === 'alarm') refreshAutoWatcherAlarm().catch(() => {});
+      if (trigger === 'alarm') refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
       autoWatcherRunning = false;
     }
   }
@@ -1919,17 +2258,18 @@
     });
 
     chrome.runtime.onStartup.addListener(() => {
-      refreshAutoWatcherAlarm().catch(() => {});
+      refreshAutoWatcherAlarm(true, 'runtime_startup').catch(() => {});
     });
 
     chrome.runtime.onInstalled.addListener(() => {
-      refreshAutoWatcherAlarm().catch(() => {});
+      refreshAutoWatcherAlarm(true, 'runtime_installed').catch(() => {});
     });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'local') return;
       if (Object.keys(changes).some(key => key.startsWith('watcher'))) {
-        refreshAutoWatcherAlarm().catch(() => {});
+        const changedKeys = Object.keys(changes).filter(key => key.startsWith('watcher')).slice(0, 12).join(',');
+        refreshAutoWatcherAlarm(true, `storage_changed:${changedKeys}`).catch(() => {});
       }
     });
 
@@ -1980,13 +2320,13 @@
         return true;
       }
       if (msg?.type === 'ablesciClearAutoWatcherLogs') {
-        chrome.storage.local.remove(AUTO_WATCHER_LOG_KEY).then(() => sendResponse({ ok: true }));
+        chrome.storage.local.remove([AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY]).then(() => sendResponse({ ok: true }));
         return true;
       }
       return false;
     });
 
-    refreshAutoWatcherAlarm().catch(() => {});
+    refreshAutoWatcherAlarm(true, 'init').catch(() => {});
   }
 
   globalThis.initPrivateAutoWatcher = initPrivateAutoWatcher;

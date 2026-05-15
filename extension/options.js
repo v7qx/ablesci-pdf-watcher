@@ -71,6 +71,7 @@ const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
 const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
+const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
 const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
 
 function el(id) { return document.getElementById(id); }
@@ -400,10 +401,12 @@ async function copyAutoWatcherConfig() {
   const stored = await chrome.storage.local.get([
     AUTO_WATCHER_STATE_KEY,
     AUTO_WATCHER_LOG_KEY,
+    AUTO_WATCHER_TRACE_KEY,
     DEMAND_SNAPSHOTS_KEY,
     LAST_DIAGNOSTIC_KEY
   ]);
   const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
+  const traceLogs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
   const demandSnapshots = Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [];
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
   const processed = state.processed || {};
@@ -434,6 +437,7 @@ async function copyAutoWatcherConfig() {
       banditTopPublishers: state.banditTopPublishers || []
     },
     latestWatcherLog: logs[0] || null,
+    latestTraceLogs: traceLogs.slice(0, 80),
     latestDemandSnapshot: demandSnapshots[0] || null,
     latestDiagnostic: diagnostic ? {
       time: diagnostic.time || '',
@@ -512,7 +516,7 @@ async function clearAutoWatcherState() {
 
 async function clearAutoWatcherLogs() {
   const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherLogs' });
-  showText('status', res.ok ? '已清除 watcher 日志。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
+  showText('status', res.ok ? '已清除 watcher 日志和 trace。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
 }
 
 document.addEventListener('DOMContentLoaded', load);
