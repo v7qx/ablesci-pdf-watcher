@@ -4,9 +4,16 @@
   const ALARM_NAME = 'ablesciAutoWatcher';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
+  const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const MAX_LOGS = 200;
+  const MAX_DEMAND_SNAPSHOTS = 500;
   const REPORT_DIR = 'ablesci-watcher-reports';
+  const SESSION_MODES = {
+    slow: { median: 28, min: 15, max: 60, sizeWeights: [0.15, 0.45, 0.30, 0.10, 0.00] },
+    normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.40, 0.25, 0.10] },
+    fast: { median: 10, min: 6, max: 25, sizeWeights: [0.02, 0.10, 0.35, 0.35, 0.18] }
+  };
 
   let deps = null;
   let autoWatcherRunning = false;
@@ -79,11 +86,128 @@
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
-      watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
+      watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
+      watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
+      watcherObserveOnly: opts.watcherObserveOnly === true,
+      watcherDemandObserveUrl: normalizeListUrls([opts.watcherDemandObserveUrl], deps.defaultListUrls)[0],
+      watcherObserveTimes: normalizeObserveTimes(opts.watcherObserveTimes),
+      watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
+      watcherWorkdays: normalizeWorkdays(opts.watcherWorkdays),
+      watcherWorkWindows: normalizeWorkWindows(opts.watcherWorkWindows),
+      watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 500, 0, 5000),
+      watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
+      watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
+      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
     };
   }
 
-  function randomIntervalMinutes(opts) {
+  function normalizeObserveTimes(value) {
+    const raw = Array.isArray(value) ? value : String(value || '09:30\n11:30\n14:00\n16:30\n18:00').split(/\r?\n|,/);
+    const values = raw
+      .map(item => String(item || '').trim())
+      .filter(item => /^([01]\d|2[0-3]):[0-5]\d$/.test(item));
+    return Array.from(new Set(values)).sort();
+  }
+
+  function normalizeWorkdays(value) {
+    const days = String(value || '1,2,3,4,5').split(/[,，\s]+/)
+      .map(item => Number(item))
+      .filter(n => Number.isInteger(n) && n >= 1 && n <= 7);
+    return new Set(days.length ? days : [1, 2, 3, 4, 5]);
+  }
+
+  function normalizeWorkWindows(value) {
+    const raw = Array.isArray(value) ? value : String(value || '09:00-12:00\n13:30-18:00').split(/\r?\n/);
+    const windows = raw.map(item => {
+      const m = String(item || '').trim().match(/^([0-2]\d:[0-5]\d)\s*[-~]\s*([0-2]\d:[0-5]\d)$/);
+      if (!m) return null;
+      const start = minutesOfDay(m[1]);
+      const end = minutesOfDay(m[2]);
+      return Number.isFinite(start) && Number.isFinite(end) && end > start ? { start, end, label: `${m[1]}-${m[2]}` } : null;
+    }).filter(Boolean);
+    return windows.length ? windows : [
+      { start: minutesOfDay('09:00'), end: minutesOfDay('12:00'), label: '09:00-12:00' },
+      { start: minutesOfDay('13:30'), end: minutesOfDay('18:00'), label: '13:30-18:00' }
+    ];
+  }
+
+  function minutesOfDay(hhmm) {
+    const m = String(hhmm || '').match(/^([0-2]\d):([0-5]\d)$/);
+    if (!m) return NaN;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23) return NaN;
+    return h * 60 + min;
+  }
+
+  function weekdayNumber(date = new Date()) {
+    const utc = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })).getDay();
+    return utc === 0 ? 7 : utc;
+  }
+
+  function beijingMinutesNow(date = new Date()) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(date).reduce((acc, item) => {
+      acc[item.type] = item.value;
+      return acc;
+    }, {});
+    return Number(parts.hour) * 60 + Number(parts.minute);
+  }
+
+  function isInWorkSchedule(opts, date = new Date()) {
+    if (!opts.watcherQuantSchedulerEnabled) return true;
+    if (!opts.watcherWorkdays.has(weekdayNumber(date))) return false;
+    const minute = beijingMinutesNow(date);
+    return opts.watcherWorkWindows.some(win => minute >= win.start && minute < win.end);
+  }
+
+  function nextWorkDelayMinutes(opts, date = new Date()) {
+    if (!opts.watcherQuantSchedulerEnabled || isInWorkSchedule(opts, date)) return null;
+    const nowMinute = beijingMinutesNow(date);
+    const todayStart = opts.watcherWorkWindows.map(w => w.start).filter(start => start > nowMinute).sort((a, b) => a - b)[0];
+    if (opts.watcherWorkdays.has(weekdayNumber(date)) && todayStart !== undefined) {
+      return Math.max(1, todayStart - nowMinute + Math.random() * 5);
+    }
+    for (let d = 1; d <= 7; d += 1) {
+      const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
+      if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;
+      const firstStart = opts.watcherWorkWindows.map(w => w.start).sort((a, b) => a - b)[0];
+      const minutesUntilMidnight = 24 * 60 - nowMinute;
+      return minutesUntilMidnight + (d - 1) * 24 * 60 + firstStart + Math.random() * 10;
+    }
+    return 60;
+  }
+
+  function logNormalMinutes(median, min, max) {
+    const u1 = Math.max(1e-6, Math.random());
+    const u2 = Math.max(1e-6, Math.random());
+    const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    const value = median * Math.exp(0.35 * normal);
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function weightedPickIndex(weights) {
+    const total = weights.reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+    if (total <= 0) return 0;
+    let r = Math.random() * total;
+    for (let i = 0; i < weights.length; i += 1) {
+      r -= Math.max(0, Number(weights[i]) || 0);
+      if (r <= 0) return i;
+    }
+    return weights.length - 1;
+  }
+
+  function randomIntervalMinutes(opts, state = null) {
+    if (opts.watcherQuantSchedulerEnabled) {
+      const outsideDelay = nextWorkDelayMinutes(opts);
+      if (outsideDelay !== null) return outsideDelay;
+      const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
+      return logNormalMinutes(mode.median, mode.min, mode.max);
+    }
     const base = clampNumber(opts.watcherIntervalMinutes, 30, 10, 60);
     const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60);
     const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
@@ -97,7 +221,11 @@
     const opts = normalizeOptions(await deps.getOptions());
     if (clearExisting) await chrome.alarms.clear(ALARM_NAME);
     if (!opts.watcherEnabled) return;
-    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: randomIntervalMinutes(opts) });
+    const state = await getWatcherState();
+    const delay = randomIntervalMinutes(opts, state);
+    state.nextScheduledAt = Date.now() + delay * 60 * 1000;
+    await saveWatcherState(state);
+    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: delay });
   }
 
   async function notifyWatcherNeedsAttention(reason, url) {
@@ -204,6 +332,126 @@
     return Number(item[field] || 0);
   }
 
+  function monthKey() {
+    return todayKey().slice(0, 7);
+  }
+
+  function monthDone(state) {
+    const prefix = monthKey() + '-';
+    return Object.entries(state.daily || {})
+      .filter(([key]) => key.startsWith(prefix))
+      .reduce((sum, [, value]) => sum + Number(value.downloaded || 0), 0);
+  }
+
+  function daysInCurrentMonth() {
+    const [year, month] = monthKey().split('-').map(Number);
+    return new Date(year, month, 0).getDate();
+  }
+
+  function calculateTargetState(state, opts, demandRegime) {
+    const done = monthDone(state);
+    const day = Number(todayKey().slice(8, 10));
+    const days = daysInCurrentMonth();
+    const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
+    const expectedDone = Math.round(monthlyTarget * Math.min(1, day / days));
+    const lag = expectedDone - done;
+    let speedMode = 'normal';
+    if (lag > Math.max(10, monthlyTarget * 0.08) || demandRegime === 'very_busy') speedMode = 'fast';
+    if (lag < -Math.max(10, monthlyTarget * 0.05) || demandRegime === 'quiet') speedMode = 'slow';
+    if (monthlyTarget <= 0) return { monthKey: monthKey(), monthDone: done, expectedDone: 0, lag: 0, speedMode: 'slow', todayTarget: 0 };
+    const rawTodayTarget = Math.ceil(Math.max(0, monthlyTarget - done) / Math.max(1, days - day + 1));
+    const todayTarget = clampNumber(rawTodayTarget, opts.watcherMinDailyTarget, opts.watcherMinDailyTarget, opts.watcherMaxDailyTarget);
+    return { monthKey: monthKey(), monthDone: done, expectedDone, lag, speedMode, todayTarget };
+  }
+
+  async function getDemandSnapshots() {
+    const stored = await chrome.storage.local.get(DEMAND_SNAPSHOTS_KEY);
+    return Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [];
+  }
+
+  function percentileRank(values, value) {
+    const nums = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!nums.length || !Number.isFinite(value)) return 0.5;
+    const below = nums.filter(n => n <= value).length;
+    return below / nums.length;
+  }
+
+  function demandRegimeFor(snapshot, history) {
+    const p = percentileRank(history.map(item => item.totalSeeking), snapshot?.totalSeeking);
+    if (p < 0.20) return 'quiet';
+    if (p < 0.70) return 'normal';
+    if (p < 0.90) return 'busy';
+    return 'very_busy';
+  }
+
+  async function recordDemandSnapshot(snapshot) {
+    if (!snapshot || !Number.isFinite(Number(snapshot.totalSeeking))) return null;
+    const snapshots = await getDemandSnapshots();
+    const normalized = {
+      ...snapshot,
+      timestamp: new Date().toISOString(),
+      dayKey: todayKey(),
+      slot: formatBeijingDateTime(new Date()).slice(11, 16)
+    };
+    const regime = demandRegimeFor(normalized, snapshots);
+    normalized.regime = regime;
+    const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
+    await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
+    const state = await getWatcherState();
+    state.lastDemandSnapshotAt = normalized.timestamp;
+    state.lastDemandSnapshot = normalized;
+    state.demandRegime = regime;
+    const target = calculateTargetState(state, normalizeOptions(await deps.getOptions()), regime);
+    Object.assign(state, target);
+    await saveWatcherState(state);
+    return normalized;
+  }
+
+  function shouldObserveDemand(state, opts) {
+    if (!opts.watcherQuantSchedulerEnabled) return false;
+    const today = todayKey();
+    const observedSlots = new Set((state.observedSlots || {})[today] || []);
+    const now = beijingMinutesNow();
+    const dueSlot = opts.watcherObserveTimes.find(slot => {
+      if (observedSlots.has(slot)) return false;
+      const minute = minutesOfDay(slot);
+      return Number.isFinite(minute) && now >= minute && now <= minute + 45;
+    });
+    if (dueSlot) return { due: true, slot: dueSlot, reason: 'slot' };
+    const last = state.lastDemandSnapshotAt ? new Date(state.lastDemandSnapshotAt).getTime() : 0;
+    const fallbackMs = opts.watcherObserveFallbackMinutes * 60 * 1000;
+    if (!last || Date.now() - last >= fallbackMs) return { due: true, slot: 'fallback', reason: 'fallback' };
+    return { due: false };
+  }
+
+  async function markObservedSlot(slot) {
+    const state = await getWatcherState();
+    const today = todayKey();
+    state.observedSlots = state.observedSlots || {};
+    state.observedSlots[today] = Array.from(new Set([...(state.observedSlots[today] || []), slot]));
+    for (const key of Object.keys(state.observedSlots)) {
+      if (key !== today) delete state.observedSlots[key];
+    }
+    await saveWatcherState(state);
+  }
+
+  async function collectDemandIfDue(opts, force = false) {
+    const state = await getWatcherState();
+    const due = force ? { due: true, slot: 'manual', reason: 'manual' } : shouldObserveDemand(state, opts);
+    if (!due.due) return null;
+    const parsed = await parseListUrl(opts.watcherDemandObserveUrl);
+    if (parsed.cfChallenge) return { ok: false, reason: 'cf_challenge' };
+    const snapshot = await recordDemandSnapshot(parsed.demandSnapshot);
+    if (snapshot) await markObservedSlot(due.slot);
+    return { ok: true, reason: due.reason, snapshot };
+  }
+
+  function sessionSize(opts, state) {
+    const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
+    const picked = weightedPickIndex(mode.sizeWeights);
+    return Math.min(opts.watcherMaxPerSession, Math.max(0, picked));
+  }
+
   async function appendWatcherLog(entry) {
     const stored = await chrome.storage.local.get(AUTO_WATCHER_LOG_KEY);
     const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
@@ -280,9 +528,11 @@
     if (!opts.watcherDailyReportEnabled) return;
 
     const date = todayKey();
-    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY]);
+    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, DEMAND_SNAPSHOTS_KEY]);
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
+    const demandSnapshots = (Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [])
+      .filter(item => item.dayKey === date);
     const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
       .filter(log => formatBeijingDateTime(log.time, true) === date);
 
@@ -311,6 +561,23 @@
       `- Skipped: ${Number(daily.skipped || 0)}`,
       `- Failed: ${Number(daily.failed || 0)}`,
       `- Notified: ${Number(daily.notified || 0)}`,
+      `- Speed mode: ${state.speedMode || 'normal'}`,
+      `- Demand regime: ${state.demandRegime || 'normal'}`,
+      `- Today target: ${Number(state.todayTarget || 0)}`,
+      `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
+      '',
+      '## Demand Snapshots',
+      '',
+      '| Time | Total | Supplement | Regime | Top Publishers |',
+      '| --- | --- | --- | --- | --- |',
+      ...demandSnapshots.slice(0, 20).map(item => {
+        const top = Object.entries(item.publisherCounts || {})
+          .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+          .slice(0, 5)
+          .map(([name, count]) => `${name}:${count}`)
+          .join(', ');
+        return `| ${formatBeijingDateTime(item.timestamp)} | ${Number(item.totalSeeking || 0)} | ${Number(item.supplementCount || 0)} | ${item.regime || ''} | ${top.replace(/\|/g, '\\|')} |`;
+      }),
       '',
       '## Recent Logs',
       '',
@@ -347,6 +614,10 @@
     function text(el) {
       return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
     }
+    function numberFromText(value) {
+      const m = String(value || '').replace(/,/g, '').match(/\d+/);
+      return m ? Number(m[0]) : null;
+    }
     function absUrl(href) {
       try { return new URL(href, location.href).href; } catch (_) { return ''; }
     }
@@ -359,6 +630,24 @@
     if (/Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText)) {
       return { cfChallenge: true, candidates: [] };
     }
+
+    const totalSeeking = numberFromText(text(Array.from(document.querySelectorAll('.fly-filter a'))
+      .find(a => /求助中/.test(text(a)))));
+    const supplementCount = numberFromText(text(Array.from(document.querySelectorAll('.fly-filter a'))
+      .find(a => /补充材料/.test(text(a)))));
+    const publisherCounts = {};
+    Array.from(document.querySelectorAll('.waiting-publisher-item')).forEach(item => {
+      const imgTitle = item.querySelector('img[title]')?.getAttribute('title') || '';
+      const title = imgTitle || String(item.getAttribute('title') || '').replace(/^查看\s+|\s+的所有求助$/g, '');
+      const count = numberFromText(text(item.querySelector('.waiting-publisher-item-num')));
+      if (title && Number.isFinite(count)) publisherCounts[title] = count;
+    });
+    const demandSnapshot = {
+      sourceUrl: location.href,
+      totalSeeking: Number.isFinite(totalSeeking) ? totalSeeking : null,
+      supplementCount: Number.isFinite(supplementCount) ? supplementCount : null,
+      publisherCounts
+    };
 
     const rows = Array.from(document.querySelectorAll('ul.assist-list > li, .assist-list li'));
     const candidates = rows.map((row, index) => {
@@ -392,7 +681,7 @@
       };
     }).filter(item => item.detailUrl);
 
-    return { cfChallenge: false, candidates: candidates.reverse() };
+    return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot };
   }
 
   function isListCandidateAllowed(candidate, opts) {
@@ -606,11 +895,38 @@
     autoWatcherRunning = true;
     try {
       const opts = normalizeOptions(await deps.getOptions());
-      if (!opts.watcherEnabled && trigger !== 'manual') return { ok: false, reason: 'disabled' };
+      if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') return { ok: false, reason: 'disabled' };
       if (deps.hasActiveTask()) return { ok: false, reason: 'active_task' };
+      if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
+        return { ok: true, reason: 'outside_work_schedule' };
+      }
+
+      const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
+      if (observeResult?.reason === 'cf_challenge') {
+        if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, opts.watcherDemandObserveUrl);
+        return { ok: false, reason: 'cf_challenge' };
+      }
+      if (trigger === 'manual-observe') {
+        return { ok: !!observeResult?.snapshot, reason: observeResult?.snapshot ? 'demand_observed' : 'demand_observe_skipped' };
+      }
+      if (opts.watcherObserveOnly) {
+        return { ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' };
+      }
+
+      const stateForTargets = await getWatcherState();
+      const targetState = calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
+      Object.assign(stateForTargets, targetState);
+      await saveWatcherState(stateForTargets);
+      if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
+        return { ok: false, reason: 'today_target_reached' };
+      }
       if (opts.watcherDailyLimit > 0 && await getDailyCount('downloaded') >= opts.watcherDailyLimit) {
         return { ok: false, reason: 'daily_limit' };
       }
+
+      let handledCount = 0;
+      const targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1;
+      if (targetSessionSize <= 0) return { ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' };
 
       for (const listUrl of opts.watcherListUrls) {
         await incrementDaily('checked');
@@ -622,6 +938,7 @@
         await resetCfChallengeStreak();
 
         for (const candidate of parsed.candidates || []) {
+          if (handledCount >= targetSessionSize) return { ok: true, reason: 'session_target_reached' };
           const listAllowed = isListCandidateAllowed(candidate, opts);
           if (!listAllowed.ok) continue;
           if (await wasRecentlyProcessed(candidate)) continue;
@@ -648,11 +965,16 @@
 
           const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId);
           if (!handled) await closeTabQuietly(detail.tabId);
-          if (handled) return { ok: true, reason: 'candidate_handled' };
+          if (handled) {
+            handledCount += 1;
+            if (handledCount >= targetSessionSize || deps.hasActiveTask()) {
+              return { ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' };
+            }
+          }
         }
       }
 
-      return { ok: true, reason: 'no_candidate' };
+      return { ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' };
     } catch (err) {
       await incrementDaily('failed');
       await appendWatcherLog({ status: 'failed', reason: err?.message || String(err) });
@@ -690,6 +1012,10 @@
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === 'ablesciRunAutoWatcherNow') {
         runAutoWatcherOnce('manual').then(sendResponse);
+        return true;
+      }
+      if (msg?.type === 'ablesciObserveDemandNow') {
+        runAutoWatcherOnce('manual-observe').then(sendResponse);
         return true;
       }
       if (msg?.type === 'ablesciTestWatcherNotification') {

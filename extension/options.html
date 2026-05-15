@@ -585,10 +585,75 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>检查间隔</strong>
-          <span>允许 10–60 分钟，默认 30 分钟。</span>
+          <span>量化调度关闭时使用；量化调度开启时作为兜底基准。</span>
         </div>
         <div class="setting-control">
           <input id="watcherIntervalMinutes" type="number" min="10" max="60" step="1" value="30" aria-label="检查间隔分钟">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>量化调度</strong>
+          <span>按需求观察、工作时间、月目标和随机会话间隔安排下一次运行；观察模式只采集列表数据。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="启用量化调度">
+            <input id="watcherQuantSchedulerEnabled" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="只观察，不打开详情页、不下载">
+            <input id="watcherObserveOnly" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>观察 URL</strong>
+          <span>用于采集求助总量和出版社需求量，建议使用求助中总页。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="watcherDemandObserveUrl" type="text" placeholder="https://www.ablesci.com/assist/index?status=waiting">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>观察时间</strong>
+          <span>每行一个北京时间 HH:mm。错过固定时间时，会按兜底间隔在可运行窗口补采样。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <textarea id="watcherObserveTimes" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>兜底观察间隔</strong>
+          <span>30–720 分钟；用于没有命中固定观察时间的日期或时间段。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherObserveFallbackMinutes" type="number" min="30" max="720" step="10" value="180" aria-label="兜底观察间隔分钟">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>工作日与窗口</strong>
+          <span>工作日用 1–7 表示周一到周日；窗口每行一个 HH:mm-HH:mm，窗口外不打开详情、不下载。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="watcherWorkdays" type="text" placeholder="1,2,3,4,5">
+          <textarea id="watcherWorkWindows" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>目标与会话</strong>
+          <span>月目标用于计算 slow / normal / fast；每会话最多 1–4 个候选，但仍受串行队列和每日上限限制。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="500" aria-label="月目标">
+          <input id="watcherMinDailyTarget" type="number" min="0" max="500" step="1" value="5" aria-label="最小日目标">
+          <input id="watcherMaxDailyTarget" type="number" min="1" max="500" step="1" value="40" aria-label="最大日目标">
+          <input id="watcherMaxPerSession" type="number" min="1" max="4" step="1" value="1" aria-label="每会话最多候选">
         </div>
       </div>
       <div class="setting-row">
@@ -603,7 +668,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>每次最多候选</strong>
-          <span>第一版固定 1 个候选，避免高频自动化。</span>
+          <span>保留兼容字段；量化调度使用“每会话最多候选”。</span>
         </div>
         <div class="setting-control">
           <input id="watcherMaxCandidatesPerRun" type="number" min="1" max="1" step="1" value="1" disabled>
@@ -721,6 +786,7 @@
         </div>
         <div class="setting-control">
           <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
+          <button id="observeDemandNow" class="secondary" type="button">立即观察</button>
           <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
           <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志</button>

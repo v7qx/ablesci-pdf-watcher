@@ -39,7 +39,18 @@ const DEFAULT_OPTIONS = {
   watcherDailyReportEnabled: true,
   watcherReportDir: '',
   watcherNotifyMode: 'native',
-  watcherCfPauseThreshold: 3
+  watcherCfPauseThreshold: 3,
+  watcherQuantSchedulerEnabled: true,
+  watcherObserveOnly: false,
+  watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
+  watcherObserveTimes: '09:30\n11:30\n14:00\n16:30\n18:00',
+  watcherObserveFallbackMinutes: 180,
+  watcherWorkdays: '1,2,3,4,5',
+  watcherWorkWindows: '09:00-12:00\n13:30-18:00',
+  watcherMonthlyTarget: 500,
+  watcherMinDailyTarget: 5,
+  watcherMaxDailyTarget: 40,
+  watcherMaxPerSession: 1
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
@@ -107,7 +118,18 @@ async function getOptions() {
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
-    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
+    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
+    watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
+    watcherObserveOnly: opts.watcherObserveOnly === true,
+    watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
+    watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
+    watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
+    watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
+    watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
+    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 500, 0, 5000),
+    watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
+    watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });

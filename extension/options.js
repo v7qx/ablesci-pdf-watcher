@@ -45,7 +45,18 @@ const DEFAULT_OPTIONS = {
   watcherDailyReportEnabled: true,
   watcherReportDir: '',
   watcherNotifyMode: 'native',
-  watcherCfPauseThreshold: 3
+  watcherCfPauseThreshold: 3,
+  watcherQuantSchedulerEnabled: true,
+  watcherObserveOnly: false,
+  watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
+  watcherObserveTimes: '09:30\n11:30\n14:00\n16:30\n18:00',
+  watcherObserveFallbackMinutes: 180,
+  watcherWorkdays: '1,2,3,4,5',
+  watcherWorkWindows: '09:00-12:00\n13:30-18:00',
+  watcherMonthlyTarget: 500,
+  watcherMinDailyTarget: 5,
+  watcherMaxDailyTarget: 40,
+  watcherMaxPerSession: 1
 };
 
 const ids = Object.keys(DEFAULT_OPTIONS);
@@ -53,6 +64,7 @@ const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
 const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
+const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
 
 function el(id) { return document.getElementById(id); }
 
@@ -133,7 +145,18 @@ async function loadOptions() {
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
-    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
+    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
+    watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
+    watcherObserveOnly: opts.watcherObserveOnly === true,
+    watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
+    watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
+    watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
+    watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
+    watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
+    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 500, 0, 5000),
+    watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
+    watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
   });
   const missingLocal = ids.some(id => local[id] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -170,6 +193,8 @@ function validateOptions(opts) {
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
+  if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
+  if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求观察 URL 必须是 Ablesci HTTPS 链接。');
 }
 
 async function save() {
@@ -204,6 +229,17 @@ async function save() {
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
+  opts.watcherQuantSchedulerEnabled = opts.watcherQuantSchedulerEnabled !== false;
+  opts.watcherObserveOnly = opts.watcherObserveOnly === true;
+  opts.watcherDemandObserveUrl = normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl;
+  opts.watcherObserveTimes = String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim();
+  opts.watcherObserveFallbackMinutes = clampNumber(opts.watcherObserveFallbackMinutes, DEFAULT_OPTIONS.watcherObserveFallbackMinutes, 30, 720);
+  opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
+  opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
+  opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);
+  opts.watcherMinDailyTarget = clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500);
+  opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
+  opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 4);
 
   try {
     validateOptions(opts);
@@ -300,9 +336,11 @@ async function copyAutoWatcherConfig() {
   const stored = await chrome.storage.local.get([
     AUTO_WATCHER_STATE_KEY,
     AUTO_WATCHER_LOG_KEY,
+    DEMAND_SNAPSHOTS_KEY,
     LAST_DIAGNOSTIC_KEY
   ]);
   const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
+  const demandSnapshots = Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [];
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
   const processed = state.processed || {};
   const diagnostic = stored[LAST_DIAGNOSTIC_KEY] || null;
@@ -320,6 +358,7 @@ async function copyAutoWatcherConfig() {
       today: state.daily?.[new Date().toISOString().slice(0, 10)] || null
     },
     latestWatcherLog: logs[0] || null,
+    latestDemandSnapshot: demandSnapshots[0] || null,
     latestDiagnostic: diagnostic ? {
       time: diagnostic.time || '',
       stage: diagnostic.stage || '',
@@ -372,6 +411,12 @@ async function runAutoWatcherNow() {
   showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : ('失败：' + (res.reason || '未知错误')), !res.ok);
 }
 
+async function observeDemandNow() {
+  showPill('watcherRunStatus', '观察中');
+  const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
+  showPill('watcherRunStatus', res.ok ? (res.reason || '已观察') : ('失败：' + (res.reason || '未知错误')), !res.ok);
+}
+
 async function testWatcherNotification() {
   await save();
   showPill('watcherNotifyStatus', '发送中');
@@ -400,6 +445,7 @@ el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
 el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
+el('observeDemandNow')?.addEventListener('click', observeDemandNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
