@@ -35,7 +35,8 @@ const DEFAULT_OPTIONS = {
   watcherUploadCountdownSeconds: 10,
   watcherDailyLimit: 10,
   watcherStopOnCfChallenge: true,
-  watcherSkipHighRiskJournal: false
+  watcherSkipHighRiskJournal: true,
+  watcherDailyReportEnabled: true
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
@@ -97,7 +98,9 @@ async function getOptions() {
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100)
+    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
+    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -221,6 +224,7 @@ function makeDiagnosticBase(payload, opts) {
     assistId: maskId(payload?.assistId),
     doi: payload?.doi || '',
     journalName: payload?.journalName || '',
+    assistDetailUrl: payload?.pageUrl || '',
     publisherHost: hostnameOf(payload?.pdfUrl || ''),
     pickedUrl: urlHostPath(payload?.pdfUrl || ''),
     source: payload?.pdfUrlSource || '',
@@ -303,7 +307,7 @@ async function saveErrorDiagnostic(payload, err) {
     const stored = await chrome.storage.local.get(LAST_DIAGNOSTIC_KEY);
     const previous = stored[LAST_DIAGNOSTIC_KEY] || {};
     const base = previous && previous.assistId === maskId(payload?.assistId)
-      ? previous
+      ? { ...previous, assistDetailUrl: previous.assistDetailUrl || payload?.pageUrl || '' }
       : makeDiagnosticBase(payload, opts);
     const stage = base.downloadItem && base.stage ? base.stage : 'error';
     await saveDiagnostic({ ...base, stage, error: raw });

@@ -6,6 +6,7 @@
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const MAX_LOGS = 200;
+  const REPORT_DIR = 'ablesci-watcher-reports';
 
   let deps = null;
   let autoWatcherRunning = false;
@@ -52,15 +53,27 @@
       watcherMaxCandidatesPerRun: 1,
       watcherListUrls: normalizeListUrls(opts.watcherListUrls, deps.defaultListUrls),
       watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-      watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100)
+      watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+      watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
+      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
     };
   }
 
-  async function refreshAutoWatcherAlarm() {
+  function randomIntervalMinutes(opts) {
+    const base = clampNumber(opts.watcherIntervalMinutes, 30, 10, 60);
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60);
+    const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
+    const jitter = Math.max(1, Math.round(base * 0.2));
+    const low = Math.max(min, base - jitter);
+    const high = Math.min(max, base + jitter);
+    return low + Math.random() * Math.max(1, high - low);
+  }
+
+  async function refreshAutoWatcherAlarm(clearExisting = true) {
     const opts = normalizeOptions(await deps.getOptions());
-    await chrome.alarms.clear(ALARM_NAME);
+    if (clearExisting) await chrome.alarms.clear(ALARM_NAME);
     if (!opts.watcherEnabled) return;
-    await chrome.alarms.create(ALARM_NAME, { periodInMinutes: opts.watcherIntervalMinutes });
+    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: randomIntervalMinutes(opts) });
   }
 
   function notifyWatcherNeedsAttention(reason, url) {
@@ -75,17 +88,7 @@
         requireInteraction: false
       });
     } catch (_) {}
-    try {
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-    } catch (_) {}
     if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-  }
-
-  function clearAttentionBadgeSoon() {
-    setTimeout(() => {
-      try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
-    }, 60000);
   }
 
   async function getWatcherState() {
@@ -113,7 +116,7 @@
     const state = await getWatcherState();
     const key = todayKey();
     state.daily = state.daily || {};
-    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0 };
+    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
     state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
     await saveWatcherState(state);
   }
@@ -138,6 +141,84 @@
       reason: normalizeText(entry.reason).slice(0, 160)
     });
     await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: logs.slice(0, MAX_LOGS) });
+  }
+
+  function csvEscape(value) {
+    return '"' + String(value ?? '').replace(/"/g, '""') + '"';
+  }
+
+  function dataUrl(content, mime) {
+    return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
+  }
+
+  async function writeReportFile(filename, content, mime) {
+    try {
+      await chrome.downloads.download({
+        url: dataUrl(content, mime),
+        filename,
+        conflictAction: 'overwrite',
+        saveAs: false
+      });
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] report download failed', err);
+    }
+  }
+
+  async function writeDailyReports() {
+    const opts = normalizeOptions(await deps.getOptions());
+    if (!opts.watcherDailyReportEnabled) return;
+
+    const date = todayKey();
+    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY]);
+    const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+    const daily = state.daily?.[date] || {};
+    const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
+      .filter(log => String(log.time || '').startsWith(date));
+
+    const csvRows = [
+      ['time', 'assistId', 'doi', 'journalName', 'detailUrlHostPath', 'status', 'reason'],
+      ...logs.map(log => [
+        log.time || '',
+        log.assistId || '',
+        log.doi || '',
+        log.journalName || '',
+        `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`,
+        log.status || '',
+        log.reason || ''
+      ])
+    ];
+    const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
+
+    const md = [
+      `# Ablesci Watcher Daily Report ${date}`,
+      '',
+      '## Summary',
+      '',
+      `- Checked: ${Number(daily.checked || 0)}`,
+      `- Downloaded or queued: ${Number(daily.downloaded || 0)}`,
+      `- Uploaded: ${Number(daily.uploaded || 0)}`,
+      `- Skipped: ${Number(daily.skipped || 0)}`,
+      `- Failed: ${Number(daily.failed || 0)}`,
+      `- Notified: ${Number(daily.notified || 0)}`,
+      '',
+      '## Recent Logs',
+      '',
+      '| Time | Status | Reason | Journal | DOI | Detail |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...logs.slice(0, 80).map(log => [
+        log.time || '',
+        log.status || '',
+        log.reason || '',
+        log.journalName || '',
+        log.doi || '',
+        `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`
+      ].map(v => String(v).replace(/\|/g, '\\|')).join(' | '))
+        .map(row => `| ${row} |`),
+      ''
+    ].join('\n');
+
+    await writeReportFile(`${REPORT_DIR}/${date}.csv`, csv, 'text/csv');
+    await writeReportFile(`${REPORT_DIR}/${date}.md`, md, 'text/markdown');
   }
 
   function getProcessedKey(candidate, payload) {
@@ -279,14 +360,6 @@
     try { await chrome.tabs.remove(tabId); } catch (_) {}
   }
 
-  async function focusTabQuietly(tabId) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
-      await chrome.tabs.update(tabId, { active: true });
-    } catch (_) {}
-  }
-
   async function parseListUrl(url) {
     const tab = await openHiddenTab(url);
     try {
@@ -334,10 +407,32 @@
     }
   }
 
-  function makeWatcherPort() {
+  function makeWatcherPort(context) {
     return {
       name: 'ablesci-auto-watcher',
-      postMessage() {},
+      postMessage(msg) {
+        if (!msg || !context) return;
+        if (msg.type === 'error') {
+          updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
+          incrementDaily('failed').catch(() => {});
+          appendWatcherLog({
+            ...context.payload,
+            detailUrl: context.detailUrl,
+            status: 'failed',
+            reason: msg.message || 'upload_failed'
+          }).then(writeDailyReports).catch(() => {});
+        }
+        if (msg.type === 'done' && msg.blocked) {
+          updateProcessed(context.key, 'failed', msg.message || 'blocked').catch(() => {});
+          incrementDaily('failed').catch(() => {});
+          appendWatcherLog({
+            ...context.payload,
+            detailUrl: context.detailUrl,
+            status: 'failed',
+            reason: msg.message || 'blocked'
+          }).then(writeDailyReports).catch(() => {});
+        }
+      },
       onDisconnect: {
         addListener() {}
       }
@@ -351,13 +446,14 @@
     if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName)) {
       await closeTabQuietly(detailTabId);
       await updateProcessed(key, 'skipped', 'high_risk_journal');
+      await incrementDaily('skipped');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
-      return true;
+      return false;
     }
 
     if (!opts.watcherAutoDownload) {
-      await focusTabQuietly(detailTabId);
       notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
+      await incrementDaily('notified');
       await updateProcessed(key, 'skipped', 'manual_detail_opened');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'manual_detail_opened' });
       return true;
@@ -369,16 +465,16 @@
         ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : []),
         '低频值守默认仅下载并校验 PDF，上传需要人工确认。'
       ];
-      await focusTabQuietly(detailTabId);
     }
 
     if (deps.hasActiveTask()) {
       await updateProcessed(key, 'skipped', 'active_task');
+      await incrementDaily('skipped');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'active_task' });
       return false;
     }
 
-    deps.enqueueUpload(makeWatcherPort(), payload);
+    deps.enqueueUpload(makeWatcherPort({ key, payload, detailUrl: candidate.detailUrl }), payload);
     if (!payload.downloadOnly) await closeTabQuietly(detailTabId);
     await incrementDaily('downloaded');
     if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
@@ -390,7 +486,7 @@
       reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
     });
     notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
-    clearAttentionBadgeSoon();
+    await incrementDaily('notified');
     return true;
   }
 
@@ -410,6 +506,8 @@
         const parsed = await parseListUrl(listUrl);
         if (parsed.cfChallenge) {
           if (opts.watcherStopOnCfChallenge) notifyWatcherNeedsAttention('Ablesci 出现验证页，需要手动处理。', listUrl);
+          await incrementDaily('notified');
+          await incrementDaily('failed');
           await appendWatcherLog({ detailUrl: listUrl, status: 'blocked', reason: 'cf_challenge' });
           return { ok: false, reason: 'cf_challenge' };
         }
@@ -423,6 +521,7 @@
           if (!detail.ok) {
             await closeTabQuietly(detail.tabId);
             await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
+            await incrementDaily('failed');
             await appendWatcherLog({ ...candidate, status: 'failed', reason: detail.reason });
             continue;
           }
@@ -433,6 +532,7 @@
           if (!detailAllowed.ok) {
             await closeTabQuietly(detail.tabId);
             await updateProcessed(key, 'skipped', detailAllowed.reason);
+            await incrementDaily('skipped');
             await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: detailAllowed.reason });
             continue;
           }
@@ -445,15 +545,19 @@
 
       return { ok: true, reason: 'no_candidate' };
     } catch (err) {
+      await incrementDaily('failed');
       await appendWatcherLog({ status: 'failed', reason: err?.message || String(err) });
       return { ok: false, reason: err?.message || String(err) };
     } finally {
+      try { await writeDailyReports(); } catch (_) {}
+      if (trigger === 'alarm') refreshAutoWatcherAlarm().catch(() => {});
       autoWatcherRunning = false;
     }
   }
 
   function initPrivateAutoWatcher(nextDeps) {
     deps = nextDeps;
+    try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
 
     chrome.alarms.onAlarm.addListener(alarm => {
       if (alarm.name === ALARM_NAME) runAutoWatcherOnce('alarm');

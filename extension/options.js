@@ -41,7 +41,8 @@ const DEFAULT_OPTIONS = {
   watcherUploadCountdownSeconds: 10,
   watcherDailyLimit: 10,
   watcherStopOnCfChallenge: true,
-  watcherSkipHighRiskJournal: false
+  watcherSkipHighRiskJournal: true,
+  watcherDailyReportEnabled: true
 };
 
 const ids = Object.keys(DEFAULT_OPTIONS);
@@ -112,7 +113,9 @@ async function loadOptions() {
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100)
+    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
+    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
   });
   const missingLocal = ids.some(id => local[id] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -178,6 +181,8 @@ async function save() {
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, 100);
+  opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
+  opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
 
   try {
     validateOptions(opts);
@@ -300,6 +305,7 @@ async function copyAutoWatcherConfig() {
       assistId: diagnostic.assistId || '',
       doi: diagnostic.doi || '',
       journalName: diagnostic.journalName || '',
+      assistDetailUrl: diagnostic.assistDetailUrl || diagnostic.pageUrl || '',
       publisherHost: diagnostic.publisherHost || '',
       pickedUrl: diagnostic.pickedUrl || null,
       source: diagnostic.source || '',
