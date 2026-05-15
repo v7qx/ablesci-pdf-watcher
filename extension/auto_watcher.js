@@ -17,8 +17,29 @@
     return Math.min(max, Math.max(min, n));
   }
 
+  function formatBeijingDateTime(value, dateOnly = false) {
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return String(value || '');
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date).reduce((acc, item) => {
+      acc[item.type] = item.value;
+      return acc;
+    }, {});
+    const day = `${parts.year}-${parts.month}-${parts.day}`;
+    if (dateOnly) return day;
+    return `${day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  }
+
   function todayKey() {
-    return new Date().toISOString().slice(0, 10);
+    return formatBeijingDateTime(new Date(), true);
   }
 
   function normalizeText(value) {
@@ -90,15 +111,15 @@
           message
         });
         if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-        return;
+        return { ok: true, mode: 'native' };
       } catch (err) {
         console.warn('[Ablesci Auto Watcher] native notify failed', err);
         if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-        return;
+        return { ok: false, mode: 'native', reason: err?.message || String(err) };
       }
     }
     try {
-      chrome.notifications.create({
+      await chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon48.png',
         title: 'Ablesci PDF Watcher',
@@ -106,7 +127,12 @@
         priority: 1,
         requireInteraction: false
       });
-    } catch (_) {}
+      if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
+      return { ok: true, mode: 'browser' };
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] browser notification failed', err);
+      return { ok: false, mode: 'browser', reason: err?.message || String(err) };
+    }
     if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
   }
 
@@ -187,6 +213,7 @@
       title: normalizeText(entry.title).slice(0, 160),
       doi: normalizeText(entry.doi).slice(0, 160),
       journalName: normalizeText(entry.journalName).slice(0, 160),
+      detailUrl: sanitizeReportUrl(entry.detailUrl || ''),
       detailUrlHostPath: deps.urlHostPath(entry.detailUrl || ''),
       status: normalizeText(entry.status).slice(0, 80),
       reason: normalizeText(entry.reason).slice(0, 160)
@@ -200,6 +227,25 @@
 
   function dataUrl(content, mime) {
     return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
+  }
+
+  function sanitizeReportUrl(value) {
+    try {
+      const url = new URL(value);
+      for (const key of Array.from(url.searchParams.keys())) {
+        if (/token|cookie|csrf|signature|credential|key|secret|auth/i.test(key)) {
+          url.searchParams.set(key, '<redacted>');
+        }
+      }
+      return url.href;
+    } catch (_) {
+      return String(value || '');
+    }
+  }
+
+  function reportDetailValue(log) {
+    if (log.detailUrl) return log.detailUrl;
+    return `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`;
   }
 
   async function writeReportFile(filename, content, mime, opts) {
@@ -238,16 +284,16 @@
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
     const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
-      .filter(log => String(log.time || '').startsWith(date));
+      .filter(log => formatBeijingDateTime(log.time, true) === date);
 
     const csvRows = [
-      ['time', 'assistId', 'doi', 'journalName', 'detailUrlHostPath', 'status', 'reason'],
+      ['time', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason'],
       ...logs.map(log => [
-        log.time || '',
+        formatBeijingDateTime(log.time),
         log.assistId || '',
         log.doi || '',
         log.journalName || '',
-        `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`,
+        reportDetailValue(log),
         log.status || '',
         log.reason || ''
       ])
@@ -271,12 +317,12 @@
       '| Time | Status | Reason | Journal | DOI | Detail |',
       '| --- | --- | --- | --- | --- | --- |',
       ...logs.slice(0, 80).map(log => [
-        log.time || '',
+        formatBeijingDateTime(log.time),
         log.status || '',
         log.reason || '',
         log.journalName || '',
         log.doi || '',
-        `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`
+        reportDetailValue(log)
       ].map(v => String(v).replace(/\|/g, '\\|')).join(' | '))
         .map(row => `| ${row} |`),
       ''
@@ -644,6 +690,12 @@
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === 'ablesciRunAutoWatcherNow') {
         runAutoWatcherOnce('manual').then(sendResponse);
+        return true;
+      }
+      if (msg?.type === 'ablesciTestWatcherNotification') {
+        notifyWatcherNeedsAttention('这是一条低频值守测试提醒，不会执行检查。')
+          .then(sendResponse)
+          .catch(err => sendResponse({ ok: false, reason: err?.message || String(err) }));
         return true;
       }
       if (msg?.type === 'ablesciClearAutoWatcherState') {

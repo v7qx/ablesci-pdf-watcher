@@ -195,7 +195,9 @@ func handleNotifyUser(req Request) error {
 	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
 	if runtime.GOOS == "windows" {
 		script := `$title = $args[0]; $msg = $args[1]; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.BalloonTipTitle = $title; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000); Start-Sleep -Seconds 6; $n.Dispose()`
-		_ = exec.Command("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script, title, message).Start()
+		if err := exec.Command("powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, title, message).Start(); err != nil {
+			return err
+		}
 		return writeResponse(Response{OK: true, Action: "notify_user"})
 	}
 	fmt.Fprint(os.Stderr, "\a")

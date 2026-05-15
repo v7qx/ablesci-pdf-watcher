@@ -371,6 +371,18 @@ async function runAutoWatcherNow() {
   showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : ('失败：' + (res.reason || '未知错误')), !res.ok);
 }
 
+async function testWatcherNotification() {
+  await save();
+  showPill('watcherNotifyStatus', '发送中');
+  const res = await sendRuntimeMessage({ type: 'ablesciTestWatcherNotification' });
+  const mode = res.mode === 'browser' ? '浏览器' : 'Native';
+  showPill(
+    'watcherNotifyStatus',
+    res.ok ? `${mode} 已发送` : `${mode} 失败：${res.reason || '未知错误'}`,
+    !res.ok
+  );
+}
+
 async function clearAutoWatcherState() {
   const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherState' });
   showText('status', res.ok ? '已清除 watcher 已处理记录。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
@@ -387,6 +399,7 @@ el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
 el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
+el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
