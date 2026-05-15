@@ -47,6 +47,8 @@ const DEFAULT_OPTIONS = {
 const ids = Object.keys(DEFAULT_OPTIONS);
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
+const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
+const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
 
 function el(id) { return document.getElementById(id); }
 
@@ -242,6 +244,86 @@ async function copyDiagnostic() {
   }
 }
 
+function sanitizeUrlForExport(value) {
+  try {
+    const url = new URL(value);
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (/token|cookie|csrf|signature|credential|key|secret|auth/i.test(key)) {
+        url.searchParams.set(key, '<redacted>');
+      }
+    }
+    return url.href;
+  } catch (_) {
+    return String(value || '').replace(/(token|cookie|csrf|signature|credential|key|secret|auth)=([^&\s]+)/ig, '$1=<redacted>');
+  }
+}
+
+function watcherOptionSnapshot(opts) {
+  const snapshot = {};
+  for (const key of Object.keys(DEFAULT_OPTIONS)) {
+    if (!key.startsWith('watcher')) continue;
+    snapshot[key] = key === 'watcherListUrls'
+      ? normalizeWatcherListUrls(opts[key]).map(sanitizeUrlForExport)
+      : opts[key];
+  }
+  return snapshot;
+}
+
+async function copyAutoWatcherConfig() {
+  const opts = await loadOptions();
+  const stored = await chrome.storage.local.get([
+    AUTO_WATCHER_STATE_KEY,
+    AUTO_WATCHER_LOG_KEY,
+    LAST_DIAGNOSTIC_KEY
+  ]);
+  const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
+  const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+  const processed = state.processed || {};
+  const diagnostic = stored[LAST_DIAGNOSTIC_KEY] || null;
+  const manifest = chrome.runtime.getManifest();
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    extension: {
+      name: manifest.name,
+      version: manifest.version
+    },
+    watcherOptions: watcherOptionSnapshot(opts),
+    watcherStateSummary: {
+      processedCount: Object.keys(processed).length,
+      today: state.daily?.[new Date().toISOString().slice(0, 10)] || null
+    },
+    latestWatcherLog: logs[0] || null,
+    latestDiagnostic: diagnostic ? {
+      time: diagnostic.time || '',
+      stage: diagnostic.stage || '',
+      assistId: diagnostic.assistId || '',
+      doi: diagnostic.doi || '',
+      journalName: diagnostic.journalName || '',
+      publisherHost: diagnostic.publisherHost || '',
+      pickedUrl: diagnostic.pickedUrl || null,
+      source: diagnostic.source || '',
+      error: diagnostic.error || ''
+    } : null
+  };
+
+  const text = JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    showPill('watcherConfigStatus', '已复制');
+  } catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    showPill('watcherConfigStatus', ok ? '已复制' : '复制失败', !ok);
+  }
+}
+
 async function clearJournalAccessStats() {
   await chrome.storage.local.remove(JOURNAL_ACCESS_STATS_KEY);
   showText('status', '已清除本地期刊失败记录。');
@@ -279,5 +361,6 @@ el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
 el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
+el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);

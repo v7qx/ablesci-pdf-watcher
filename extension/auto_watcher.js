@@ -71,16 +71,15 @@
         iconUrl: 'icons/icon48.png',
         title: 'Ablesci PDF Watcher',
         message,
-        priority: 1
+        priority: 1,
+        requireInteraction: false
       });
     } catch (_) {}
     try {
       chrome.action.setBadgeText({ text: '!' });
       chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
     } catch (_) {}
-    if (url) {
-      try { chrome.tabs.create({ url, active: true }); } catch (_) {}
-    }
+    if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
   }
 
   function clearAttentionBadgeSoon() {
@@ -280,6 +279,14 @@
     try { await chrome.tabs.remove(tabId); } catch (_) {}
   }
 
+  async function focusTabQuietly(tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (_) {}
+  }
+
   async function parseListUrl(url) {
     const tab = await openHiddenTab(url);
     try {
@@ -324,8 +331,6 @@
       return { ok: true, payload: response.payload, tabId: tab.id };
     } catch (err) {
       return { ok: false, reason: err?.message || String(err), tabId: tab.id };
-    } finally {
-      await closeTabQuietly(tab.id);
     }
   }
 
@@ -339,18 +344,20 @@
     };
   }
 
-  async function handleAllowedPayload(candidate, payload, opts) {
+  async function handleAllowedPayload(candidate, payload, opts, detailTabId) {
     payload.triggeredBy = 'auto_watcher';
     const key = getProcessedKey(candidate, payload);
 
     if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName)) {
+      await closeTabQuietly(detailTabId);
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
       return true;
     }
 
     if (!opts.watcherAutoDownload) {
-      notifyWatcherNeedsAttention('低频值守发现候选，已打开详情页等待人工处理。', candidate.detailUrl);
+      await focusTabQuietly(detailTabId);
+      notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
       await updateProcessed(key, 'skipped', 'manual_detail_opened');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'manual_detail_opened' });
       return true;
@@ -362,6 +369,7 @@
         ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : []),
         '低频值守默认仅下载并校验 PDF，上传需要人工确认。'
       ];
+      await focusTabQuietly(detailTabId);
     }
 
     if (deps.hasActiveTask()) {
@@ -371,6 +379,7 @@
     }
 
     deps.enqueueUpload(makeWatcherPort(), payload);
+    if (!payload.downloadOnly) await closeTabQuietly(detailTabId);
     await incrementDaily('downloaded');
     if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
     await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
@@ -380,7 +389,7 @@
       status: payload.downloadOnly ? 'download_only' : 'queued_upload',
       reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
     });
-    notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，上传仍需人工确认。' : '低频值守已排队处理一个候选。');
+    notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
     clearAttentionBadgeSoon();
     return true;
   }
@@ -412,6 +421,7 @@
 
           const detail = await inspectDetail(candidate);
           if (!detail.ok) {
+            await closeTabQuietly(detail.tabId);
             await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
             await appendWatcherLog({ ...candidate, status: 'failed', reason: detail.reason });
             continue;
@@ -421,12 +431,14 @@
           const detailAllowed = isDetailAllowedForWatcher(payload, opts);
           const key = getProcessedKey(candidate, payload);
           if (!detailAllowed.ok) {
+            await closeTabQuietly(detail.tabId);
             await updateProcessed(key, 'skipped', detailAllowed.reason);
             await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: detailAllowed.reason });
             continue;
           }
 
-          const handled = await handleAllowedPayload(candidate, payload, opts);
+          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId);
+          if (!handled) await closeTabQuietly(detail.tabId);
           if (handled) return { ok: true, reason: 'candidate_handled' };
         }
       }
