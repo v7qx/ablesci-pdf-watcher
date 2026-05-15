@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ablesci PDF Uploader",
+  "name": "Ablesci PDF Watcher Private",
   "version": "0.10.0",
-  "description": "在 Ablesci 求助详情页下载 PDF，校验后上传。",
+  "description": "Private local watcher for Ablesci PDF assist workflow.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -10,8 +10,11 @@
     "128": "icons/icon128.png"
   },
   "permissions": [
+    "alarms",
     "downloads",
     "nativeMessaging",
+    "notifications",
+    "scripting",
     "storage",
     "tabs"
   ],
@@ -72,7 +75,7 @@
   ],
   "options_page": "options.html",
   "action": {
-    "default_title": "Ablesci PDF Uploader",
+    "default_title": "Ablesci PDF Watcher Private",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

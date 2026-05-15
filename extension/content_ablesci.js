@@ -470,6 +470,22 @@
     };
   }
 
+  function extractStatusText() {
+    return Array.from(document.querySelectorAll('.assist-badge, .assist-status-badge, .close-daojishi'))
+      .map(visibleText)
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function buildPayloadFromCurrentPage() {
+    const payload = collectPayload();
+    return {
+      ...payload,
+      statusText: extractStatusText(),
+      riskText: (payload.riskReasons || []).join('；')
+    };
+  }
+
   function startUpload() {
     const btn = $('#' + BTN_ID);
     if (btn && btn.classList.contains('busy')) {
@@ -565,6 +581,22 @@
       pageOptions = opts;
       updateExistingButton();
     }).catch(() => {});
+  });
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type !== 'ablesciExtractDetailPayload') return;
+    try {
+      sendResponse({
+        ok: true,
+        payload: buildPayloadFromCurrentPage()
+      });
+    } catch (err) {
+      sendResponse({
+        ok: false,
+        error: err?.message || String(err)
+      });
+    }
+    return true;
   });
 
   loadUiOptions().then(opts => {

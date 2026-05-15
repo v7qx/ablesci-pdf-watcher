@@ -1,4 +1,6 @@
-# Ablesci PDF Uploader
+# Ablesci PDF Watcher Private
+
+这是基于 Ablesci PDF Uploader 的私人本地实验版，用于低频候选提醒和本地辅助处理。默认关闭，不建议公开分发。
 
 Chrome / Edge 扩展 + Go Native Messaging Helper，用于在 Ablesci 求助详情页辅助完成正文 PDF 的下载、校验和上传。
 
@@ -76,6 +78,7 @@ edge://settings/content/pdfDocuments
 - 智能推送：控制提交成功后是否显示网站返回的相关文献提示层。
 - 按钮显示名称、颜色和位置；有快捷应助区域时挂到该区域，没有时回退到页面详情区域。
 - 复制最近一次诊断信息。
+- 实验低频值守：默认关闭；启用后使用浏览器 alarm 低频检查 Ablesci 求助列表，跳过置顶、举报、驳回、补充材料和明显异常候选，每次最多处理 1 个候选。
 
 ## 下载和上传逻辑
 

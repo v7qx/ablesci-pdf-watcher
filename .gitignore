@@ -8,6 +8,9 @@ Downloads/
 .local/
 
 *.har
+*net-export*.json
+*cookie*
+*token*
 *.pdf
 *.log
 *.tmp

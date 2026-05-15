@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>Ablesci PDF Uploader</title>
+  <title>Ablesci PDF Watcher Private</title>
   <style>
     :root {
       --bg: #f8f9fa;
@@ -103,6 +103,7 @@
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
+      flex-wrap: wrap;
       min-width: 250px;
       flex: 0 0 340px;
     }
@@ -114,6 +115,7 @@
 
     input[type="text"],
     input[type="number"],
+    textarea,
     select {
       width: 100%;
       min-height: 36px;
@@ -128,11 +130,17 @@
 
     input[type="text"]:focus,
     input[type="number"]:focus,
+    textarea:focus,
     select:focus {
       outline: none;
       border-color: var(--primary);
       background: #fff;
       box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+    }
+
+    textarea {
+      min-height: 88px;
+      resize: vertical;
     }
 
     select {
@@ -349,8 +357,8 @@
 <body>
   <main class="page">
     <header class="header">
-      <h1>Ablesci PDF Uploader</h1>
-      <p>设置下载、上传和按钮显示。</p>
+      <h1>Ablesci PDF Watcher Private</h1>
+      <p>设置下载、上传、按钮显示和低频本地值守。</p>
     </header>
 
     <section class="card">
@@ -541,6 +549,134 @@
         </div>
       </div>
     </details>
+
+    <section class="card">
+      <h2 class="card-title">实验：低频值守</h2>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>启用低频值守</strong>
+          <span>默认关闭。只在浏览器运行且扩展启用时按低频 alarm 检查。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="启用低频值守">
+            <input id="watcherEnabled" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>检查间隔</strong>
+          <span>允许 10–60 分钟，默认 30 分钟。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherIntervalMinutes" type="number" min="10" max="60" step="1" value="30" aria-label="检查间隔分钟">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>列表 URL</strong>
+          <span>每行一个。默认使用 Elsevier 求助中第 3 页，避免第一页竞争。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <textarea id="watcherListUrls" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>每次最多候选</strong>
+          <span>第一版固定 1 个候选，避免高频自动化。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherMaxCandidatesPerRun" type="number" min="1" max="1" step="1" value="1" disabled>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>候选筛选</strong>
+          <span>跳过置顶、举报、驳回、补充材料和明显异常文本；详情页会二次确认 DOI。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="只处理有 DOI 的求助">
+            <input id="watcherRequireDoi" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="跳过举报">
+            <input id="watcherSkipReported" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="跳过驳回">
+            <input id="watcherSkipRejected" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="跳过补充材料">
+            <input id="watcherSkipSupplement" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="跳过异常文本">
+            <input id="watcherSkipRiskText" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>处理方式</strong>
+          <span>默认自动打开详情、下载并校验；上传前仍需人工确认。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="自动打开详情页">
+            <input id="watcherOpenDetail" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="自动下载校验">
+            <input id="watcherAutoDownload" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="自动上传">
+            <input id="watcherAutoUpload" type="checkbox">
+            <span></span>
+          </label>
+          <label class="toggle" title="上传前确认">
+            <input id="watcherUploadConfirmRequired" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>每日上传上限</strong>
+          <span>0 表示不限制。默认 10。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherDailyLimit" type="number" min="0" max="100" step="1" value="10" aria-label="每日上传上限">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>验证页处理</strong>
+          <span>遇到 Cloudflare 或真人验证时停止流程，只提醒手动处理。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="遇到验证页停止">
+            <input id="watcherStopOnCfChallenge" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>本地记录</strong>
+          <span>已处理记录和 watcher 日志只保存在本机。</span>
+        </div>
+        <div class="setting-control">
+          <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
+          <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
+          <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志</button>
+          <span id="watcherRunStatus" class="pill">未检查</span>
+        </div>
+      </div>
+    </section>
 
     <footer class="footer">
       <button id="save" type="button">保存</button>

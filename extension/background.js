@@ -14,7 +14,28 @@ const DEFAULT_OPTIONS = {
   maxAutoUploadMB: 99,
   maxAutoUploadUnit: 'MB',
   debugDownloadOnly: false,
-  autoRemoveHtmlDownloads: false
+  autoRemoveHtmlDownloads: false,
+  watcherEnabled: false,
+  watcherIntervalMinutes: 30,
+  watcherMinIntervalMinutes: 10,
+  watcherMaxIntervalMinutes: 60,
+  watcherMaxCandidatesPerRun: 1,
+  watcherListUrls: [
+    'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page=3'
+  ],
+  watcherRequireDoi: true,
+  watcherSkipReported: true,
+  watcherSkipRejected: true,
+  watcherSkipSupplement: true,
+  watcherSkipRiskText: true,
+  watcherOpenDetail: true,
+  watcherAutoDownload: true,
+  watcherAutoUpload: false,
+  watcherUploadConfirmRequired: true,
+  watcherUploadCountdownSeconds: 10,
+  watcherDailyLimit: 10,
+  watcherStopOnCfChallenge: true,
+  watcherSkipHighRiskJournal: false
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
@@ -69,7 +90,14 @@ async function getOptions() {
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
     minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
-    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit)
+    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
+    watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, 10, 60),
+    watcherMinIntervalMinutes: clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60),
+    watcherMaxIntervalMinutes: clampNumber(opts.watcherMaxIntervalMinutes, 60, 10, 1440),
+    watcherMaxCandidatesPerRun: 1,
+    watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
+    watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
+    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100)
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -93,6 +121,28 @@ function sanitizePathPart(s) {
 
 function normalizeSizeUnit(value) {
   return String(value || '').toUpperCase() === 'KB' ? 'KB' : 'MB';
+}
+
+function clampNumber(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeWatcherListUrls(value) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/\r?\n/);
+  const urls = raw
+    .map(s => String(s || '').trim())
+    .filter(Boolean)
+    .filter(url => {
+      try {
+        const u = new URL(url);
+        return /^https:$/.test(u.protocol) && /(^|\.)ablesci\.com$/i.test(u.hostname);
+      } catch (_) {
+        return false;
+      }
+    });
+  return urls.length ? urls : DEFAULT_OPTIONS.watcherListUrls.slice();
 }
 
 function formatBytes(size) {
@@ -1357,4 +1407,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   sendResponse({ ok: false, ignored: true, reason: 'unsupported publisher' });
+});
+
+// PRIVATE_WATCHER_ONLY
+importScripts('auto_watcher.js');
+globalThis.initPrivateAutoWatcher({
+  getOptions,
+  enqueueUpload,
+  hasActiveTask: () => !!activeTask || taskQueue.length > 0,
+  urlHostPath,
+  defaultListUrls: DEFAULT_OPTIONS.watcherListUrls.slice()
 });
