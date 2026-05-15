@@ -9,6 +9,8 @@
   const MAX_LOGS = 200;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const REPORT_DIR = 'ablesci-watcher-reports';
+  const ASSIST_RANDOM_PAGE_MIN = 3;
+  const ASSIST_RANDOM_PAGE_MAX = 100;
   const ADVANCED_MODEL_MIN_DAYS = 2;
   const FALLBACK_PUBLISHER_WEIGHTS = {
     Elsevier: 2.8,
@@ -78,6 +80,29 @@
         }
       });
     return urls.length ? urls : fallback.slice();
+  }
+
+  function randomIntInclusive(min, max) {
+    const low = Math.ceil(min);
+    const high = Math.floor(max);
+    return low + Math.floor(Math.random() * Math.max(1, high - low + 1));
+  }
+
+  function randomizeAssistListUrl(url) {
+    try {
+      const u = new URL(url);
+      const isAblesci = /(^|\.)ablesci\.com$/i.test(u.hostname);
+      const isAssistList = /\/assist\/index$/i.test(u.pathname);
+      const isElsevierWaiting = u.searchParams.get('status') === 'waiting' &&
+        /elsevier/i.test(u.searchParams.get('publisher') || '');
+      if (isAblesci && isAssistList && isElsevierWaiting) {
+        u.searchParams.set('page', String(randomIntInclusive(ASSIST_RANDOM_PAGE_MIN, ASSIST_RANDOM_PAGE_MAX)));
+        return u.toString();
+      }
+    } catch (_) {
+      // Keep the configured URL if it cannot be parsed.
+    }
+    return url;
   }
 
   function normalizeOptions(opts) {
@@ -408,12 +433,50 @@
     return below / nums.length;
   }
 
+  function medianNumber(values) {
+    const nums = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!nums.length) return null;
+    const mid = Math.floor(nums.length / 2);
+    return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+  }
+
   function demandRegimeFor(snapshot, history) {
-    const p = percentileRank(history.map(item => item.totalSeeking), snapshot?.totalSeeking);
+    const stableHistory = history.filter(item => !item.demandAnomaly);
+    const p = percentileRank(stableHistory.map(item => item.totalSeeking), snapshot?.totalSeeking);
     if (p < 0.20) return 'quiet';
     if (p < 0.70) return 'normal';
     if (p < 0.90) return 'busy';
     return 'very_busy';
+  }
+
+  function classifyDemandSnapshotAnomaly(snapshot, history) {
+    const value = Number(snapshot?.totalSeeking);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { ok: false, type: 'invalid_total', value };
+    }
+    const recent = (history || [])
+      .filter(item => !item.demandAnomaly && Number.isFinite(Number(item.totalSeeking)) && Number(item.totalSeeking) > 0)
+      .slice(0, 60);
+    if (!recent.length) return { ok: true };
+    const latest = Number(recent[0].totalSeeking);
+    if (recent.length < 3) {
+      const diff = Math.abs(value - latest);
+      if (value >= latest * 4 && diff >= 100) return { ok: false, type: 'sudden_high', value, baseline: latest };
+      if (value <= latest * 0.2 && diff >= 100) return { ok: false, type: 'sudden_low', value, baseline: latest };
+      return { ok: true };
+    }
+    const values = recent.map(item => Number(item.totalSeeking));
+    const median = medianNumber(values);
+    const deviations = values.map(n => Math.abs(n - median));
+    const mad = medianNumber(deviations) || 0;
+    const absoluteBand = Math.max(120, mad * 6);
+    if (value > Math.max(median * 2.8, median + absoluteBand)) {
+      return { ok: false, type: 'sudden_high', value, baseline: median, mad };
+    }
+    if (value < Math.min(median * 0.35, median - absoluteBand)) {
+      return { ok: false, type: 'sudden_low', value, baseline: median, mad };
+    }
+    return { ok: true };
   }
 
   function demandSnapshotDays(snapshots) {
@@ -463,7 +526,7 @@
   }
 
   function buildAdvancedPublisherModel(snapshots) {
-    const clean = (snapshots || []).filter(item => item && item.publisherCounts);
+    const clean = (snapshots || []).filter(item => item && item.publisherCounts && !item.demandAnomaly);
     const days = demandSnapshotDays(clean);
     const latest = clean[0] || null;
     if (days.size < ADVANCED_MODEL_MIN_DAYS) return buildFallbackPublisherModel(latest);
@@ -525,6 +588,25 @@
       dayKey: todayKey(),
       slot: formatBeijingDateTime(new Date()).slice(11, 16)
     };
+    const anomaly = classifyDemandSnapshotAnomaly(normalized, snapshots);
+    if (!anomaly.ok) {
+      normalized.demandAnomaly = true;
+      normalized.anomalyType = anomaly.type;
+      normalized.anomalyBaseline = Number.isFinite(Number(anomaly.baseline)) ? Number(anomaly.baseline) : null;
+      normalized.regime = 'anomaly';
+      const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
+      await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
+      const state = await getWatcherState();
+      state.lastDemandAnomalyAt = normalized.timestamp;
+      state.lastDemandAnomaly = normalized;
+      await saveWatcherState(state);
+      await appendWatcherLog({
+        detailUrl: normalized.sourceUrl,
+        status: 'skipped',
+        reason: `demand_snapshot_${anomaly.type}`
+      });
+      return normalized;
+    }
     const regime = demandRegimeFor(normalized, snapshots);
     normalized.regime = regime;
     const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
@@ -705,18 +787,19 @@
       `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
       `- Today target: ${Number(state.todayTarget || 0)}`,
       `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
+      `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
       '',
       '## Demand Snapshots',
       '',
-      '| Time | Total | Supplement | Regime | Top Publishers |',
-      '| --- | --- | --- | --- | --- |',
+      '| Time | Total | Supplement | Regime | Anomaly | Top Publishers |',
+      '| --- | --- | --- | --- | --- | --- |',
       ...demandSnapshots.slice(0, 20).map(item => {
         const top = Object.entries(item.publisherCounts || {})
           .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
           .slice(0, 5)
           .map(([name, count]) => `${name}:${count}`)
           .join(', ');
-        return `| ${formatBeijingDateTime(item.timestamp)} | ${Number(item.totalSeeking || 0)} | ${Number(item.supplementCount || 0)} | ${item.regime || ''} | ${top.replace(/\|/g, '\\|')} |`;
+        return `| ${formatBeijingDateTime(item.timestamp)} | ${Number(item.totalSeeking || 0)} | ${Number(item.supplementCount || 0)} | ${item.regime || ''} | ${item.demandAnomaly ? item.anomalyType || 'yes' : ''} | ${top.replace(/\|/g, '\\|')} |`;
       }),
       '',
       '## Recent Logs',
@@ -1093,10 +1176,13 @@
       if (targetSessionSize <= 0) return { ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' };
 
       for (const listUrl of opts.watcherListUrls) {
+        const pickedListUrl = randomizeAssistListUrl(listUrl);
+        stateForTargets.lastPickedListUrl = pickedListUrl;
+        await saveWatcherState(stateForTargets);
         await incrementDaily('checked');
-        const parsed = await parseListUrl(listUrl);
+        const parsed = await parseListUrl(pickedListUrl);
         if (parsed.cfChallenge) {
-          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, listUrl);
+          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
           return { ok: false, reason: 'cf_challenge' };
         }
         await resetCfChallengeStreak();
