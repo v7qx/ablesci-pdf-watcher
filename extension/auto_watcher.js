@@ -9,8 +9,10 @@
   const MAX_LOGS = 200;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const REPORT_DIR = 'ablesci-watcher-reports';
-  const ASSIST_RANDOM_PAGE_MIN = 3;
-  const ASSIST_RANDOM_PAGE_MAX = 100;
+  const ASSIST_RANDOM_PAGE_RANGES = {
+    elsevier: { min: 3, max: 100 },
+    rsc: { min: 1, max: 5 }
+  };
   const ADVANCED_MODEL_MIN_DAYS = 2;
   const FALLBACK_PUBLISHER_WEIGHTS = {
     Elsevier: 2.8,
@@ -20,6 +22,7 @@
     Nature: 1.0,
     Oxford: 0.9,
     IEEE: 0.7,
+    RSC: 0.65,
     Unknown: 0.4
   };
   const SESSION_MODES = {
@@ -93,10 +96,10 @@
       const u = new URL(url);
       const isAblesci = /(^|\.)ablesci\.com$/i.test(u.hostname);
       const isAssistList = /\/assist\/index$/i.test(u.pathname);
-      const isElsevierWaiting = u.searchParams.get('status') === 'waiting' &&
-        /elsevier/i.test(u.searchParams.get('publisher') || '');
-      if (isAblesci && isAssistList && isElsevierWaiting) {
-        u.searchParams.set('page', String(randomIntInclusive(ASSIST_RANDOM_PAGE_MIN, ASSIST_RANDOM_PAGE_MAX)));
+      const publisher = String(u.searchParams.get('publisher') || '').toLowerCase();
+      const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
+      if (isAblesci && isAssistList && u.searchParams.get('status') === 'waiting' && range) {
+        u.searchParams.set('page', String(randomIntInclusive(range.min, range.max)));
         return u.toString();
       }
     } catch (_) {
@@ -494,6 +497,7 @@
     if (/nature/i.test(s)) return 'Nature';
     if (/oxford/i.test(s)) return 'Oxford';
     if (/ieee/i.test(s)) return 'IEEE';
+    if (/\brsc\b|royal\s+society\s+of\s+chemistry|pubs\.rsc\.org/i.test(s)) return 'RSC';
     return s.split(/[\/|,，;；\s]+/).filter(Boolean)[0] || 'Unknown';
   }
 
@@ -850,10 +854,14 @@
   function orderCandidatesForRun(candidates, state) {
     const list = Array.isArray(candidates) ? candidates.slice() : [];
     if (state?.schedulerModelMode !== 'advanced') return list;
-    return list
-      .map((candidate, index) => ({ candidate, index, score: candidateModelScore(candidate, state) }))
-      .sort((a, b) => (b.score - a.score) || (a.index - b.index))
-      .map(item => item.candidate);
+    const scored = list.map(candidate => candidateModelScore(candidate, state));
+    const median = medianNumber(scored) ?? 0;
+    const preferred = [];
+    const fallback = [];
+    list.forEach((candidate, index) => {
+      (scored[index] >= median ? preferred : fallback).push(candidate);
+    });
+    return preferred.concat(fallback);
   }
 
   function parseAssistListPage() {
@@ -962,7 +970,14 @@
     return { ok: true };
   }
 
-  async function isHighRiskJournal(journalName) {
+  function isRscPayload(payload) {
+    let host = '';
+    try { host = new URL(payload?.pdfUrl || 'https://invalid.local').hostname; } catch (_) {}
+    return /(^|\.)pubs\.rsc\.org$/i.test(host) ||
+      /\brsc\b|royal\s+society\s+of\s+chemistry/i.test([payload?.journalName, payload?.publisherName, payload?.pdfUrl].join(' '));
+  }
+
+  async function isHighRiskJournal(journalName, payload = null) {
     const journal = normalizeText(journalName);
     if (!journal) return false;
     const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
@@ -971,6 +986,7 @@
     if (!item) return false;
     const failCount = Number(item.failCount || 0);
     const successCount = Number(item.successCount || 0);
+    if (isRscPayload(payload)) return failCount >= 1 && failCount > successCount;
     return failCount >= 2 && failCount > successCount;
   }
 
@@ -1089,7 +1105,7 @@
     payload.triggeredBy = 'auto_watcher';
     const key = getProcessedKey(candidate, payload);
 
-    if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName)) {
+    if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
       await closeTabQuietly(detailTabId);
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await incrementDaily('skipped');

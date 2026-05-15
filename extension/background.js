@@ -21,7 +21,8 @@ const DEFAULT_OPTIONS = {
   watcherMaxIntervalMinutes: 60,
   watcherMaxCandidatesPerRun: 1,
   watcherListUrls: [
-    'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page=3'
+    'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page=3',
+    'https://www.ablesci.com/assist/index?status=waiting&publisher=rsc'
   ],
   watcherRequireDoi: true,
   watcherSkipReported: true,
@@ -178,7 +179,27 @@ function normalizeWatcherListUrls(value) {
         return false;
       }
     });
-  return urls.length ? urls : DEFAULT_OPTIONS.watcherListUrls.slice();
+  const next = urls.length ? urls : DEFAULT_OPTIONS.watcherListUrls.slice();
+  const hasRsc = next.some(url => {
+    try {
+      const u = new URL(url);
+      return /rsc/i.test(u.searchParams.get('publisher') || '');
+    } catch (_) {
+      return false;
+    }
+  });
+  const hasLegacyElsevier = next.some(url => {
+    try {
+      const u = new URL(url);
+      return /elsevier/i.test(u.searchParams.get('publisher') || '') && u.searchParams.get('status') === 'waiting';
+    } catch (_) {
+      return false;
+    }
+  });
+  if (!hasRsc && hasLegacyElsevier) {
+    next.push('https://www.ablesci.com/assist/index?status=waiting&publisher=rsc');
+  }
+  return next;
 }
 
 function formatBytes(size) {
