@@ -219,6 +219,20 @@
     .toggle input:checked + span::before { transform: translateX(18px); }
     .toggle input:focus-visible + span { box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
 
+    .toggle-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .toggle-option .toggle-text {
+      line-height: 1;
+    }
+
     .range {
       display: grid;
       grid-template-columns: minmax(72px, 1fr) minmax(72px, auto) auto minmax(72px, 1fr) minmax(72px, auto) auto;
@@ -248,6 +262,38 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(76px, 1fr));
+      gap: 10px;
+      width: 100%;
+    }
+
+    .metric-field {
+      min-width: 0;
+    }
+
+    .metric-field label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .metric-field input {
+      text-align: right;
+    }
+
+    .setting-hint {
+      width: 100%;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
     }
 
     input[type="color"] {
@@ -351,6 +397,7 @@
 
       .range { grid-template-columns: minmax(0, 1fr) minmax(72px, auto) auto; }
       .range > :nth-child(4) { grid-column: 1; }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
 </head>
@@ -656,13 +703,28 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>目标与会话</strong>
-          <span>月目标用于计算 slow / normal / fast；每会话最多 1–4 个候选，但仍受串行队列和每日上限限制。</span>
+          <span>按月目标推算当天应助量，再根据进度和需求量切换 slow / normal / fast。</span>
         </div>
-        <div class="setting-control">
-          <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="500" aria-label="月目标">
-          <input id="watcherMinDailyTarget" type="number" min="0" max="500" step="1" value="5" aria-label="最小日目标">
-          <input id="watcherMaxDailyTarget" type="number" min="1" max="500" step="1" value="40" aria-label="最大日目标">
-          <input id="watcherMaxPerSession" type="number" min="1" max="4" step="1" value="1" aria-label="每会话最多候选">
+        <div class="setting-control setting-control-wide">
+          <div class="metric-grid">
+            <div class="metric-field">
+              <label for="watcherMonthlyTarget">月目标</label>
+              <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="500" aria-label="月目标">
+            </div>
+            <div class="metric-field">
+              <label for="watcherMinDailyTarget">最小日目标</label>
+              <input id="watcherMinDailyTarget" type="number" min="0" max="500" step="1" value="5" aria-label="最小日目标">
+            </div>
+            <div class="metric-field">
+              <label for="watcherMaxDailyTarget">最大日目标</label>
+              <input id="watcherMaxDailyTarget" type="number" min="1" max="500" step="1" value="40" aria-label="最大日目标">
+            </div>
+            <div class="metric-field">
+              <label for="watcherMaxPerSession">会话候选</label>
+              <input id="watcherMaxPerSession" type="number" min="1" max="4" step="1" value="1" aria-label="每会话最多候选">
+            </div>
+          </div>
+          <div class="setting-hint">会话候选只是单轮上限，实际仍受每日上限、当前串行队列和下载/上传状态限制。</div>
         </div>
       </div>
       <div class="setting-row">
@@ -689,25 +751,25 @@
           <span>跳过置顶、举报、驳回、补充材料和明显异常文本；详情页会二次确认 DOI。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle" title="只处理有 DOI 的求助">
-            <input id="watcherRequireDoi" type="checkbox">
-            <span></span>
+          <label class="toggle-option" title="只处理有 DOI 的求助">
+            <span class="toggle"><input id="watcherRequireDoi" type="checkbox"><span></span></span>
+            <span class="toggle-text">有 DOI</span>
           </label>
-          <label class="toggle" title="跳过举报">
-            <input id="watcherSkipReported" type="checkbox">
-            <span></span>
+          <label class="toggle-option" title="跳过举报">
+            <span class="toggle"><input id="watcherSkipReported" type="checkbox"><span></span></span>
+            <span class="toggle-text">举报</span>
           </label>
-          <label class="toggle" title="跳过驳回">
-            <input id="watcherSkipRejected" type="checkbox">
-            <span></span>
+          <label class="toggle-option" title="跳过驳回">
+            <span class="toggle"><input id="watcherSkipRejected" type="checkbox"><span></span></span>
+            <span class="toggle-text">驳回</span>
           </label>
-          <label class="toggle" title="跳过补充材料">
-            <input id="watcherSkipSupplement" type="checkbox">
-            <span></span>
+          <label class="toggle-option" title="跳过补充材料">
+            <span class="toggle"><input id="watcherSkipSupplement" type="checkbox"><span></span></span>
+            <span class="toggle-text">补充材料</span>
           </label>
-          <label class="toggle" title="跳过异常文本">
-            <input id="watcherSkipRiskText" type="checkbox">
-            <span></span>
+          <label class="toggle-option" title="跳过异常文本">
+            <span class="toggle"><input id="watcherSkipRiskText" type="checkbox"><span></span></span>
+            <span class="toggle-text">异常文本</span>
           </label>
         </div>
       </div>
