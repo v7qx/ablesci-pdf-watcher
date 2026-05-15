@@ -619,7 +619,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>观察时间</strong>
-          <span>每行一个北京时间 HH:mm。错过固定时间时，会按兜底间隔在可运行窗口补采样。</span>
+          <span>每行一个北京时间 HH:mm。固定时间用于对齐日内采样点，高频采样会按频率补充。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherObserveTimes" spellcheck="false"></textarea>
@@ -627,8 +627,17 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>观察频率</strong>
+          <span>1–60 分钟，默认 5 分钟。用于类 K 线高频采样 totalSeeking 和 publisherCounts。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherObserveIntervalMinutes" type="number" min="1" max="60" step="1" value="5" aria-label="观察频率分钟">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>兜底观察间隔</strong>
-          <span>30–720 分钟；用于没有命中固定观察时间的日期或时间段。</span>
+          <span>30–720 分钟；用于浏览器长时间休眠、错过采样后恢复时补采样。</span>
         </div>
         <div class="setting-control">
           <input id="watcherObserveFallbackMinutes" type="number" min="30" max="720" step="10" value="180" aria-label="兜底观察间隔分钟">

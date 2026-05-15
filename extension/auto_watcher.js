@@ -91,6 +91,7 @@
       watcherObserveOnly: opts.watcherObserveOnly === true,
       watcherDemandObserveUrl: normalizeListUrls([opts.watcherDemandObserveUrl], deps.defaultListUrls)[0],
       watcherObserveTimes: normalizeObserveTimes(opts.watcherObserveTimes),
+      watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
       watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
       watcherWorkdays: normalizeWorkdays(opts.watcherWorkdays),
       watcherWorkWindows: normalizeWorkWindows(opts.watcherWorkWindows),
@@ -206,7 +207,9 @@
       const outsideDelay = nextWorkDelayMinutes(opts);
       if (outsideDelay !== null) return outsideDelay;
       const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-      return logNormalMinutes(mode.median, mode.min, mode.max);
+      const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
+      const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
+      return Math.max(1, Math.min(sessionDelay, observeDelay));
     }
     const base = clampNumber(opts.watcherIntervalMinutes, 30, 10, 60);
     const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60);
@@ -419,6 +422,8 @@
     });
     if (dueSlot) return { due: true, slot: dueSlot, reason: 'slot' };
     const last = state.lastDemandSnapshotAt ? new Date(state.lastDemandSnapshotAt).getTime() : 0;
+    const intervalMs = opts.watcherObserveIntervalMinutes * 60 * 1000;
+    if (!last || Date.now() - last >= intervalMs) return { due: true, slot: 'interval', reason: 'interval' };
     const fallbackMs = opts.watcherObserveFallbackMinutes * 60 * 1000;
     if (!last || Date.now() - last >= fallbackMs) return { due: true, slot: 'fallback', reason: 'fallback' };
     return { due: false };
@@ -1011,12 +1016,39 @@
 
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === 'ablesciRunAutoWatcherNow') {
-        runAutoWatcherOnce('manual').then(sendResponse);
+        runAutoWatcherOnce('manual')
+          .then(sendResponse)
+          .catch(err => sendResponse({ ok: false, reason: err?.message || String(err) }));
         return true;
       }
       if (msg?.type === 'ablesciObserveDemandNow') {
-        runAutoWatcherOnce('manual-observe').then(sendResponse);
-        return true;
+        if (autoWatcherRunning) {
+          sendResponse({ ok: false, reason: 'already_running' });
+          return false;
+        }
+        getWatcherState()
+          .then(state => {
+            state.lastManualObserveStartedAt = new Date().toISOString();
+            state.lastManualObserveStatus = 'running';
+            return saveWatcherState(state);
+          })
+          .then(() => runAutoWatcherOnce('manual-observe'))
+          .then(async result => {
+            const state = await getWatcherState();
+            state.lastManualObserveFinishedAt = new Date().toISOString();
+            state.lastManualObserveStatus = result.ok ? 'ok' : 'failed';
+            state.lastManualObserveReason = result.reason || '';
+            await saveWatcherState(state);
+          })
+          .catch(async err => {
+            const state = await getWatcherState();
+            state.lastManualObserveFinishedAt = new Date().toISOString();
+            state.lastManualObserveStatus = 'failed';
+            state.lastManualObserveReason = err?.message || String(err);
+            await saveWatcherState(state);
+          });
+        sendResponse({ ok: true, reason: 'demand_observe_started' });
+        return false;
       }
       if (msg?.type === 'ablesciTestWatcherNotification') {
         notifyWatcherNeedsAttention('这是一条低频值守测试提醒，不会执行检查。')

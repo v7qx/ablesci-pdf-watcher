@@ -50,6 +50,7 @@ const DEFAULT_OPTIONS = {
   watcherObserveOnly: false,
   watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
   watcherObserveTimes: '09:30\n11:30\n14:00\n16:30\n18:00',
+  watcherObserveIntervalMinutes: 5,
   watcherObserveFallbackMinutes: 180,
   watcherWorkdays: '1,2,3,4,5',
   watcherWorkWindows: '09:00-12:00\n13:30-18:00',
@@ -150,6 +151,7 @@ async function loadOptions() {
     watcherObserveOnly: opts.watcherObserveOnly === true,
     watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
     watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
+    watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
     watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
     watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
     watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
@@ -233,6 +235,7 @@ async function save() {
   opts.watcherObserveOnly = opts.watcherObserveOnly === true;
   opts.watcherDemandObserveUrl = normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl;
   opts.watcherObserveTimes = String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim();
+  opts.watcherObserveIntervalMinutes = clampNumber(opts.watcherObserveIntervalMinutes, DEFAULT_OPTIONS.watcherObserveIntervalMinutes, 1, 60);
   opts.watcherObserveFallbackMinutes = clampNumber(opts.watcherObserveFallbackMinutes, DEFAULT_OPTIONS.watcherObserveFallbackMinutes, 30, 720);
   opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
   opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
