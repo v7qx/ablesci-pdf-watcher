@@ -9,6 +9,17 @@
   const MAX_LOGS = 200;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const REPORT_DIR = 'ablesci-watcher-reports';
+  const ADVANCED_MODEL_MIN_DAYS = 2;
+  const FALLBACK_PUBLISHER_WEIGHTS = {
+    Elsevier: 2.8,
+    ScienceDirect: 2.8,
+    Wiley: 1.2,
+    Springer: 1.1,
+    Nature: 1.0,
+    Oxford: 0.9,
+    IEEE: 0.7,
+    Unknown: 0.4
+  };
   const SESSION_MODES = {
     slow: { median: 28, min: 15, max: 60, sizeWeights: [0.15, 0.45, 0.30, 0.10, 0.00] },
     normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.40, 0.25, 0.10] },
@@ -88,7 +99,8 @@
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
       watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
-      watcherObserveOnly: opts.watcherObserveOnly === true,
+      watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
+      watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
       watcherDemandObserveUrl: normalizeListUrls([opts.watcherDemandObserveUrl], deps.defaultListUrls)[0],
       watcherObserveTimes: normalizeObserveTimes(opts.watcherObserveTimes),
       watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
@@ -356,15 +368,32 @@
     const day = Number(todayKey().slice(8, 10));
     const days = daysInCurrentMonth();
     const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
+    const model = state.publisherModel || { ready: false };
+    const modelMode = model.ready ? 'advanced' : 'simple';
     const expectedDone = Math.round(monthlyTarget * Math.min(1, day / days));
     const lag = expectedDone - done;
     let speedMode = 'normal';
     if (lag > Math.max(10, monthlyTarget * 0.08) || demandRegime === 'very_busy') speedMode = 'fast';
     if (lag < -Math.max(10, monthlyTarget * 0.05) || demandRegime === 'quiet') speedMode = 'slow';
-    if (monthlyTarget <= 0) return { monthKey: monthKey(), monthDone: done, expectedDone: 0, lag: 0, speedMode: 'slow', todayTarget: 0 };
-    const rawTodayTarget = Math.ceil(Math.max(0, monthlyTarget - done) / Math.max(1, days - day + 1));
+    if (monthlyTarget <= 0) {
+      return {
+        monthKey: monthKey(),
+        monthDone: done,
+        expectedDone: 0,
+        lag: 0,
+        speedMode: 'slow',
+        todayTarget: 0,
+        schedulerModelMode: 'simple',
+        demandFactor: 1,
+        trendFactor: 1
+      };
+    }
+    const baseTodayTarget = Math.max(0, monthlyTarget - done) / Math.max(1, days - day + 1);
+    const demandFactor = modelMode === 'advanced' ? demandFactorByRegime(demandRegime) : 1;
+    const trendFactor = modelMode === 'advanced' ? trendFactorFromModel(model) : 1;
+    const rawTodayTarget = Math.ceil(baseTodayTarget * demandFactor * trendFactor);
     const todayTarget = clampNumber(rawTodayTarget, opts.watcherMinDailyTarget, opts.watcherMinDailyTarget, opts.watcherMaxDailyTarget);
-    return { monthKey: monthKey(), monthDone: done, expectedDone, lag, speedMode, todayTarget };
+    return { monthKey: monthKey(), monthDone: done, expectedDone, lag, speedMode, todayTarget, schedulerModelMode: modelMode, demandFactor, trendFactor };
   }
 
   async function getDemandSnapshots() {
@@ -387,6 +416,106 @@
     return 'very_busy';
   }
 
+  function demandSnapshotDays(snapshots) {
+    return new Set((snapshots || [])
+      .map(item => item.dayKey || formatBeijingDateTime(item.timestamp, true))
+      .filter(Boolean));
+  }
+
+  function publisherAlias(name) {
+    const s = normalizeText(name);
+    if (!s) return 'Unknown';
+    if (/elsevier|science\s*direct/i.test(s)) return 'Elsevier';
+    if (/wiley/i.test(s)) return 'Wiley';
+    if (/springer/i.test(s)) return 'Springer';
+    if (/nature/i.test(s)) return 'Nature';
+    if (/oxford/i.test(s)) return 'Oxford';
+    if (/ieee/i.test(s)) return 'IEEE';
+    return s.split(/[\/|,，;；\s]+/).filter(Boolean)[0] || 'Unknown';
+  }
+
+  function aggregatePublisherCounts(counts) {
+    const out = {};
+    for (const [name, count] of Object.entries(counts || {})) {
+      const alias = publisherAlias(name);
+      out[alias] = (out[alias] || 0) + Math.max(0, Number(count) || 0);
+    }
+    return out;
+  }
+
+  function buildFallbackPublisherModel(snapshot) {
+    const counts = aggregatePublisherCounts(snapshot?.publisherCounts);
+    const entries = Object.entries(counts).filter(([, count]) => count > 0);
+    const total = entries.reduce((sum, [, count]) => sum + count, 0);
+    if (!entries.length || total <= 0) return { ready: false, source: 'empty', days: 0, publishers: {} };
+    const publishers = {};
+    for (const [name, count] of entries) {
+      const base = FALLBACK_PUBLISHER_WEIGHTS[name] || FALLBACK_PUBLISHER_WEIGHTS.Unknown;
+      const share = count / total;
+      publishers[name] = {
+        count,
+        pressure: Number(share.toFixed(4)),
+        weight: Number((base * (0.8 + share * 0.6)).toFixed(3)),
+        successRate: Number(Math.min(0.95, 0.45 + base * 0.08).toFixed(3))
+      };
+    }
+    return { ready: false, source: 'fallback_current_snapshot', days: 1, publishers };
+  }
+
+  function buildAdvancedPublisherModel(snapshots) {
+    const clean = (snapshots || []).filter(item => item && item.publisherCounts);
+    const days = demandSnapshotDays(clean);
+    const latest = clean[0] || null;
+    if (days.size < ADVANCED_MODEL_MIN_DAYS) return buildFallbackPublisherModel(latest);
+    const previous = clean.find(item => item.dayKey && item.dayKey !== latest?.dayKey) || clean[1] || null;
+    const latestCounts = aggregatePublisherCounts(latest?.publisherCounts);
+    const previousCounts = aggregatePublisherCounts(previous?.publisherCounts);
+    const latestTotal = Math.max(1, Object.values(latestCounts).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0));
+    const publishers = {};
+    for (const [name, rawCount] of Object.entries(latestCounts)) {
+      const count = Math.max(0, Number(rawCount) || 0);
+      const previousCount = Math.max(0, Number(previousCounts[name] || 0) || 0);
+      const delta = count - previousCount;
+      const pressure = count / latestTotal;
+      const trend = Math.max(-0.4, Math.min(0.6, delta / Math.max(1, previousCount || count)));
+      const base = FALLBACK_PUBLISHER_WEIGHTS[name] || FALLBACK_PUBLISHER_WEIGHTS.Unknown;
+      publishers[name] = {
+        count,
+        previousCount,
+        delta,
+        pressure: Number(pressure.toFixed(4)),
+        trend: Number(trend.toFixed(4)),
+        weight: Number((base * (0.85 + pressure * 0.8 + trend * 0.35)).toFixed(3)),
+        successRate: Number(Math.min(0.97, 0.5 + base * 0.07 + Math.max(0, trend) * 0.12).toFixed(3))
+      };
+    }
+    return { ready: true, source: 'advanced_2day_delta', days: days.size, publishers };
+  }
+
+  function demandFactorByRegime(regime) {
+    if (regime === 'quiet') return 0.65;
+    if (regime === 'busy') return 1.2;
+    if (regime === 'very_busy') return 1.4;
+    return 1;
+  }
+
+  function trendFactorFromModel(model) {
+    const values = Object.values(model?.publishers || {});
+    if (!values.length) return 1;
+    const pressure = values.reduce((sum, item) => sum + Math.max(0, Number(item.pressure) || 0), 0) / values.length;
+    const trend = values.reduce((sum, item) => sum + Number(item.trend || 0), 0) / values.length;
+    return Math.max(0.75, Math.min(1.35, 1 + pressure * 0.4 + trend * 0.2));
+  }
+
+  async function refreshPublisherModelFromSnapshots(state) {
+    const snapshots = await getDemandSnapshots();
+    if (!snapshots.length) return state;
+    const model = buildAdvancedPublisherModel(snapshots);
+    state.publisherModel = model;
+    state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
+    return state;
+  }
+
   async function recordDemandSnapshot(snapshot) {
     if (!snapshot || !Number.isFinite(Number(snapshot.totalSeeking))) return null;
     const snapshots = await getDemandSnapshots();
@@ -401,9 +530,12 @@
     const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
     await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
     const state = await getWatcherState();
+    const model = buildAdvancedPublisherModel(nextSnapshots);
     state.lastDemandSnapshotAt = normalized.timestamp;
     state.lastDemandSnapshot = normalized;
     state.demandRegime = regime;
+    state.publisherModel = model;
+    state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
     const target = calculateTargetState(state, normalizeOptions(await deps.getOptions()), regime);
     Object.assign(state, target);
     await saveWatcherState(state);
@@ -568,6 +700,9 @@
       `- Notified: ${Number(daily.notified || 0)}`,
       `- Speed mode: ${state.speedMode || 'normal'}`,
       `- Demand regime: ${state.demandRegime || 'normal'}`,
+      `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
+      `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
+      `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
       `- Today target: ${Number(state.todayTarget || 0)}`,
       `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
       '',
@@ -613,6 +748,29 @@
     if (!key) return false;
     const state = await getWatcherState();
     return !!state.processed?.[key];
+  }
+
+  function candidatePublisherName(candidate) {
+    return publisherAlias(candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
+  }
+
+  function candidateModelScore(candidate, state) {
+    const model = state?.publisherModel || {};
+    const publisher = candidatePublisherName(candidate);
+    const item = model.publishers?.[publisher] || model.publishers?.Unknown || {};
+    const doiBonus = candidate?.hasDoi ? 0.25 : 0;
+    const demandWeight = Number(item.weight || 0.4);
+    const successRate = Number(item.successRate || 0.5);
+    return demandWeight * successRate + doiBonus;
+  }
+
+  function orderCandidatesForRun(candidates, state) {
+    const list = Array.isArray(candidates) ? candidates.slice() : [];
+    if (state?.schedulerModelMode !== 'advanced') return list;
+    return list
+      .map((candidate, index) => ({ candidate, index, score: candidateModelScore(candidate, state) }))
+      .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+      .map(item => item.candidate);
   }
 
   function parseAssistListPage() {
@@ -914,11 +1072,12 @@
       if (trigger === 'manual-observe') {
         return { ok: !!observeResult?.snapshot, reason: observeResult?.snapshot ? 'demand_observed' : 'demand_observe_skipped' };
       }
-      if (opts.watcherObserveOnly) {
+      if (opts.watcherObserveMode === 'observe_only') {
         return { ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' };
       }
 
       const stateForTargets = await getWatcherState();
+      if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
       const targetState = calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
       Object.assign(stateForTargets, targetState);
       await saveWatcherState(stateForTargets);
@@ -942,7 +1101,8 @@
         }
         await resetCfChallengeStreak();
 
-        for (const candidate of parsed.candidates || []) {
+        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets);
+        for (const candidate of candidates) {
           if (handledCount >= targetSessionSize) return { ok: true, reason: 'session_target_reached' };
           const listAllowed = isListCandidateAllowed(candidate, opts);
           if (!listAllowed.ok) continue;

@@ -594,17 +594,17 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>量化调度</strong>
-          <span>按需求观察、工作时间、月目标和随机会话间隔安排下一次运行；观察模式只采集列表数据。</span>
+          <span>按需求观察、工作时间、月目标和随机会话间隔安排下一次运行；默认边观察边按目标应助。</span>
         </div>
         <div class="setting-control">
           <label class="toggle" title="启用量化调度">
             <input id="watcherQuantSchedulerEnabled" type="checkbox">
             <span></span>
           </label>
-          <label class="toggle" title="只观察，不打开详情页、不下载">
-            <input id="watcherObserveOnly" type="checkbox">
-            <span></span>
-          </label>
+          <select id="watcherObserveMode" aria-label="观察模式">
+            <option value="assist">应助+观察</option>
+            <option value="observe_only">纯观察</option>
+          </select>
         </div>
       </div>
       <div class="setting-row">

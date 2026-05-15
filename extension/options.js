@@ -48,6 +48,7 @@ const DEFAULT_OPTIONS = {
   watcherCfPauseThreshold: 3,
   watcherQuantSchedulerEnabled: true,
   watcherObserveOnly: false,
+  watcherObserveMode: 'assist',
   watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
   watcherObserveTimes: '09:30\n11:30\n14:00\n16:30\n18:00',
   watcherObserveIntervalMinutes: 5,
@@ -148,7 +149,8 @@ async function loadOptions() {
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
     watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
-    watcherObserveOnly: opts.watcherObserveOnly === true,
+    watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
+    watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
     watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
     watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
     watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
@@ -232,7 +234,8 @@ async function save() {
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherQuantSchedulerEnabled !== false;
-  opts.watcherObserveOnly = opts.watcherObserveOnly === true;
+  opts.watcherObserveMode = opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist';
+  opts.watcherObserveOnly = opts.watcherObserveMode === 'observe_only';
   opts.watcherDemandObserveUrl = normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl;
   opts.watcherObserveTimes = String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim();
   opts.watcherObserveIntervalMinutes = clampNumber(opts.watcherObserveIntervalMinutes, DEFAULT_OPTIONS.watcherObserveIntervalMinutes, 1, 60);
