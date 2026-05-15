@@ -55,7 +55,10 @@
       watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
       watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
+      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+      watcherReportDir: String(opts.watcherReportDir || '').trim(),
+      watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+      watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
     };
   }
 
@@ -76,8 +79,22 @@
     await chrome.alarms.create(ALARM_NAME, { delayInMinutes: randomIntervalMinutes(opts) });
   }
 
-  function notifyWatcherNeedsAttention(reason, url) {
+  async function notifyWatcherNeedsAttention(reason, url) {
     const message = normalizeText(reason || '低频值守需要人工处理。').slice(0, 160);
+    const opts = normalizeOptions(await deps.getOptions());
+    if (opts.watcherNotifyMode === 'native') {
+      try {
+        await deps.sendNativeMessage(opts.nativeHostName, {
+          action: 'notify_user',
+          title: 'Ablesci PDF Watcher',
+          message
+        });
+        if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
+        return;
+      } catch (err) {
+        console.warn('[Ablesci Auto Watcher] native notify failed, fallback to browser notification', err);
+      }
+    }
     try {
       chrome.notifications.create({
         type: 'basic',
@@ -98,6 +115,38 @@
 
   async function saveWatcherState(state) {
     await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+  }
+
+  async function resetCfChallengeStreak() {
+    const state = await getWatcherState();
+    if (!state.cfChallengeStreak && !state.pausedByCfChallenge) return;
+    state.cfChallengeStreak = 0;
+    state.pausedByCfChallenge = false;
+    await saveWatcherState(state);
+  }
+
+  async function recordCfChallenge(opts, listUrl) {
+    const state = await getWatcherState();
+    const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
+    state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
+    const reached = state.cfChallengeStreak >= threshold;
+    if (reached) {
+      state.pausedByCfChallenge = true;
+      await chrome.storage.local.set({ watcherEnabled: false });
+      await chrome.alarms.clear(ALARM_NAME);
+    }
+    await saveWatcherState(state);
+    await incrementDaily('failed');
+    await appendWatcherLog({
+      detailUrl: listUrl,
+      status: reached ? 'paused' : 'blocked',
+      reason: reached ? `cf_challenge_${state.cfChallengeStreak}_paused` : `cf_challenge_${state.cfChallengeStreak}`
+    });
+    if (reached) {
+      await notifyWatcherNeedsAttention(`连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`, listUrl);
+      await incrementDaily('notified');
+    }
+    return reached;
   }
 
   async function updateProcessed(key, status, reason) {
@@ -151,11 +200,24 @@
     return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
   }
 
-  async function writeReportFile(filename, content, mime) {
+  async function writeReportFile(filename, content, mime, opts) {
+    if (opts.watcherDailyReportEnabled && deps.sendNativeMessage) {
+      try {
+        await deps.sendNativeMessage(opts.nativeHostName, {
+          action: 'write_text_file',
+          dir: opts.watcherReportDir || '',
+          filename,
+          content
+        });
+        return;
+      } catch (err) {
+        console.warn('[Ablesci Auto Watcher] native report write failed, fallback to downloads', err);
+      }
+    }
     try {
       await chrome.downloads.download({
         url: dataUrl(content, mime),
-        filename,
+        filename: `${REPORT_DIR}/${filename}`,
         conflictAction: 'overwrite',
         saveAs: false
       });
@@ -217,8 +279,8 @@
       ''
     ].join('\n');
 
-    await writeReportFile(`${REPORT_DIR}/${date}.csv`, csv, 'text/csv');
-    await writeReportFile(`${REPORT_DIR}/${date}.md`, md, 'text/markdown');
+    await writeReportFile(`${date}.csv`, csv, 'text/csv', opts);
+    await writeReportFile(`${date}.md`, md, 'text/markdown', opts);
   }
 
   function getProcessedKey(candidate, payload) {
@@ -452,7 +514,7 @@
     }
 
     if (!opts.watcherAutoDownload) {
-      notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
+      await notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
       await incrementDaily('notified');
       await updateProcessed(key, 'skipped', 'manual_detail_opened');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'manual_detail_opened' });
@@ -485,7 +547,7 @@
       status: payload.downloadOnly ? 'download_only' : 'queued_upload',
       reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
     });
-    notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
+    await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
     await incrementDaily('notified');
     return true;
   }
@@ -505,12 +567,10 @@
         await incrementDaily('checked');
         const parsed = await parseListUrl(listUrl);
         if (parsed.cfChallenge) {
-          if (opts.watcherStopOnCfChallenge) notifyWatcherNeedsAttention('Ablesci 出现验证页，需要手动处理。', listUrl);
-          await incrementDaily('notified');
-          await incrementDaily('failed');
-          await appendWatcherLog({ detailUrl: listUrl, status: 'blocked', reason: 'cf_challenge' });
+          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, listUrl);
           return { ok: false, reason: 'cf_challenge' };
         }
+        await resetCfChallengeStreak();
 
         for (const candidate of parsed.candidates || []) {
           const listAllowed = isListCandidateAllowed(candidate, opts);

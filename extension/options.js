@@ -42,7 +42,10 @@ const DEFAULT_OPTIONS = {
   watcherDailyLimit: 10,
   watcherStopOnCfChallenge: true,
   watcherSkipHighRiskJournal: true,
-  watcherDailyReportEnabled: true
+  watcherDailyReportEnabled: true,
+  watcherReportDir: '',
+  watcherNotifyMode: 'native',
+  watcherCfPauseThreshold: 3
 };
 
 const ids = Object.keys(DEFAULT_OPTIONS);
@@ -71,6 +74,17 @@ function normalizeSizeUnit(value) {
   return String(value || '').toUpperCase() === 'KB' ? 'KB' : 'MB';
 }
 
+function sanitizePathPart(s) {
+  return String(s || '')
+    .replace(/^[\\/]+/, '')
+    .replace(/\.\.+/g, '_')
+    .replace(/[<>:"|?*]+/g, '_')
+    .replace(/\\+/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function clampNumber(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -97,8 +111,8 @@ async function loadOptions() {
   const local = await chrome.storage.local.get(ids);
   const normalizeOptions = opts => ({
     ...opts,
-    downloadSubdir: '',
-    moveToDir: '',
+    downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
+    moveToDir: String(opts.moveToDir || '').trim(),
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
     minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
@@ -115,7 +129,10 @@ async function loadOptions() {
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
     watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
+    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+    watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
   });
   const missingLocal = ids.some(id => local[id] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -162,8 +179,8 @@ async function save() {
     opts[id] = node.type === 'checkbox' ? node.checked : node.value.trim();
   }
 
-  opts.downloadSubdir = '';
-  opts.moveToDir = '';
+  opts.downloadSubdir = sanitizePathPart(opts.downloadSubdir || '');
+  opts.moveToDir = String(opts.moveToDir || '').trim();
   opts.downloadMode = 'auto';
   opts.scienceDirectTabMode = 'silent_then_visible';
   opts.minAutoUploadMB = Number(opts.minAutoUploadMB);
@@ -183,6 +200,9 @@ async function save() {
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, 100);
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
+  opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
+  opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
+  opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
 
   try {
     validateOptions(opts);

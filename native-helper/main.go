@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -26,6 +27,11 @@ type Request struct {
 	Path      string            `json:"path"`
 	MoveToDir string            `json:"move_to_dir,omitempty"`
 	Delete    bool              `json:"delete,omitempty"`
+	Title     string            `json:"title,omitempty"`
+	Message   string            `json:"message,omitempty"`
+	Content   string            `json:"content,omitempty"`
+	Filename  string            `json:"filename,omitempty"`
+	Dir       string            `json:"dir,omitempty"`
 	CSRFParam string            `json:"csrf_param,omitempty"`
 	CSRFToken string            `json:"csrf_token,omitempty"`
 	AssistID  string            `json:"assist_id,omitempty"`
@@ -84,6 +90,10 @@ func run() error {
 		return handleUploadOSS(req)
 	case "delete_file":
 		return handleDeleteFile(req)
+	case "notify_user":
+		return handleNotifyUser(req)
+	case "write_text_file":
+		return handleWriteTextFile(req)
 	default:
 		return fmt.Errorf("unknown action: %s", req.Action)
 	}
@@ -178,6 +188,37 @@ func handleDeleteFile(req Request) error {
 	}
 
 	return writeResponse(Response{OK: true, Action: "delete_file", Path: path, Deleted: true})
+}
+
+func handleNotifyUser(req Request) error {
+	title := limitText(firstNonEmpty(req.Title, "Ablesci PDF Watcher"), 80)
+	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
+	if runtime.GOOS == "windows" {
+		script := `$title = $args[0]; $msg = $args[1]; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.BalloonTipTitle = $title; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000); Start-Sleep -Seconds 6; $n.Dispose()`
+		_ = exec.Command("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script, title, message).Start()
+		return writeResponse(Response{OK: true, Action: "notify_user"})
+	}
+	fmt.Fprint(os.Stderr, "\a")
+	return writeResponse(Response{OK: true, Action: "notify_user"})
+}
+
+func handleWriteTextFile(req Request) error {
+	filename := sanitizeReportFilename(req.Filename)
+	if filename == "" {
+		return errors.New("missing report filename")
+	}
+	dir, err := reportDir(req.Dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, []byte(req.Content), 0644); err != nil {
+		return err
+	}
+	return writeResponse(Response{OK: true, Action: "write_text_file", Path: path, Filename: filepath.Base(path), Size: int64(len(req.Content))})
 }
 
 func handleUploadOSS(req Request) error {
@@ -418,6 +459,46 @@ func moveFileToDir(src, targetDir string) (string, error) {
 		}
 	}
 	return dst, nil
+}
+
+func reportDir(dir string) (string, error) {
+	dir = strings.Trim(dir, "\" ")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, "Downloads", "ablesci-watcher-reports")
+	}
+	if runtime.GOOS == "windows" {
+		dir = strings.ReplaceAll(dir, "/", `\`)
+	}
+	if !filepath.IsAbs(dir) {
+		return "", errors.New("report dir must be an absolute path")
+	}
+	return filepath.Clean(dir), nil
+}
+
+func sanitizeReportFilename(name string) string {
+	name = strings.TrimSpace(filepath.Base(name))
+	name = strings.ReplaceAll(name, "\x00", "")
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext != ".csv" && ext != ".md" && ext != ".txt" {
+		return ""
+	}
+	if name == ext {
+		return ""
+	}
+	return name
+}
+
+func limitText(value string, max int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\x00", ""))
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max])
 }
 
 func uniquePath(p string) string {

@@ -507,6 +507,24 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>浏览器下载子目录</strong>
+          <span>相对浏览器默认下载目录，例如 AblesciPDF；留空则直接下载到默认目录。</span>
+        </div>
+        <div class="setting-control">
+          <input id="downloadSubdir" type="text" placeholder="AblesciPDF">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>PDF 移动目录</strong>
+          <span>可选。Native Helper 校验 PDF 前移动到这个绝对路径，用于避免默认下载目录堆积。</span>
+        </div>
+        <div class="setting-control">
+          <input id="moveToDir" type="text" placeholder="D:\AblesciPDF">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>求助链接当前窗口打开</strong>
           <span>开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。</span>
         </div>
@@ -655,19 +673,20 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>验证页处理</strong>
-          <span>遇到 Cloudflare 或真人验证时停止流程，只提醒手动处理。</span>
+          <span>遇到 Cloudflare 或真人验证时跳过本轮；连续达到阈值后暂停低频值守。</span>
         </div>
         <div class="setting-control">
           <label class="toggle" title="遇到验证页停止">
             <input id="watcherStopOnCfChallenge" type="checkbox">
             <span></span>
           </label>
+          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="3" aria-label="连续 CF 暂停阈值">
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>失败期刊与日报</strong>
-          <span>跳过本地记录近期多次失败的期刊，并生成每日 CSV / Markdown 统计。</span>
+          <strong>失败期刊、提醒与日报</strong>
+          <span>跳过近期多次失败的期刊；提醒优先走 Native Helper；日报由 Helper 直接写入本地。</span>
         </div>
         <div class="setting-control">
           <label class="toggle" title="跳过近期多次失败的期刊">
@@ -678,6 +697,19 @@
             <input id="watcherDailyReportEnabled" type="checkbox">
             <span></span>
           </label>
+          <select id="watcherNotifyMode" aria-label="提醒方式">
+            <option value="native">Native Helper</option>
+            <option value="browser">浏览器通知</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>日报目录</strong>
+          <span>可选绝对路径。留空时 Native Helper 写入用户 Downloads 下的 ablesci-watcher-reports。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="watcherReportDir" type="text" placeholder="D:\AblesciReports">
         </div>
       </div>
       <div class="setting-row">

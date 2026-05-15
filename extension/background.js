@@ -36,7 +36,10 @@ const DEFAULT_OPTIONS = {
   watcherDailyLimit: 10,
   watcherStopOnCfChallenge: true,
   watcherSkipHighRiskJournal: true,
-  watcherDailyReportEnabled: true
+  watcherDailyReportEnabled: true,
+  watcherReportDir: '',
+  watcherNotifyMode: 'native',
+  watcherCfPauseThreshold: 3
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
@@ -86,8 +89,8 @@ async function getOptions() {
   const local = await chrome.storage.local.get(keys);
   const normalizeOptions = opts => ({
     ...opts,
-    downloadSubdir: '',
-    moveToDir: '',
+    downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
+    moveToDir: String(opts.moveToDir || '').trim(),
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
     minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
@@ -100,7 +103,10 @@ async function getOptions() {
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
     watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false
+    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+    watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10)
   });
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
@@ -1418,6 +1424,7 @@ importScripts('auto_watcher.js');
 globalThis.initPrivateAutoWatcher({
   getOptions,
   enqueueUpload,
+  sendNativeMessage,
   hasActiveTask: () => !!activeTask || taskQueue.length > 0,
   urlHostPath,
   defaultListUrls: DEFAULT_OPTIONS.watcherListUrls.slice()
