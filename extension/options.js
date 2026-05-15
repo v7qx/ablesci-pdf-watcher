@@ -48,6 +48,8 @@ const DEFAULT_OPTIONS = {
   watcherNotifyMode: 'native',
   watcherCfPauseThreshold: 3,
   watcherQuantSchedulerEnabled: true,
+  watcherAdvancedSchedulerEnabled: false,
+  watcherRiskBudgetLimit: 10,
   watcherObserveOnly: false,
   watcherObserveMode: 'assist',
   watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
@@ -56,7 +58,7 @@ const DEFAULT_OPTIONS = {
   watcherObserveFallbackMinutes: 180,
   watcherWorkdays: '1,2,3,4,5',
   watcherWorkWindows: '09:00-12:00\n13:30-18:00',
-  watcherMonthlyTarget: 500,
+  watcherMonthlyTarget: 2000,
   watcherMinDailyTarget: 5,
   watcherMaxDailyTarget: 40,
   watcherMaxPerSession: 1
@@ -170,6 +172,8 @@ async function loadOptions() {
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
     watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
+    watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
+    watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
     watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
     watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
     watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
@@ -178,7 +182,7 @@ async function loadOptions() {
     watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
     watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
     watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
-    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 500, 0, 5000),
+    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
     watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
@@ -201,6 +205,31 @@ async function load() {
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
   }
+  await renderAdvancedWatcherStatus();
+}
+
+function setText(id, value) {
+  const node = el(id);
+  if (node) node.textContent = value;
+}
+
+async function renderAdvancedWatcherStatus() {
+  const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
+  const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+  const daily = state.daily?.[new Date().toISOString().slice(0, 10)] || {};
+  setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
+  setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
+  setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
+  setText('advancedError', String(Number(state.targetError || state.lag || 0)));
+  setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
+  setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
+  setText('advancedH1Delta', String(Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)));
+  setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
+  const top = (state.banditTopPublishers || [])
+    .slice(0, 5)
+    .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
+    .join(', ');
+  setText('advancedBanditTop', `Bandit top publishers: ${top || '-'}`);
 }
 
 function validateOptions(opts) {
@@ -255,6 +284,8 @@ async function save() {
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherQuantSchedulerEnabled !== false;
+  opts.watcherAdvancedSchedulerEnabled = opts.watcherAdvancedSchedulerEnabled === true;
+  opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
   opts.watcherObserveMode = opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist';
   opts.watcherObserveOnly = opts.watcherObserveMode === 'observe_only';
   opts.watcherDemandObserveUrl = normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl;
@@ -382,7 +413,19 @@ async function copyAutoWatcherConfig() {
     watcherOptions: watcherOptionSnapshot(opts),
     watcherStateSummary: {
       processedCount: Object.keys(processed).length,
-      today: state.daily?.[new Date().toISOString().slice(0, 10)] || null
+      today: state.daily?.[new Date().toISOString().slice(0, 10)] || null,
+      schedulerModelMode: state.schedulerModelMode || '',
+      marketRegime: state.marketRegime || state.marketData?.marketRegime || '',
+      workTimeProgressRatio: state.workTimeProgressRatio || 0,
+      expectedDone: state.expectedDone || 0,
+      actualDone: state.actualDone || state.monthDone || 0,
+      targetError: state.targetError || state.lag || 0,
+      rateMultiplier: state.rateMultiplier || 1,
+      riskUsed: state.riskUsed || 0,
+      riskLimit: state.riskLimit || 0,
+      recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
+      currentSession: state.currentSession || null,
+      banditTopPublishers: state.banditTopPublishers || []
     },
     latestWatcherLog: logs[0] || null,
     latestDemandSnapshot: demandSnapshots[0] || null,

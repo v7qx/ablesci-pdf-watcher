@@ -8,6 +8,8 @@
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const MAX_LOGS = 200;
   const MAX_DEMAND_SNAPSHOTS = 500;
+  const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+  const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
   const ASSIST_RANDOM_PAGE_RANGES = {
     elsevier: { min: 3, max: 100 },
@@ -30,6 +32,8 @@
     normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.40, 0.25, 0.10] },
     fast: { median: 10, min: 6, max: 25, sizeWeights: [0.02, 0.10, 0.35, 0.35, 0.18] }
   };
+  const ADVANCED_ITEM_GAP = { median: 3, min: 1, max: 8 };
+  const ADVANCED_COOLDOWN = { median: 18, min: 6, max: 90 };
 
   let deps = null;
   let autoWatcherRunning = false;
@@ -127,6 +131,8 @@
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
       watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
+      watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
+      watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
       watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
       watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
       watcherDemandObserveUrl: normalizeListUrls([opts.watcherDemandObserveUrl], deps.defaultListUrls)[0],
@@ -135,7 +141,7 @@
       watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
       watcherWorkdays: normalizeWorkdays(opts.watcherWorkdays),
       watcherWorkWindows: normalizeWorkWindows(opts.watcherWorkWindows),
-      watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 500, 0, 5000),
+      watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
       watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
       watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
       watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
@@ -246,6 +252,13 @@
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
       if (outsideDelay !== null) return outsideDelay;
+      if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
+        const pauseMs = new Date(state.riskPausedUntil).getTime() - Date.now();
+        if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
+      }
+      if (opts.watcherAdvancedSchedulerEnabled && Number(state?.lastSession?.cooldownMinutes || 0) > 0) {
+        return Math.max(1, Number(state.lastSession.cooldownMinutes));
+      }
       const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
       const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
       const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
@@ -328,7 +341,7 @@
     const state = await getWatcherState();
     const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
     state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
-    const reached = state.cfChallengeStreak >= threshold;
+    const reached = opts.watcherAdvancedSchedulerEnabled || state.cfChallengeStreak >= threshold;
     if (reached) {
       state.pausedByCfChallenge = true;
       await chrome.storage.local.set({ watcherEnabled: false });
@@ -336,6 +349,7 @@
     }
     await saveWatcherState(state);
     await incrementDaily('failed');
+    if (opts.watcherAdvancedSchedulerEnabled) await recordRiskEvent(opts, 'cf_challenge', 'blocked');
     await appendWatcherLog({
       detailUrl: listUrl,
       status: reached ? 'paused' : 'blocked',
@@ -441,6 +455,354 @@
     if (!nums.length) return null;
     const mid = Math.floor(nums.length / 2);
     return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+  }
+
+  function sumNumbers(values) {
+    return values.map(Number).filter(Number.isFinite).reduce((sum, n) => sum + n, 0);
+  }
+
+  function floorTime(value, intervalMs) {
+    const t = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    if (!Number.isFinite(t)) return 0;
+    return Math.floor(t / intervalMs) * intervalMs;
+  }
+
+  function candleFromSamples(samples, intervalMs, field) {
+    const groups = new Map();
+    for (const sample of samples) {
+      const t = new Date(sample.timestamp).getTime();
+      if (!Number.isFinite(t)) continue;
+      const key = floorTime(t, intervalMs);
+      const value = Number(field(sample));
+      const list = groups.get(key) || [];
+      list.push({ t, value, valid: Number.isFinite(value) && value >= 0 });
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries()).sort((a, b) => b[0] - a[0]).map(([start, list]) => {
+      const ordered = list.sort((a, b) => a.t - b.t);
+      const valid = ordered.filter(item => item.valid);
+      const values = valid.map(item => item.value);
+      const open = values.length ? values[0] : null;
+      const close = values.length ? values[values.length - 1] : null;
+      const high = values.length ? Math.max(...values) : null;
+      const low = values.length ? Math.min(...values) : null;
+      const delta = open === null || close === null ? null : close - open;
+      const range = high === null || low === null ? null : high - low;
+      return {
+        start: new Date(start).toISOString(),
+        end: new Date(start + intervalMs).toISOString(),
+        open,
+        high,
+        low,
+        close,
+        delta,
+        range,
+        absMove: delta === null ? null : Math.abs(delta),
+        sampleCount: ordered.length,
+        validSampleCount: valid.length
+      };
+    });
+  }
+
+  function topPublishersFromSamples(samples, topN = MARKET_TOP_PUBLISHERS) {
+    const totals = {};
+    for (const sample of samples) {
+      const counts = aggregatePublisherCounts(sample.publisherCounts);
+      for (const [name, count] of Object.entries(counts)) totals[name] = (totals[name] || 0) + count;
+    }
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topN)
+      .map(([name]) => name);
+  }
+
+  function minuteOfDayFromTimestamp(value) {
+    const s = formatBeijingDateTime(value);
+    const m = s.match(/\s(\d{2}):(\d{2}):/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+  }
+
+  function sameSlotPercentile(samples, current) {
+    const currentValue = Number(current?.totalSeeking);
+    if (!Number.isFinite(currentValue)) return 0.5;
+    const minute = minuteOfDayFromTimestamp(current.timestamp);
+    const values = samples
+      .filter(item => item !== current && !item.demandAnomaly)
+      .filter(item => Math.abs(minuteOfDayFromTimestamp(item.timestamp) - minute) <= 30)
+      .map(item => item.totalSeeking);
+    return percentileRank(values, currentValue);
+  }
+
+  function buildMarketDataModel(snapshots) {
+    const now = Date.now();
+    const raw = (snapshots || [])
+      .filter(item => item?.timestamp && now - new Date(item.timestamp).getTime() <= MARKET_RAW_RETENTION_MS)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const valid = raw.filter(item => !item.demandAnomaly && Number.isFinite(Number(item.totalSeeking)));
+    const latest = valid[0] || null;
+    const candles = {
+      m15: candleFromSamples(valid, 15 * 60 * 1000, item => item.totalSeeking).slice(0, 96 * 7),
+      h1: candleFromSamples(valid, 60 * 60 * 1000, item => item.totalSeeking).slice(0, 24 * 7),
+      d1: candleFromSamples(valid, 24 * 60 * 60 * 1000, item => item.totalSeeking).slice(0, 7)
+    };
+    const topPublishers = topPublishersFromSamples(valid);
+    const publisherCandles = {};
+    const latestCounts = aggregatePublisherCounts(latest?.publisherCounts);
+    for (const publisher of topPublishers) {
+      publisherCandles[publisher] = {
+        m15: candleFromSamples(valid, 15 * 60 * 1000, item => aggregatePublisherCounts(item.publisherCounts)[publisher]).slice(0, 96),
+        h1: candleFromSamples(valid, 60 * 60 * 1000, item => aggregatePublisherCounts(item.publisherCounts)[publisher]).slice(0, 24),
+        d1: candleFromSamples(valid, 24 * 60 * 60 * 1000, item => aggregatePublisherCounts(item.publisherCounts)[publisher]).slice(0, 7)
+      };
+    }
+    const h1Delta = candles.h1[0]?.delta ?? (candles.h1.length > 1 ? Number(candles.h1[0].close || 0) - Number(candles.h1[1].close || 0) : 0);
+    const d1Delta = candles.d1[0]?.delta ?? (candles.d1.length > 1 ? Number(candles.d1[0].close || 0) - Number(candles.d1[1].close || 0) : 0);
+    const totalLatest = Math.max(1, sumNumbers(Object.values(latestCounts)));
+    const publisherTrend = {};
+    for (const [publisher, c] of Object.entries(publisherCandles)) {
+      publisherTrend[publisher] = {
+        h1Delta: c.h1[0]?.delta ?? 0,
+        d1Delta: c.d1[0]?.delta ?? 0,
+        pressure: Number(((latestCounts[publisher] || 0) / totalLatest).toFixed(4))
+      };
+    }
+    return {
+      generatedAt: new Date().toISOString(),
+      rawSampleCount: raw.length,
+      validSampleCount: valid.length,
+      latestTotalSeeking: Number(latest?.totalSeeking || 0),
+      marketRegime: demandRegimeFor(latest, valid.slice(1)),
+      sameSlotPercentile: sameSlotPercentile(valid, latest),
+      h1Delta,
+      d1Delta,
+      topPublishers,
+      candles,
+      publisherCandles,
+      publisherTrend
+    };
+  }
+
+  function workMinutesForDay(opts) {
+    return opts.watcherWorkWindows.reduce((sum, win) => sum + Math.max(0, win.end - win.start), 0);
+  }
+
+  function workTimeProgressRatio(opts, date = new Date()) {
+    const key = todayKey();
+    const [year, month, day] = key.split('-').map(Number);
+    let total = 0;
+    let elapsed = 0;
+    const nowMinute = beijingMinutesNow(date);
+    const days = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= days; d += 1) {
+      const current = new Date(year, month - 1, d, 12, 0, 0);
+      if (!opts.watcherWorkdays.has(weekdayNumber(current))) continue;
+      const dayMinutes = workMinutesForDay(opts);
+      total += dayMinutes;
+      if (d < day) elapsed += dayMinutes;
+      if (d === day) {
+        for (const win of opts.watcherWorkWindows) {
+          elapsed += Math.max(0, Math.min(nowMinute, win.end) - win.start);
+        }
+      }
+    }
+    return total > 0 ? Math.max(0, Math.min(1, elapsed / total)) : 0;
+  }
+
+  function riskSnapshot(state, opts) {
+    const daily = state.daily?.[todayKey()] || {};
+    const used = Number(daily.riskUsed || 0);
+    const limit = clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100);
+    return {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      ratio: used / Math.max(1, limit),
+      exhausted: used >= limit,
+      nearLimit: used >= limit * 0.75
+    };
+  }
+
+  function calculateAdvancedTargetState(state, opts, market) {
+    const actualDone = monthDone(state);
+    const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
+    const progress = workTimeProgressRatio(opts);
+    const expectedDone = Math.round(monthlyTarget * progress);
+    const error = expectedDone - actualDone;
+    const risk = riskSnapshot(state, opts);
+    const daily = state.daily?.[todayKey()] || {};
+    const failures = Number(daily.failed || 0);
+    const successes = Number(daily.downloaded || 0);
+    const failureRate = failures / Math.max(1, failures + successes);
+    const p = Number(market?.sameSlotPercentile ?? 0.5);
+    const demandMultiplier = p >= 0.9 ? 1.25 : p <= 0.2 ? 0.75 : 1;
+    const proportional = monthlyTarget > 0 ? error / Math.max(1, monthlyTarget) : 0;
+    let rateMultiplier = 1 + proportional * 3;
+    rateMultiplier *= demandMultiplier;
+    rateMultiplier *= Math.max(0.35, 1 - failureRate * 0.8);
+    rateMultiplier *= risk.nearLimit ? 0.45 : 1;
+    if (risk.exhausted) rateMultiplier = 0;
+    rateMultiplier = Math.max(0, Math.min(2.5, rateMultiplier));
+    const speedMode = risk.exhausted || rateMultiplier < 0.65 ? 'slow' : rateMultiplier > 1.35 ? 'fast' : 'normal';
+    const todayTarget = monthlyTarget <= 0 ? 0 : clampNumber(Math.ceil(Math.max(0, error) + (rateMultiplier > 1 ? rateMultiplier : 0)), opts.watcherMinDailyTarget, opts.watcherMinDailyTarget, opts.watcherMaxDailyTarget);
+    const hourTarget = Math.max(0, Math.min(opts.watcherMaxPerSession * 3, Math.ceil(rateMultiplier * opts.watcherMaxPerSession)));
+    const sessionIntensity = Math.max(0, Math.min(1, rateMultiplier / 2.5));
+    return {
+      schedulerModelMode: 'advanced',
+      speedMode,
+      workTimeProgressRatio: Number(progress.toFixed(4)),
+      expectedDone,
+      actualDone,
+      targetError: error,
+      rateMultiplier: Number(rateMultiplier.toFixed(3)),
+      todayTarget,
+      hourTarget,
+      sessionIntensity: Number(sessionIntensity.toFixed(3)),
+      riskUsed: risk.used,
+      riskLimit: risk.limit,
+      riskRemaining: risk.remaining,
+      riskExhausted: risk.exhausted,
+      marketRegime: market?.marketRegime || 'normal',
+      recentH1DemandDelta: Number(market?.h1Delta || 0),
+      recentD1DemandDelta: Number(market?.d1Delta || 0)
+    };
+  }
+
+  function candidateSource(candidate, payload = null) {
+    return publisherAlias(payload?.publisherName || payload?.journalName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
+  }
+
+  function ensureBanditStats(state) {
+    state.banditStats = state.banditStats || {};
+    return state.banditStats;
+  }
+
+  function banditItem(stats, source) {
+    stats[source] = stats[source] || {
+      trials: 0,
+      success: 0,
+      failure: 0,
+      htmlFailure: 0,
+      cfFailure: 0,
+      avgDurationMs: 0,
+      lastFailureAt: ''
+    };
+    return stats[source];
+  }
+
+  function banditScore(candidate, state, market) {
+    const source = candidateSource(candidate);
+    const stats = ensureBanditStats(state);
+    const item = banditItem(stats, source);
+    const totalTrials = Object.values(stats).reduce((sum, value) => sum + Number(value.trials || 0), 0);
+    const trials = Number(item.trials || 0);
+    const estimatedSuccessRate = (Number(item.success || 0) + 1) / (trials + 2);
+    const explorationBonus = Math.sqrt(2 * Math.log(totalTrials + 2) / (trials + 1));
+    const trend = market?.publisherTrend?.[source] || {};
+    const demandPressure = Number(trend.pressure || 0);
+    const sourceTrend = Math.max(-0.4, Math.min(0.6, Number(trend.h1Delta || 0) / 100));
+    const lastFailMs = item.lastFailureAt ? Date.now() - new Date(item.lastFailureAt).getTime() : Infinity;
+    const recentFailurePenalty = lastFailMs < 6 * 60 * 60 * 1000 ? 0.35 : 0;
+    const avgDurationPenalty = Math.min(0.3, Number(item.avgDurationMs || 0) / (8 * 60 * 1000) * 0.2);
+    const doiBonus = candidate?.hasDoi ? 0.15 : 0;
+    const score = estimatedSuccessRate + explorationBonus * 0.35 + demandPressure * 0.8 + sourceTrend * 0.25 + doiBonus - recentFailurePenalty - avgDurationPenalty;
+    return {
+      source,
+      score: Math.max(0.01, Number(score.toFixed(4))),
+      estimatedSuccessRate: Number(estimatedSuccessRate.toFixed(4)),
+      explorationBonus: Number(explorationBonus.toFixed(4)),
+      demandPressure,
+      sourceTrend,
+      recentFailurePenalty,
+      avgDurationPenalty,
+      doiBonus
+    };
+  }
+
+  function weightedSampleWithoutReplacement(items, count) {
+    const pool = items.slice();
+    const picked = [];
+    while (pool.length && picked.length < count) {
+      const total = pool.reduce((sum, item) => sum + Math.max(0.01, Number(item.score) || 0.01), 0);
+      let r = Math.random() * total;
+      let index = 0;
+      for (; index < pool.length; index += 1) {
+        r -= Math.max(0.01, Number(pool[index].score) || 0.01);
+        if (r <= 0) break;
+      }
+      picked.push(pool.splice(Math.min(index, pool.length - 1), 1)[0]);
+    }
+    return picked;
+  }
+
+  function selectBanditCandidates(candidates, state, market, count) {
+    const scored = (Array.isArray(candidates) ? candidates : [])
+      .map((candidate, order) => ({ candidate, order, ...banditScore(candidate, state, market) }))
+      .sort((a, b) => (b.score - a.score) || (a.order - b.order));
+    const top = scored.slice(0, Math.max(count * 3, Math.min(12, scored.length)));
+    const picked = weightedSampleWithoutReplacement(top, count);
+    state.banditTopPublishers = scored.slice(0, 8).map(item => ({
+      source: item.source,
+      score: item.score,
+      estimatedSuccessRate: item.estimatedSuccessRate,
+      demandPressure: item.demandPressure
+    }));
+    return picked.map(item => item.candidate);
+  }
+
+  async function recordBanditOutcome(source, outcome, durationMs = 0, reason = '') {
+    const state = await getWatcherState();
+    const stats = ensureBanditStats(state);
+    const item = banditItem(stats, source || 'Unknown');
+    item.trials += 1;
+    if (outcome === 'success') {
+      item.success += 1;
+    } else {
+      item.failure += 1;
+      item.lastFailureAt = new Date().toISOString();
+      if (/html|login|not_pdf|error_page/i.test(reason)) item.htmlFailure += 1;
+      if (/cf|challenge/i.test(reason)) item.cfFailure += 1;
+    }
+    if (durationMs > 0) {
+      item.avgDurationMs = item.avgDurationMs ? Math.round(item.avgDurationMs * 0.75 + durationMs * 0.25) : Math.round(durationMs);
+    }
+    await saveWatcherState(state);
+  }
+
+  function riskCostFor(reason, status = '') {
+    const text = `${reason || ''} ${status || ''}`;
+    if (/cf|challenge/i.test(text)) return 5;
+    if (/login|permission|权限|publisher_error_page/i.test(text)) return 3;
+    if (/html|not_pdf|PDF 校验失败|file header/i.test(text)) return 2;
+    if (/failed|blocked|timeout|interrupted|error/i.test(text)) return 1;
+    return 0;
+  }
+
+  async function recordRiskEvent(opts, reason, status = '') {
+    const cost = riskCostFor(reason, status);
+    const state = await getWatcherState();
+    const key = todayKey();
+    state.daily = state.daily || {};
+    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+    if (cost > 0) {
+      state.daily[key].riskUsed = Number(state.daily[key].riskUsed || 0) + cost;
+      state.daily[key].consecutiveFailures = Number(state.daily[key].consecutiveFailures || 0) + 1;
+      if (state.daily[key].consecutiveFailures >= 3) state.daily[key].riskUsed += 1;
+    } else if (/success|queued|download_only|uploaded/i.test(status || reason || '')) {
+      state.daily[key].consecutiveFailures = 0;
+    }
+    const risk = riskSnapshot(state, opts);
+    if (opts.watcherAdvancedSchedulerEnabled && risk.exhausted) {
+      state.riskPausedUntil = nextRiskResumeAt(opts);
+      state.riskPauseReason = 'risk_budget_exhausted';
+    }
+    await saveWatcherState(state);
+    return risk;
+  }
+
+  function nextRiskResumeAt(opts) {
+    const delay = nextWorkDelayMinutes(opts);
+    const minutes = delay === null ? 60 : Math.max(15, delay);
+    return new Date(Date.now() + minutes * 60 * 1000).toISOString();
   }
 
   function demandRegimeFor(snapshot, history) {
@@ -578,14 +940,17 @@
     const snapshots = await getDemandSnapshots();
     if (!snapshots.length) return state;
     const model = buildAdvancedPublisherModel(snapshots);
+    const market = buildMarketDataModel(snapshots);
     state.publisherModel = model;
+    state.marketData = market;
     state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
     return state;
   }
 
   async function recordDemandSnapshot(snapshot) {
     if (!snapshot || !Number.isFinite(Number(snapshot.totalSeeking))) return null;
-    const snapshots = await getDemandSnapshots();
+    const snapshots = (await getDemandSnapshots())
+      .filter(item => item?.timestamp && Date.now() - new Date(item.timestamp).getTime() <= MARKET_RAW_RETENTION_MS);
     const normalized = {
       ...snapshot,
       timestamp: new Date().toISOString(),
@@ -601,6 +966,7 @@
       const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
       await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
       const state = await getWatcherState();
+      state.marketData = buildMarketDataModel(nextSnapshots);
       state.lastDemandAnomalyAt = normalized.timestamp;
       state.lastDemandAnomaly = normalized;
       await saveWatcherState(state);
@@ -617,12 +983,15 @@
     await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
     const state = await getWatcherState();
     const model = buildAdvancedPublisherModel(nextSnapshots);
+    const market = buildMarketDataModel(nextSnapshots);
     state.lastDemandSnapshotAt = normalized.timestamp;
     state.lastDemandSnapshot = normalized;
     state.demandRegime = regime;
+    state.marketData = market;
     state.publisherModel = model;
     state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
-    const target = calculateTargetState(state, normalizeOptions(await deps.getOptions()), regime);
+    const opts = normalizeOptions(await deps.getOptions());
+    const target = opts.watcherAdvancedSchedulerEnabled ? calculateAdvancedTargetState(state, opts, market) : calculateTargetState(state, opts, regime);
     Object.assign(state, target);
     await saveWatcherState(state);
     return normalized;
@@ -673,6 +1042,22 @@
     const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
     const picked = weightedPickIndex(mode.sizeWeights);
     return Math.min(opts.watcherMaxPerSession, Math.max(0, picked));
+  }
+
+  function advancedSessionSize(opts, state) {
+    const risk = riskSnapshot(state, opts);
+    if (risk.exhausted) return 0;
+    const multiplier = Number(state.rateMultiplier || 1);
+    const intensity = Number(state.sessionIntensity || 0.4);
+    const base = Math.ceil(opts.watcherMaxPerSession * Math.max(0.2, intensity));
+    const boosted = multiplier > 1.4 ? base + 1 : base;
+    const cappedByRisk = Math.min(boosted, risk.remaining);
+    return Math.max(0, Math.min(4, opts.watcherMaxPerSession, cappedByRisk));
+  }
+
+  async function sleepMinutes(minutes) {
+    if (minutes <= 0) return;
+    await new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
   }
 
   async function appendWatcherLog(entry) {
@@ -760,9 +1145,10 @@
       .filter(log => formatBeijingDateTime(log.time, true) === date);
 
     const csvRows = [
-      ['time', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason'],
+      ['time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason'],
       ...logs.map(log => [
         formatBeijingDateTime(log.time),
+        log.sessionId || '',
         log.assistId || '',
         log.doi || '',
         log.journalName || '',
@@ -789,9 +1175,27 @@
       `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
       `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
+      `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
+      `- Expected / actual / error: ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
+      `- Rate multiplier: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
+      `- Hour target: ${Number(state.hourTarget || 0)}`,
+      `- Risk used / limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+      `- Recent 1h demand delta: ${Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)}`,
       `- Today target: ${Number(state.todayTarget || 0)}`,
       `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
       `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
+      `- Session ID: ${state.lastSession?.id || ''}`,
+      `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
+      `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
+      `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
+      '',
+      '## Bandit Top Publishers',
+      '',
+      '| Publisher | Score | Estimated Success | Demand Pressure |',
+      '| --- | --- | --- | --- |',
+      ...(state.banditTopPublishers || []).slice(0, 8).map(item =>
+        `| ${String(item.source || '').replace(/\|/g, '\\|')} | ${Number(item.score || 0).toFixed(4)} | ${Number(item.estimatedSuccessRate || 0).toFixed(4)} | ${Number(item.demandPressure || 0).toFixed(4)} |`
+      ),
       '',
       '## Demand Snapshots',
       '',
@@ -851,8 +1255,9 @@
     return demandWeight * successRate + doiBonus;
   }
 
-  function orderCandidatesForRun(candidates, state) {
+  function orderCandidatesForRun(candidates, state, opts = {}, count = 1) {
     const list = Array.isArray(candidates) ? candidates.slice() : [];
+    if (opts.watcherAdvancedSchedulerEnabled) return selectBanditCandidates(list, state, state.marketData, Math.max(1, count));
     if (state?.schedulerModelMode !== 'advanced') return list;
     const scored = list.map(candidate => candidateModelScore(candidate, state));
     const median = medianNumber(scored) ?? 0;
@@ -1070,29 +1475,49 @@
   }
 
   function makeWatcherPort(context) {
+    function settle(result) {
+      if (!context || context.settled) return;
+      context.settled = true;
+      if (context.resolve) context.resolve(result);
+    }
     return {
       name: 'ablesci-auto-watcher',
       postMessage(msg) {
         if (!msg || !context) return;
         if (msg.type === 'error') {
+          const durationMs = Date.now() - Number(context.startedAt || Date.now());
           updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
           incrementDaily('failed').catch(() => {});
+          recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed').catch(() => {});
+          recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed').catch(() => {});
           appendWatcherLog({
             ...context.payload,
             detailUrl: context.detailUrl,
+            sessionId: context.sessionId || '',
             status: 'failed',
             reason: msg.message || 'upload_failed'
           }).then(writeDailyReports).catch(() => {});
+          settle({ ok: false, reason: msg.message || 'upload_failed', durationMs });
         }
         if (msg.type === 'done' && msg.blocked) {
+          const durationMs = Date.now() - Number(context.startedAt || Date.now());
           updateProcessed(context.key, 'failed', msg.message || 'blocked').catch(() => {});
           incrementDaily('failed').catch(() => {});
+          recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked').catch(() => {});
+          recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked').catch(() => {});
           appendWatcherLog({
             ...context.payload,
             detailUrl: context.detailUrl,
+            sessionId: context.sessionId || '',
             status: 'failed',
             reason: msg.message || 'blocked'
           }).then(writeDailyReports).catch(() => {});
+          settle({ ok: false, reason: msg.message || 'blocked', durationMs });
+        } else if (msg.type === 'done') {
+          const durationMs = Date.now() - Number(context.startedAt || Date.now());
+          recordRiskEvent(context.opts || {}, msg.message || 'success', 'success').catch(() => {});
+          recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success').catch(() => {});
+          settle({ ok: true, reason: msg.message || 'done', durationMs });
         }
       },
       onDisconnect: {
@@ -1101,14 +1526,28 @@
     };
   }
 
-  async function handleAllowedPayload(candidate, payload, opts, detailTabId) {
+  function makeSessionPortContext(context) {
+    let timer = null;
+    const result = new Promise(resolve => {
+      context.resolve = value => {
+        if (timer) clearTimeout(timer);
+        resolve(value);
+      };
+      timer = setTimeout(() => resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: 12 * 60 * 1000 }), 12 * 60 * 1000);
+    });
+    return { port: makeWatcherPort(context), result };
+  }
+
+  async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null) {
     payload.triggeredBy = 'auto_watcher';
     const key = getProcessedKey(candidate, payload);
+    const source = candidateSource(candidate, payload);
 
     if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
       await closeTabQuietly(detailTabId);
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await incrementDaily('skipped');
+      await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
       await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
       return false;
     }
@@ -1136,7 +1575,17 @@
       return false;
     }
 
-    deps.enqueueUpload(makeWatcherPort({ key, payload, detailUrl: candidate.detailUrl }), payload);
+    const portContext = {
+      key,
+      payload,
+      detailUrl: candidate.detailUrl,
+      opts,
+      source,
+      sessionId: session?.id || '',
+      startedAt: Date.now()
+    };
+    const sessionPort = opts.watcherAdvancedSchedulerEnabled ? makeSessionPortContext(portContext) : null;
+    deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
     if (!payload.downloadOnly) await closeTabQuietly(detailTabId);
     await incrementDaily('downloaded');
     if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
@@ -1144,12 +1593,122 @@
     await appendWatcherLog({
       ...payload,
       detailUrl: candidate.detailUrl,
+      sessionId: session?.id || '',
       status: payload.downloadOnly ? 'download_only' : 'queued_upload',
       reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
     });
     await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
     await incrementDaily('notified');
+    if (sessionPort) {
+      const result = await sessionPort.result;
+      return result.ok;
+    }
     return true;
+  }
+
+  async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult) {
+    const session = {
+      id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      startedAt: new Date().toISOString(),
+      status: 'planning',
+      plannedSize: 0,
+      handledCount: 0
+    };
+    stateForTargets.currentSession = session;
+    await saveWatcherState(stateForTargets);
+
+    const plan = [];
+    for (const listUrl of opts.watcherListUrls) {
+      if (plan.length >= targetSessionSize * 3) break;
+      const pickedListUrl = randomizeAssistListUrl(listUrl);
+      stateForTargets.lastPickedListUrl = pickedListUrl;
+      await saveWatcherState(stateForTargets);
+      await incrementDaily('checked');
+      const parsed = await parseListUrl(pickedListUrl);
+      if (parsed.cfChallenge) {
+        if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
+        return { ok: false, reason: 'cf_challenge' };
+      }
+      await resetCfChallengeStreak();
+      const allowed = [];
+      for (const candidate of parsed.candidates || []) {
+        const listAllowed = isListCandidateAllowed(candidate, opts);
+        if (!listAllowed.ok) continue;
+        if (await wasRecentlyProcessed(candidate)) continue;
+        allowed.push(candidate);
+      }
+      plan.push(...selectBanditCandidates(allowed, stateForTargets, stateForTargets.marketData, Math.max(targetSessionSize * 2, targetSessionSize)));
+    }
+
+    const stateWithPlan = await getWatcherState();
+    stateWithPlan.currentSession = {
+      ...session,
+      status: 'running',
+      plannedSize: plan.length,
+      targetSessionSize
+    };
+    await saveWatcherState(stateWithPlan);
+
+    let handledCount = 0;
+    const startedMs = Date.now();
+    for (const candidate of plan) {
+      if (handledCount >= targetSessionSize) break;
+      const risk = riskSnapshot(await getWatcherState(), opts);
+      if (risk.exhausted) break;
+
+      const detail = await inspectDetail(candidate);
+      if (!detail.ok) {
+        await closeTabQuietly(detail.tabId);
+        await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
+        await incrementDaily('failed');
+        await recordRiskEvent(opts, detail.reason, 'failed');
+        await recordBanditOutcome(candidateSource(candidate), 'failure', 0, detail.reason);
+        await appendWatcherLog({ ...candidate, sessionId: session.id, status: 'failed', reason: detail.reason });
+      } else {
+        const payload = detail.payload;
+        const detailAllowed = isDetailAllowedForWatcher(payload, opts);
+        const key = getProcessedKey(candidate, payload);
+        if (!detailAllowed.ok) {
+          await closeTabQuietly(detail.tabId);
+          await updateProcessed(key, 'skipped', detailAllowed.reason);
+          await incrementDaily('skipped');
+          await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
+          await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, status: 'skipped', reason: detailAllowed.reason });
+        } else {
+          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session);
+          if (!handled) await closeTabQuietly(detail.tabId);
+          if (handled) handledCount += 1;
+        }
+      }
+
+      const afterState = await getWatcherState();
+      afterState.currentSession = {
+        ...afterState.currentSession,
+        status: 'running',
+        handledCount,
+        sessionDurationMs: Date.now() - startedMs
+      };
+      await saveWatcherState(afterState);
+
+      if (handledCount < targetSessionSize && plan.indexOf(candidate) < plan.length - 1) {
+        const gap = logNormalMinutes(ADVANCED_ITEM_GAP.median, ADVANCED_ITEM_GAP.min, ADVANCED_ITEM_GAP.max);
+        await sleepMinutes(gap);
+      }
+    }
+
+    const finalState = await getWatcherState();
+    const durationMs = Date.now() - startedMs;
+    finalState.lastSession = {
+      ...finalState.currentSession,
+      status: 'done',
+      finishedAt: new Date().toISOString(),
+      handledCount,
+      sessionDurationMs: durationMs,
+      cooldownMinutes: Number((logNormalMinutes(ADVANCED_COOLDOWN.median, ADVANCED_COOLDOWN.min, ADVANCED_COOLDOWN.max) / Math.max(0.25, Number(finalState.rateMultiplier || 1))).toFixed(2))
+    };
+    finalState.currentSession = { ...finalState.lastSession };
+    await saveWatcherState(finalState);
+    return { ok: true, reason: handledCount ? 'advanced_session_done' : (observeResult?.snapshot ? 'observe_only_session' : 'advanced_no_candidate') };
   }
 
   async function runAutoWatcherOnce(trigger = 'alarm') {
@@ -1176,8 +1735,13 @@
       }
 
       const stateForTargets = await getWatcherState();
+      if (opts.watcherAdvancedSchedulerEnabled && stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
+        return { ok: false, reason: 'risk_budget_paused' };
+      }
       if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
-      const targetState = calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
+      const targetState = opts.watcherAdvancedSchedulerEnabled
+        ? calculateAdvancedTargetState(stateForTargets, opts, stateForTargets.marketData || {})
+        : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
       Object.assign(stateForTargets, targetState);
       await saveWatcherState(stateForTargets);
       if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
@@ -1188,8 +1752,13 @@
       }
 
       let handledCount = 0;
-      const targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1;
+      const targetSessionSize = opts.watcherAdvancedSchedulerEnabled
+        ? advancedSessionSize(opts, stateForTargets)
+        : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
       if (targetSessionSize <= 0) return { ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' };
+      if (opts.watcherAdvancedSchedulerEnabled) {
+        return await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult);
+      }
 
       for (const listUrl of opts.watcherListUrls) {
         const pickedListUrl = randomizeAssistListUrl(listUrl);
@@ -1203,7 +1772,7 @@
         }
         await resetCfChallengeStreak();
 
-        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets);
+        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
         for (const candidate of candidates) {
           if (handledCount >= targetSessionSize) return { ok: true, reason: 'session_target_reached' };
           const listAllowed = isListCandidateAllowed(candidate, opts);
