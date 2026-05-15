@@ -5,12 +5,12 @@ param(
   [ValidateSet("Chrome", "Edge", "All")]
   [string]$Browser = "Chrome",
 
-  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfUploader"
+  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcherPrivate"
 )
 
 $ErrorActionPreference = "Stop"
 
-$HostName = "com.ablesci.pdf_uploader"
+$HostName = "com.ablesci.pdf_watcher_private"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
@@ -57,7 +57,7 @@ $AllowedOrigins = @($ExistingOrigins + $AllowedOrigin | Where-Object { $_ } | So
 
 $manifest = [ordered]@{
   name = $HostName
-  description = "Ablesci PDF Uploader Native Helper"
+  description = "Ablesci PDF Watcher Private Native Helper"
   path = $TargetExe
   type = "stdio"
   allowed_origins = $AllowedOrigins

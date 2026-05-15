@@ -2,13 +2,13 @@ param(
   [ValidateSet("Chrome", "Edge", "All")]
   [string]$Browser = "All",
 
-  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfUploader",
+  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcherPrivate",
 
   [switch]$RemoveFiles
 )
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
-$HostName = "com.ablesci.pdf_uploader"
+$HostName = "com.ablesci.pdf_watcher_private"
 $Browsers = if ($Browser -eq "All") { @("Chrome", "Edge") } else { @($Browser) }
 
 foreach ($BrowserName in $Browsers) {

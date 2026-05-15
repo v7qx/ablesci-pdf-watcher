@@ -69,7 +69,7 @@ edge://settings/content/pdfDocuments
 
 扩展设置页里可以修改：
 
-- Native Host 名称：默认 `com.ablesci.pdf_uploader`。
+- Native Host 名称：默认 `com.ablesci.pdf_watcher_private`，与 direct-upload 版本分开注册，避免互相覆盖 Helper。
 - 最小自动上传体积：默认 `1 MB`，小于该值只下载不上传。
 - 最大自动上传体积：默认 `99 MB`，大于该值只下载不上传。
 - 是否保留浏览器下载记录。

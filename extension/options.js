@@ -1,7 +1,7 @@
 'use strict';
 
 const DEFAULT_OPTIONS = {
-  nativeHostName: 'com.ablesci.pdf_uploader',
+  nativeHostName: 'com.ablesci.pdf_watcher_private',
   downloadSubdir: '',
   downloadMode: 'auto',
   scienceDirectTabMode: 'silent_then_visible',
@@ -111,6 +111,7 @@ async function loadOptions() {
   const local = await chrome.storage.local.get(ids);
   const normalizeOptions = opts => ({
     ...opts,
+    nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
     downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
     moveToDir: String(opts.moveToDir || '').trim(),
     downloadMode: 'auto',
