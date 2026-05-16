@@ -278,7 +278,11 @@ function todayKeyBeijing() {
 }
 
 async function renderAdvancedWatcherStatus() {
-  const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
+  const stored = await chrome.storage.local.get([
+    AUTO_WATCHER_STATE_KEY,
+    'watcherWorkdays',
+    'watcherWorkWindows'
+  ]);
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
   const daily = state.daily?.[todayKeyBeijing()] || {};
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
@@ -292,6 +296,7 @@ async function renderAdvancedWatcherStatus() {
   setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
   setText('watcherNextRunAt', formatBeijingDateTime(state.nextScheduledAt));
   setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
+  setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
   const top = (state.banditTopPublishers || [])
     .slice(0, 5)
     .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
