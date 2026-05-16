@@ -287,6 +287,8 @@ async function renderAdvancedWatcherStatus() {
   const daily = state.daily?.[todayKeyBeijing()] || {};
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
   setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
+  setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
+  setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
   setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
   setText('advancedError', String(Number(state.targetError || state.lag || 0)));
   setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
@@ -530,6 +532,10 @@ async function copyAutoWatcherConfig() {
       schedulerModelMode: state.schedulerModelMode || '',
       marketRegime: state.marketRegime || state.marketData?.marketRegime || '',
       workTimeProgressRatio: state.workTimeProgressRatio || 0,
+      activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
+      availabilityFactor: state.availabilityFactor || 1,
+      availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
+      availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
       expectedDone: state.expectedDone || 0,
       actualDone: state.actualDone || state.monthDone || 0,
       targetError: state.targetError || state.lag || 0,

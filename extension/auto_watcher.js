@@ -11,6 +11,7 @@
   const MAX_TRACE_LOGS = 1200;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const MAX_SESSION_CANDIDATES = 10;
+  const ACTIVE_RUN_RETENTION_DAYS = 62;
   const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
@@ -424,17 +425,20 @@
     const rawModelDelay = logNormalMinutes(mode.median, mode.min, mode.max);
     const targetError = Number(state.targetError ?? state.lag ?? 0);
     const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
-    const lagBoost = targetError > 0 ? Math.min(1.6, 1 + Math.min(1, targetError / monthlyTarget) * 2.5) : 1;
+    const thresholds = lagThresholds(monthlyTarget);
+    const severeLag = targetError >= thresholds.severe;
+    const mediumLag = targetError >= thresholds.medium;
+    const lagBoost = targetError > 0 ? Math.min(2.2, 1 + Math.min(1, targetError / monthlyTarget) * 3.2) : 1;
     const rateMultiplier = Number(state.rateMultiplier || 1);
     const demandFactor = Number(state.demandFactor || 1);
     const trendFactor = Number(state.trendFactor || 1);
     const h1Delta = Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0);
     const marketRegime = state.marketRegime || state.demandRegime || state.marketData?.marketRegime || 'normal';
-    const marketBoost = marketRegime === 'very_busy' ? 1.25 : (marketRegime === 'quiet' ? 0.8 : 1);
-    const trendBoost = h1Delta > 20 ? 1.15 : (h1Delta < -20 ? 0.9 : 1);
+    const marketBoost = marketRegime === 'very_busy' ? 1.25 : (marketRegime === 'quiet' ? (mediumLag ? 0.95 : 0.8) : 1);
+    const trendBoost = h1Delta > 20 ? 1.15 : (h1Delta < -20 ? (severeLag ? 0.97 : 0.9) : 1);
     const risk = riskSnapshot(state, opts);
     const riskPenalty = risk.nearLimit ? 0.55 : 1;
-    const combined = Math.max(0.25, Math.min(3, rateMultiplier * demandFactor * trendFactor * lagBoost * marketBoost * trendBoost * riskPenalty));
+    const combined = Math.max(0.25, Math.min(3.5, rateMultiplier * demandFactor * trendFactor * lagBoost * marketBoost * trendBoost * riskPenalty));
     const modelDelay = rawModelDelay / combined;
     const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
     return {
@@ -450,6 +454,8 @@
       targetError,
       marketRegime,
       h1Delta,
+      severeLag,
+      mediumLag,
       combinedMultiplier: combined
     };
   }
@@ -759,6 +765,13 @@
     state.lastRunTrigger = trigger;
     state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
     state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+    state.activeRunDays = state.activeRunDays || {};
+    state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
+    const keepAfter = Date.now() - ACTIVE_RUN_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    for (const dayKey of Object.keys(state.activeRunDays)) {
+      const t = new Date(`${dayKey}T00:00:00+08:00`).getTime();
+      if (!Number.isFinite(t) || t < keepAfter) delete state.activeRunDays[dayKey];
+    }
     await saveWatcherState(state);
     return state;
   }
@@ -798,16 +811,15 @@
 
   function calculateTargetState(state, opts, demandRegime) {
     const done = monthDone(state);
-    const day = Number(todayKey().slice(8, 10));
-    const days = daysInCurrentMonth();
     const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
     const model = state.publisherModel || { ready: false };
     const modelMode = model.ready ? 'advanced' : 'simple';
-    const expectedDone = Math.round(monthlyTarget * Math.min(1, day / days));
+    const progress = workTimeProgressDetails(opts);
+    const availability = availabilitySnapshot(state, opts, progress);
+    const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
+    const expectedDone = Math.round(monthlyTarget * Math.min(1, effectiveProgress));
     const lag = expectedDone - done;
-    let speedMode = 'normal';
-    if (lag > Math.max(10, monthlyTarget * 0.08) || demandRegime === 'very_busy') speedMode = 'fast';
-    if (lag < -Math.max(10, monthlyTarget * 0.05) || demandRegime === 'quiet') speedMode = 'slow';
+    const speedMode = speedModeFromTarget({ error: lag, monthlyTarget, demandRegime });
     if (monthlyTarget <= 0) {
       return {
         monthKey: monthKey(),
@@ -815,18 +827,41 @@
         expectedDone: 0,
         lag: 0,
         speedMode: 'slow',
+        workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
+        activeTimeProgressRatio: availability.activeTimeProgressRatio,
+        availabilityFactor: availability.availabilityFactor,
         todayTarget: 0,
         schedulerModelMode: 'simple',
         demandFactor: 1,
         trendFactor: 1
       };
     }
+    const day = Number(todayKey().slice(8, 10));
+    const days = daysInCurrentMonth();
     const baseTodayTarget = Math.max(0, monthlyTarget - done) / Math.max(1, days - day + 1);
-    const demandFactor = modelMode === 'advanced' ? demandFactorByRegime(demandRegime) : 1;
+    const thresholds = lagThresholds(monthlyTarget);
+    const rawDemandFactor = modelMode === 'advanced' ? demandFactorByRegime(demandRegime) : 1;
+    const demandFactor = demandRegime === 'quiet' && lag >= thresholds.medium ? Math.max(rawDemandFactor, 0.9) : rawDemandFactor;
     const trendFactor = modelMode === 'advanced' ? trendFactorFromModel(model) : 1;
     const rawTodayTarget = Math.ceil(baseTodayTarget * demandFactor * trendFactor);
     const todayTarget = clampNumber(rawTodayTarget, opts.watcherMinDailyTarget, opts.watcherMinDailyTarget, opts.watcherMaxDailyTarget);
-    return { monthKey: monthKey(), monthDone: done, expectedDone, lag, speedMode, todayTarget, schedulerModelMode: modelMode, demandFactor, trendFactor };
+    return {
+      monthKey: monthKey(),
+      monthDone: done,
+      expectedDone,
+      lag,
+      targetError: lag,
+      speedMode,
+      workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
+      activeTimeProgressRatio: availability.activeTimeProgressRatio,
+      availabilityFactor: availability.availabilityFactor,
+      availabilityExpectedWakeCount: availability.expectedWakeCount,
+      availabilityActualWakeCount: availability.actualWakeCount,
+      todayTarget,
+      schedulerModelMode: modelMode,
+      demandFactor,
+      trendFactor
+    };
   }
 
   async function getDemandSnapshots() {
@@ -977,7 +1012,7 @@
     return opts.watcherWorkWindows.reduce((sum, win) => sum + Math.max(0, win.end - win.start), 0);
   }
 
-  function workTimeProgressRatio(opts, date = new Date()) {
+  function workTimeProgressDetails(opts, date = new Date()) {
     const key = todayKey();
     const [year, month, day] = key.split('-').map(Number);
     let total = 0;
@@ -996,7 +1031,60 @@
         }
       }
     }
-    return total > 0 ? Math.max(0, Math.min(1, elapsed / total)) : 0;
+    const ratio = total > 0 ? Math.max(0, Math.min(1, elapsed / total)) : 0;
+    return { ratio, elapsedMinutes: elapsed, totalMinutes: total };
+  }
+
+  function workTimeProgressRatio(opts, date = new Date()) {
+    return workTimeProgressDetails(opts, date).ratio;
+  }
+
+  function monthRunCount(state) {
+    const prefix = monthKey() + '-';
+    return Object.entries(state.daily || {})
+      .filter(([key]) => key.startsWith(prefix))
+      .reduce((sum, [, value]) => sum + Number(value.totalRuns || 0), 0);
+  }
+
+  function availabilitySnapshot(state, opts, progressDetails = null) {
+    const details = progressDetails || workTimeProgressDetails(opts);
+    const elapsed = Number(details.elapsedMinutes || 0);
+    const expectedWakeCount = elapsed > 0
+      ? Math.max(1, elapsed / Math.max(1, Number(opts.watcherObserveIntervalMinutes || 5)))
+      : 0;
+    const actualWakeCount = monthRunCount(state);
+    const enoughData = expectedWakeCount >= 6 && actualWakeCount >= 3;
+    const rawAvailability = expectedWakeCount > 0 ? actualWakeCount / expectedWakeCount : 1;
+    const availabilityFactor = enoughData ? Math.max(0.25, Math.min(1, rawAvailability)) : 1;
+    const activeTimeProgressRatio = Math.max(0, Math.min(1, Number(details.ratio || 0) * availabilityFactor));
+    return {
+      expectedWakeCount: Number(expectedWakeCount.toFixed(2)),
+      actualWakeCount,
+      rawAvailability: Number(rawAvailability.toFixed(3)),
+      availabilityFactor: Number(availabilityFactor.toFixed(3)),
+      activeTimeProgressRatio: Number(activeTimeProgressRatio.toFixed(4)),
+      enoughData
+    };
+  }
+
+  function lagThresholds(monthlyTarget) {
+    const target = Math.max(1, Number(monthlyTarget || 0));
+    return {
+      medium: Math.max(10, target * 0.04),
+      severe: Math.max(20, target * 0.12),
+      ahead: Math.max(10, target * 0.05)
+    };
+  }
+
+  function speedModeFromTarget({ error, monthlyTarget, demandRegime = 'normal', riskExhausted = false, rateMultiplier = 1 }) {
+    if (riskExhausted) return 'slow';
+    const thresholds = lagThresholds(monthlyTarget);
+    if (error >= thresholds.severe || rateMultiplier >= 1.55) return 'fast';
+    if (error >= thresholds.medium) return demandRegime === 'very_busy' ? 'fast' : 'normal';
+    if (error <= -thresholds.ahead) return 'slow';
+    if (demandRegime === 'very_busy') return 'fast';
+    if (demandRegime === 'quiet' && rateMultiplier < 1.2) return 'slow';
+    return 'normal';
   }
 
   function riskSnapshot(state, opts) {
@@ -1016,8 +1104,10 @@
   function calculateAdvancedTargetState(state, opts, market) {
     const actualDone = monthDone(state);
     const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
-    const progress = workTimeProgressRatio(opts);
-    const expectedDone = Math.round(monthlyTarget * progress);
+    const progress = workTimeProgressDetails(opts);
+    const availability = availabilitySnapshot(state, opts, progress);
+    const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
+    const expectedDone = Math.round(monthlyTarget * Math.min(1, effectiveProgress));
     const error = expectedDone - actualDone;
     const risk = riskSnapshot(state, opts);
     const daily = state.daily?.[todayKey()] || {};
@@ -1025,22 +1115,37 @@
     const successes = Number(daily.downloaded || 0);
     const failureRate = failures / Math.max(1, failures + successes);
     const p = Number(market?.sameSlotPercentile ?? 0.5);
-    const demandMultiplier = p >= 0.9 ? 1.25 : p <= 0.2 ? 0.75 : 1;
+    const thresholds = lagThresholds(monthlyTarget);
+    const demandMultiplier = p >= 0.9
+      ? 1.25
+      : (p <= 0.2 ? (error >= thresholds.medium ? 0.9 : 0.75) : 1);
     const proportional = monthlyTarget > 0 ? error / Math.max(1, monthlyTarget) : 0;
     let rateMultiplier = 1 + proportional * 3;
     rateMultiplier *= demandMultiplier;
     rateMultiplier *= Math.max(0.35, 1 - failureRate * 0.8);
     rateMultiplier *= risk.nearLimit ? 0.45 : 1;
     if (risk.exhausted) rateMultiplier = 0;
-    rateMultiplier = Math.max(0, Math.min(2.5, rateMultiplier));
-    const speedMode = risk.exhausted || rateMultiplier < 0.65 ? 'slow' : rateMultiplier > 1.35 ? 'fast' : 'normal';
+    if (!risk.nearLimit && error >= thresholds.severe) rateMultiplier = Math.max(rateMultiplier, 1.55);
+    if (!risk.nearLimit && error >= thresholds.medium) rateMultiplier = Math.max(rateMultiplier, 1.05);
+    rateMultiplier = Math.max(0, Math.min(3, rateMultiplier));
+    const speedMode = speedModeFromTarget({
+      error,
+      monthlyTarget,
+      demandRegime: market?.marketRegime || 'normal',
+      riskExhausted: risk.exhausted,
+      rateMultiplier
+    });
     const todayTarget = monthlyTarget <= 0 ? 0 : clampNumber(Math.ceil(Math.max(0, error) + (rateMultiplier > 1 ? rateMultiplier : 0)), opts.watcherMinDailyTarget, opts.watcherMinDailyTarget, opts.watcherMaxDailyTarget);
     const hourTarget = Math.max(0, Math.min(opts.watcherMaxPerSession * 3, Math.ceil(rateMultiplier * opts.watcherMaxPerSession)));
-    const sessionIntensity = Math.max(0, Math.min(1, rateMultiplier / 2.5));
+    const sessionIntensity = Math.max(0, Math.min(1, rateMultiplier / 3));
     return {
       schedulerModelMode: 'advanced',
       speedMode,
-      workTimeProgressRatio: Number(progress.toFixed(4)),
+      workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
+      activeTimeProgressRatio: availability.activeTimeProgressRatio,
+      availabilityFactor: availability.availabilityFactor,
+      availabilityExpectedWakeCount: availability.expectedWakeCount,
+      availabilityActualWakeCount: availability.actualWakeCount,
       expectedDone,
       actualDone,
       targetError: error,
@@ -1614,7 +1719,8 @@
       'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
       'marketRegime', 'totalSeeking', 'supplementCount', 'publisher', 'open', 'high', 'low', 'close', 'delta',
       'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
-      'targetError', 'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
+      'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
+      'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
       'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
       'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
       'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
@@ -1626,6 +1732,10 @@
       expectedDone: state.expectedDone || '',
       actualDone: state.actualDone || state.monthDone || '',
       targetError: state.targetError || state.lag || '',
+      activeTimeProgressRatio: state.activeTimeProgressRatio || '',
+      availabilityFactor: state.availabilityFactor || '',
+      availabilityActualWakeCount: state.availabilityActualWakeCount || '',
+      availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || '',
       rateMultiplier: state.rateMultiplier || '',
       riskUsed: daily.riskUsed || state.riskUsed || '',
       riskLimit: state.riskLimit || '',
@@ -1753,6 +1863,8 @@
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
       `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
       `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
+      `- Active progress / availability: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
+      `- Active wake count expected / actual: ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
       `- Expected / actual / error: ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
       `- Rate multiplier: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
       `- Hour target: ${Number(state.hourTarget || 0)}`,
@@ -2532,11 +2644,16 @@
         speedMode: targetState.speedMode,
         todayTarget: targetState.todayTarget || 0,
         hourTarget: targetState.hourTarget || 0,
-        rateMultiplier: targetState.rateMultiplier || 1,
-        targetError: targetState.targetError ?? targetState.lag ?? 0,
-        marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
-        recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
-        riskUsed: targetState.riskUsed || 0,
+      rateMultiplier: targetState.rateMultiplier || 1,
+      targetError: targetState.targetError ?? targetState.lag ?? 0,
+      workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
+      activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
+      availabilityFactor: targetState.availabilityFactor || 1,
+      availabilityActualWakeCount: targetState.availabilityActualWakeCount || 0,
+      availabilityExpectedWakeCount: targetState.availabilityExpectedWakeCount || 0,
+      marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
+      recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
+      riskUsed: targetState.riskUsed || 0,
         riskLimit: targetState.riskLimit || 0,
         dailyLimit: opts.watcherDailyLimit || 0
       };
@@ -2548,7 +2665,10 @@
         todayTarget: targetState.todayTarget,
         hourTarget: targetState.hourTarget || '',
         rateMultiplier: targetState.rateMultiplier || '',
-        targetError: targetState.targetError || targetState.lag || ''
+        targetError: targetState.targetError || targetState.lag || '',
+        workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
+        activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
+        availabilityFactor: targetState.availabilityFactor || 1
       });
       if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
         await appendWatcherTrace('run_skip_today_target_reached', { reason: 'today_target_reached', trigger, todayTarget: targetState.todayTarget });
