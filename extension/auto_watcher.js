@@ -521,6 +521,13 @@
     state.nextAssistGuardLiftMinutes = Number((plan.guardLiftMinutes || 0).toFixed(2));
     state.nextAssistGuardWeight = Number((plan.guardWeight || 0).toFixed(3));
     state.nextAssistGuardMode = plan.guardMode || '';
+    state.nextAssistPlannedAt = new Date().toISOString();
+    state.nextAssistPlanningData = {
+      plannedAt: state.nextAssistPlannedAt,
+      marketDataAt: state.lastDemandSnapshotAt || state.marketData?.generatedAt || '',
+      appliesNewSamplesAfterThisAttempt: true,
+      targetState: targetStateSnapshot(state)
+    };
     state.nextAssistPlan = {
       strategy: plan.strategy,
       reason: plan.reason,
@@ -563,6 +570,8 @@
     delete state.nextAssistGuardLiftMinutes;
     delete state.nextAssistGuardWeight;
     delete state.nextAssistGuardMode;
+    delete state.nextAssistPlannedAt;
+    delete state.nextAssistPlanningData;
     delete state.nextAssistPlan;
     const plan = ensureNextAssistSchedule(opts, state, `after_${reason || 'run'}`);
     await saveWatcherState(state);
@@ -585,6 +594,51 @@
   function isAssistDue(state = null) {
     const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
     return !Number.isFinite(nextAssistMs) || nextAssistMs <= Date.now() + 1000;
+  }
+
+  function hasPendingAssist(state = null) {
+    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+    return Number.isFinite(nextAssistMs) && nextAssistMs > Date.now() + 1000;
+  }
+
+  function targetStateSnapshot(state = {}) {
+    return {
+      schedulerModelMode: state.schedulerModelMode || '',
+      speedMode: state.speedMode || '',
+      todayTarget: state.todayTarget || 0,
+      hourTarget: state.hourTarget || 0,
+      rateMultiplier: state.rateMultiplier || 1,
+      targetError: state.targetError ?? state.lag ?? 0,
+      lag: state.lag ?? state.targetError ?? 0,
+      workTimeProgressRatio: state.workTimeProgressRatio || 0,
+      activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
+      availabilityFactor: state.availabilityFactor || 1,
+      availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
+      availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
+      demandFactor: state.demandFactor || 1,
+      trendFactor: state.trendFactor || 1,
+      marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
+      recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
+      recentD1DemandDelta: state.recentD1DemandDelta || state.marketData?.d1Delta || 0,
+      riskUsed: state.riskUsed || 0,
+      riskLimit: state.riskLimit || 0,
+      riskRemaining: state.riskRemaining || 0,
+      riskExhausted: state.riskExhausted === true
+    };
+  }
+
+  function mergeFrozenTargetState(liveTarget, frozenTarget) {
+    if (!frozenTarget) return liveTarget;
+    return {
+      ...liveTarget,
+      ...frozenTarget,
+      actualDone: liveTarget.actualDone ?? liveTarget.monthDone,
+      monthDone: liveTarget.monthDone,
+      riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed,
+      riskLimit: liveTarget.riskLimit ?? frozenTarget.riskLimit,
+      riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining,
+      riskExhausted: liveTarget.riskExhausted === true
+    };
   }
 
   function randomIntervalMinutes(opts, state = null) {
@@ -630,6 +684,8 @@
       delete state.nextAssistGuardLiftMinutes;
       delete state.nextAssistGuardWeight;
       delete state.nextAssistGuardMode;
+      delete state.nextAssistPlannedAt;
+      delete state.nextAssistPlanningData;
       delete state.nextAssistPlan;
     }
     const delay = randomIntervalMinutes(opts, state);
@@ -1629,8 +1685,22 @@
     state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
     const opts = normalizeOptions(await deps.getOptions());
     const target = opts.watcherAdvancedSchedulerEnabled ? calculateAdvancedTargetState(state, opts, market) : calculateTargetState(state, opts, regime);
-    Object.assign(state, target);
+    const deferForPendingAssist = opts.watcherQuantSchedulerEnabled && opts.watcherObserveMode !== 'observe_only' && hasPendingAssist(state);
+    state.targetPreview = target;
+    state.targetPreviewAt = normalized.timestamp;
+    state.marketDataAffects = deferForPendingAssist ? 'next_after_pending_assist' : 'current_plan';
+    if (!deferForPendingAssist) {
+      Object.assign(state, target);
+    }
     await saveWatcherState(state);
+    await appendWatcherTrace('market_sample_recorded', {
+      reason: deferForPendingAssist ? 'deferred_until_next_assist_plan' : 'applied_to_current_plan',
+      totalSeeking: normalized.totalSeeking,
+      regime,
+      nextAssistRunAt: state.nextAssistRunAt || '',
+      targetPreviewSpeedMode: target.speedMode || '',
+      targetPreviewRateMultiplier: target.rateMultiplier || ''
+    });
     return normalized;
   }
 
@@ -1897,7 +1967,7 @@
       'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
       'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
       'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
-      'nextAssistGuardWeight', 'nextWakeAt', 'chromeAlarmScheduledAt',
+      'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextAssistMarketDataAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
       'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',
       'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
       'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'randomSessionPicked', 'randomSessionFinalSize',
@@ -1929,6 +1999,8 @@
       nextAssistGuardMode: state.nextAssistGuardMode || '',
       nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
       nextAssistGuardWeight: state.nextAssistGuardWeight || '',
+      nextAssistPlannedAt: state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : '',
+      nextAssistMarketDataAt: state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : '',
       nextWakeAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''),
       chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
       lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
@@ -2074,6 +2146,8 @@
       `- Next wake: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
       `- Next assist attempt: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
       `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
+      `- Next assist plan data: planned=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}, market=${state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : ''}`,
+      `- Latest sample affects: ${state.marketDataAffects || ''}`,
       `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
       `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
       `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
@@ -2897,7 +2971,7 @@
         return finish({ ok: false, reason: 'risk_budget_paused' });
       }
       if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
-      const targetState = !opts.watcherQuantSchedulerEnabled
+      const liveTargetState = !opts.watcherQuantSchedulerEnabled
         ? {
             schedulerModelMode: 'fixed',
             speedMode: 'fixed',
@@ -2910,12 +2984,20 @@
         : opts.watcherAdvancedSchedulerEnabled
         ? calculateAdvancedTargetState(stateForTargets, opts, stateForTargets.marketData || {})
         : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
+      const frozenTargetState = trigger === 'alarm' && stateForTargets.nextAssistPlanningData?.targetState
+        ? stateForTargets.nextAssistPlanningData.targetState
+        : null;
+      const targetState = mergeFrozenTargetState(liveTargetState, frozenTargetState);
       Object.assign(stateForTargets, targetState);
+      stateForTargets.lastAssistDecisionModelData = frozenTargetState ? 'frozen_pending_assist_plan' : 'live_market_data';
       stateForTargets.lastAssistStrategy = opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : (opts.watcherQuantSchedulerEnabled ? 'quant_target_market' : 'fixed_interval');
       stateForTargets.lastAssistDecisionAt = new Date().toISOString();
       stateForTargets.lastAssistDecision = {
         trigger,
         strategy: stateForTargets.lastAssistStrategy,
+        modelData: stateForTargets.lastAssistDecisionModelData,
+        frozenPlanAt: stateForTargets.nextAssistPlanningData?.plannedAt || '',
+        frozenMarketDataAt: stateForTargets.nextAssistPlanningData?.marketDataAt || '',
         speedMode: targetState.speedMode,
         todayTarget: targetState.todayTarget || 0,
         hourTarget: targetState.hourTarget || 0,
@@ -2936,6 +3018,7 @@
       await appendWatcherTrace('run_target_state', {
         reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : (opts.watcherQuantSchedulerEnabled ? 'quant_target' : 'fixed_interval'),
         trigger,
+        modelData: stateForTargets.lastAssistDecisionModelData,
         speedMode: targetState.speedMode,
         todayTarget: targetState.todayTarget,
         hourTarget: targetState.hourTarget || '',
