@@ -45,6 +45,7 @@ const DEFAULT_OPTIONS = {
   watcherStopOnCfChallenge: true,
   watcherSkipHighRiskJournal: true,
   watcherDailyReportEnabled: true,
+  watcherBadgeCountdownEnabled: true,
   watcherReportDir: '',
   watcherNoDownloadTimeoutMinutes: 1,
   watcherDownloadTimeoutMinutes: 5,
@@ -196,6 +197,7 @@ async function loadOptions() {
     watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+    watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
     watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
     watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
@@ -382,6 +384,7 @@ async function save() {
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, 100);
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
+  opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
   opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);

@@ -2,6 +2,7 @@
 
 (function () {
   const ALARM_NAME = 'ablesciAutoWatcher';
+  const BADGE_REFRESH_ALARM_NAME = 'ablesciBadgeRefresh';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
@@ -41,6 +42,8 @@
 
   let deps = null;
   let autoWatcherRunning = false;
+  let badgeRefreshTimer = null;
+  const BADGE_REFRESH_INTERVAL_MS = 30 * 1000;
 
   function clampNumber(value, fallback, min, max) {
     const n = Number(value);
@@ -116,12 +119,17 @@
   async function updateActionBadge(state = null) {
     try {
       const current = state || await getWatcherState();
+      const opts = deps?.getOptions ? normalizeOptions(await deps.getOptions()) : {};
       const text = countdownText(current.nextAssistRunAt);
       const shortText = text === 'due'
         ? 'due'
         : (text ? text.replace(/(\d+)m\d+s$/, '$1m').replace(/(\d+)h(\d+)m$/, '$1h') : '');
-      await chrome.action.setBadgeText({ text: shortText.slice(0, 4) });
-      await chrome.action.setBadgeBackgroundColor({ color: text === 'due' ? '#dc2626' : '#2563eb' });
+      if (opts.watcherBadgeCountdownEnabled !== false) {
+        await chrome.action.setBadgeText({ text: shortText.slice(0, 4) });
+        await chrome.action.setBadgeBackgroundColor({ color: text === 'due' ? '#dc2626' : '#2563eb' });
+      } else {
+        await chrome.action.setBadgeText({ text: '' });
+      }
       const title = text
         ? `Ablesci PDF Watcher\n下一次应助尝试：${formatBeijingDateTime(current.nextAssistRunAt)}\n倒计时：${text}`
         : 'Ablesci PDF Watcher';
@@ -210,6 +218,7 @@
       watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+      watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
       watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
@@ -3248,10 +3257,16 @@
   function initPrivateAutoWatcher(nextDeps) {
     deps = nextDeps;
     updateActionBadge().catch(() => {});
+    if (badgeRefreshTimer) clearInterval(badgeRefreshTimer);
+    badgeRefreshTimer = setInterval(() => {
+      updateActionBadge().catch(() => {});
+    }, BADGE_REFRESH_INTERVAL_MS);
 
     chrome.alarms.onAlarm.addListener(alarm => {
       if (alarm.name === ALARM_NAME) runAutoWatcherOnce('alarm');
+      if (alarm.name === BADGE_REFRESH_ALARM_NAME) updateActionBadge().catch(() => {});
     });
+    chrome.alarms.create(BADGE_REFRESH_ALARM_NAME, { periodInMinutes: 1 });
 
     chrome.runtime.onStartup.addListener(() => {
       refreshAutoWatcherAlarm(true, 'runtime_startup').catch(() => {});
@@ -3263,9 +3278,13 @@
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'local') return;
-      if (Object.keys(changes).some(key => key.startsWith('watcher'))) {
-        const changedKeys = Object.keys(changes).filter(key => key.startsWith('watcher')).slice(0, 12).join(',');
-        refreshAutoWatcherAlarm(true, `storage_changed:${changedKeys}`).catch(() => {});
+      const watcherKeys = Object.keys(changes).filter(key => key.startsWith('watcher'));
+      if (watcherKeys.length) {
+        const changedKeys = watcherKeys.slice(0, 12).join(',');
+        updateActionBadge().catch(() => {});
+        if (watcherKeys.some(key => key !== 'watcherBadgeCountdownEnabled')) {
+          refreshAutoWatcherAlarm(true, `storage_changed:${changedKeys}`).catch(() => {});
+        }
       }
     });
 
