@@ -677,7 +677,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>检查间隔</strong>
-          <span>固定间隔模式直接使用；量化/高级模式只作为兜底边界。支持 1–1440 分钟，便于短时测试。</span>
+          <span>固定间隔模式直接使用；量化/高级模式把基准/最小作为应助下限，观察频率单独控制。支持 1–1440 分钟。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
@@ -812,7 +812,8 @@
             <div class="metric-field"><label>1h Delta</label><span id="advancedH1Delta" class="pill">-</span></div>
             <div class="metric-field"><label>Session</label><span id="advancedSessionStatus" class="pill">-</span></div>
             <div class="metric-field"><label>Logic</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
-            <div class="metric-field"><label>Next</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field"><label>Next Alarm</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field"><label>Next Assist</label><span id="watcherNextAssistAt" class="pill">-</span></div>
             <div class="metric-field"><label>Runs</label><span id="watcherRunCounts" class="pill">-</span></div>
             <div class="metric-field"><label>工作日</label><span id="watcherSavedWorkdays" class="pill">-</span></div>
           </div>

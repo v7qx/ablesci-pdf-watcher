@@ -367,6 +367,24 @@ function classifyJournalAccessFailureReason(err) {
   return '';
 }
 
+function isExpectedTimeoutFailure(reason) {
+  return /^(download_not_triggered_timeout|download_timeout|task_timeout)$/.test(String(reason || ''));
+}
+
+function formatTimeoutDoneMessage(err, reason) {
+  const raw = formatTaskError(err);
+  if (reason === 'download_not_triggered_timeout') {
+    return `已按未触发下载超时结束本任务：${raw}`;
+  }
+  if (reason === 'download_timeout') {
+    return `已按下载中超时结束本任务：${raw}`;
+  }
+  if (reason === 'task_timeout') {
+    return `已按单任务最长时间超时结束本任务：${raw}`;
+  }
+  return `已按超时结束本任务：${raw}`;
+}
+
 function sanitizeDownloadItem(item) {
   if (!item) return null;
   return {
@@ -1373,6 +1391,17 @@ function processQueue() {
             reload: false,
             downloadOnly: true,
             blocked: true
+          });
+        } else if (isExpectedTimeoutFailure(failureReason)) {
+          const message = formatTimeoutDoneMessage(err, failureReason);
+          post(port, 'done', message, {
+            html: escapeHtml(message),
+            recomend: false,
+            reload: false,
+            downloadOnly: true,
+            blocked: true,
+            timeout: true,
+            timeoutReason: failureReason
           });
         } else {
           console.error('[Ablesci PDF Uploader Error]', err);

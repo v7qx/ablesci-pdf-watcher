@@ -295,30 +295,51 @@
     return Math.max(0, Math.floor(cap));
   }
 
+  function quantAssistDelayMinutes(opts, state = null) {
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
+    const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
+    const base = clampNumber(opts.watcherIntervalMinutes, 30, min, max);
+    const assistMin = Math.max(min, base);
+    const now = Date.now();
+    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+    if (Number.isFinite(nextAssistMs) && nextAssistMs > now) {
+      return Math.max(1, (nextAssistMs - now) / 60000);
+    }
+    if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
+      const pauseMs = new Date(state.riskPausedUntil).getTime() - now;
+      if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
+    }
+    if (opts.watcherAdvancedSchedulerEnabled && state?.lastSession) {
+      const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
+      if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > now) {
+        return Math.max(1, (cooldownUntilMs - now) / 60000);
+      }
+      const finishedAtMs = state.lastSession.finishedAt ? new Date(state.lastSession.finishedAt).getTime() : 0;
+      const cooldownMinutes = Number(state.lastSession.cooldownMinutes || 0);
+      if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
+        const remaining = cooldownMinutes - ((now - finishedAtMs) / 60000);
+        if (remaining > 0) return Math.max(1, remaining);
+      }
+    }
+    const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
+    const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
+    const boundedDelay = Math.max(assistMin, Math.min(max, sessionDelay));
+    if (state) state.nextAssistRunAt = new Date(now + boundedDelay * 60 * 1000).toISOString();
+    return boundedDelay;
+  }
+
+  function isAssistDue(state = null) {
+    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+    return !Number.isFinite(nextAssistMs) || nextAssistMs <= Date.now() + 1000;
+  }
+
   function randomIntervalMinutes(opts, state = null) {
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
       const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
       if (outsideDelay !== null) return Math.max(1, Math.min(outsideDelay, observeDelay));
-      if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
-        const pauseMs = new Date(state.riskPausedUntil).getTime() - Date.now();
-        if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
-      }
-      if (opts.watcherAdvancedSchedulerEnabled && state?.lastSession) {
-        const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
-        if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
-          return Math.max(1, (cooldownUntilMs - Date.now()) / 60000);
-        }
-        const finishedAtMs = state.lastSession.finishedAt ? new Date(state.lastSession.finishedAt).getTime() : 0;
-        const cooldownMinutes = Number(state.lastSession.cooldownMinutes || 0);
-        if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
-          const remaining = cooldownMinutes - ((Date.now() - finishedAtMs) / 60000);
-          if (remaining > 0) return Math.max(1, remaining);
-        }
-      }
-      const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-      const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
-      return Math.max(1, Math.min(sessionDelay, observeDelay));
+      const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : quantAssistDelayMinutes(opts, state);
+      return Math.max(1, Math.min(assistDelay, observeDelay));
     }
     const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
     const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
@@ -341,6 +362,9 @@
       return;
     }
     const state = await getWatcherState();
+    if (String(reason || '').startsWith('storage_changed:')) {
+      delete state.nextAssistRunAt;
+    }
     const delay = randomIntervalMinutes(opts, state);
     state.nextScheduledAt = Date.now() + delay * 60 * 1000;
     state.currentSchedulerMode = opts.watcherSchedulerMode;
@@ -352,6 +376,8 @@
       reason,
       delayMinutes: Number(delay.toFixed(2)),
       nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
+      nextAssistRunAt: state.nextAssistRunAt || '',
+      observeIntervalMinutes: opts.watcherObserveIntervalMinutes || '',
       speedMode: state.speedMode || '',
       rateMultiplier: state.rateMultiplier || ''
     });
@@ -2217,6 +2243,15 @@
       }
 
       const stateForTargets = await getWatcherState();
+      if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
+        await appendWatcherTrace('run_skip_assist_not_due', {
+          reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
+          trigger,
+          nextAssistRunAt: stateForTargets.nextAssistRunAt || '',
+          observeSnapshot: observeResult?.snapshot ? true : false
+        });
+        return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
+      }
       if (opts.watcherAdvancedSchedulerEnabled && stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
         await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
         return finish({ ok: false, reason: 'risk_budget_paused' });

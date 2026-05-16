@@ -295,6 +295,7 @@ async function renderAdvancedWatcherStatus() {
   setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
   setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
   setText('watcherNextRunAt', formatBeijingDateTime(state.nextScheduledAt));
+  setText('watcherNextAssistAt', formatBeijingDateTime(state.nextAssistRunAt));
   setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
   setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
   const top = (state.banditTopPublishers || [])
@@ -507,6 +508,7 @@ async function copyAutoWatcherConfig() {
       currentSchedulerMode: state.currentSchedulerMode || '',
       currentExecutionModel: state.currentExecutionModel || '',
       nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
+      nextAssistRunAt: state.nextAssistRunAt || '',
       lastRunTrigger: state.lastRunTrigger || '',
       lastRunStartedAt: state.lastRunStartedAt || '',
       lastRunFinishedAt: state.lastRunFinishedAt || '',
