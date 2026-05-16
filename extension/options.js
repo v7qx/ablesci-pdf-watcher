@@ -22,6 +22,7 @@ const DEFAULT_OPTIONS = {
   buttonTextColor: '#ffffff',
   buttonPosition: 'end',
   watcherEnabled: false,
+  watcherSchedulerMode: 'quant',
   watcherIntervalMinutes: 30,
   watcherMinIntervalMinutes: 10,
   watcherMaxIntervalMinutes: 60,
@@ -147,9 +148,30 @@ function normalizeWatcherListUrls(value) {
   return next;
 }
 
+function normalizeSchedulerMode(opts) {
+  const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
+  if (raw === 'fixed' || raw === 'quant' || raw === 'advanced') return raw;
+  if (opts?.watcherAdvancedSchedulerEnabled === true) return 'advanced';
+  if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
+  return 'quant';
+}
+
+function normalizeWatcherIntervals(opts) {
+  const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
+  const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
+  return {
+    watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, min, max),
+    watcherMinIntervalMinutes: min,
+    watcherMaxIntervalMinutes: max
+  };
+}
+
 async function loadOptions() {
   const local = await chrome.storage.local.get(ids);
-  const normalizeOptions = opts => ({
+  const normalizeOptions = opts => {
+    const schedulerMode = normalizeSchedulerMode(opts);
+    const intervals = normalizeWatcherIntervals(opts);
+    return {
     ...opts,
     nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
     downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
@@ -162,9 +184,8 @@ async function loadOptions() {
     buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),
     buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
     buttonPosition: normalizeButtonPosition(opts.buttonPosition),
-    watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, 10, 60),
-    watcherMinIntervalMinutes: clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60),
-    watcherMaxIntervalMinutes: clampNumber(opts.watcherMaxIntervalMinutes, 60, 10, 1440),
+    watcherSchedulerMode: schedulerMode,
+    ...intervals,
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
@@ -176,8 +197,8 @@ async function loadOptions() {
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
-    watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
-    watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
+    watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
+    watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
     watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
     watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
     watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
@@ -191,7 +212,8 @@ async function loadOptions() {
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
     watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
-  });
+  };
+  };
   const missingLocal = ids.some(id => local[id] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
 
@@ -218,10 +240,41 @@ function setText(id, value) {
   if (node) node.textContent = value;
 }
 
+function formatBeijingDateTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '-';
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date).reduce((acc, item) => {
+    acc[item.type] = item.value;
+    return acc;
+  }, {});
+  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function todayKeyBeijing() {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date()).reduce((acc, item) => {
+    acc[item.type] = item.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 async function renderAdvancedWatcherStatus() {
   const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
-  const daily = state.daily?.[new Date().toISOString().slice(0, 10)] || {};
+  const daily = state.daily?.[todayKeyBeijing()] || {};
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
   setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
   setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
@@ -230,6 +283,9 @@ async function renderAdvancedWatcherStatus() {
   setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
   setText('advancedH1Delta', String(Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)));
   setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
+  setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
+  setText('watcherNextRunAt', formatBeijingDateTime(state.nextScheduledAt));
+  setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
   const top = (state.banditTopPublishers || [])
     .slice(0, 5)
     .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
@@ -247,8 +303,11 @@ function validateOptions(opts) {
   const maxBytes = Math.round(maxValue * unitFactor(opts.maxAutoUploadUnit));
   if (maxBytes > 0 && minBytes > maxBytes) throw new Error('最小体积不能大于最大体积。');
 
-  if (opts.watcherIntervalMinutes < 10 || opts.watcherIntervalMinutes > 60) {
-    throw new Error('低频值守检查间隔必须在 10–60 分钟之间。');
+  if (opts.watcherIntervalMinutes < 1 || opts.watcherIntervalMinutes > 1440) {
+    throw new Error('低频值守检查间隔必须在 1–1440 分钟之间。');
+  }
+  if (opts.watcherMinIntervalMinutes < 1 || opts.watcherMaxIntervalMinutes > 1440 || opts.watcherMinIntervalMinutes > opts.watcherMaxIntervalMinutes) {
+    throw new Error('随机间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
@@ -276,9 +335,8 @@ async function save() {
   opts.buttonColor = normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor);
   opts.buttonTextColor = normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor);
   opts.buttonPosition = normalizeButtonPosition(opts.buttonPosition);
-  opts.watcherIntervalMinutes = clampNumber(opts.watcherIntervalMinutes, DEFAULT_OPTIONS.watcherIntervalMinutes, 10, 60);
-  opts.watcherMinIntervalMinutes = DEFAULT_OPTIONS.watcherMinIntervalMinutes;
-  opts.watcherMaxIntervalMinutes = DEFAULT_OPTIONS.watcherMaxIntervalMinutes;
+  opts.watcherSchedulerMode = normalizeSchedulerMode(opts);
+  Object.assign(opts, normalizeWatcherIntervals(opts));
   opts.watcherMaxCandidatesPerRun = 1;
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
@@ -290,8 +348,8 @@ async function save() {
   opts.watcherTelegramNotifyEnabled = opts.watcherTelegramNotifyEnabled === true;
   opts.watcherTelegramConfigPath = String(opts.watcherTelegramConfigPath || '').trim();
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
-  opts.watcherQuantSchedulerEnabled = opts.watcherQuantSchedulerEnabled !== false;
-  opts.watcherAdvancedSchedulerEnabled = opts.watcherAdvancedSchedulerEnabled === true;
+  opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
+  opts.watcherAdvancedSchedulerEnabled = opts.watcherSchedulerMode === 'advanced';
   opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
   opts.watcherObserveMode = opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist';
   opts.watcherObserveOnly = opts.watcherObserveMode === 'observe_only';
@@ -422,7 +480,15 @@ async function copyAutoWatcherConfig() {
     watcherOptions: watcherOptionSnapshot(opts),
     watcherStateSummary: {
       processedCount: Object.keys(processed).length,
-      today: state.daily?.[new Date().toISOString().slice(0, 10)] || null,
+      today: state.daily?.[todayKeyBeijing()] || null,
+      currentSchedulerMode: state.currentSchedulerMode || '',
+      currentExecutionModel: state.currentExecutionModel || '',
+      nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
+      lastRunTrigger: state.lastRunTrigger || '',
+      lastRunStartedAt: state.lastRunStartedAt || '',
+      lastRunFinishedAt: state.lastRunFinishedAt || '',
+      lastRunResult: state.lastRunResult || null,
+      runStats: state.runStats || {},
       schedulerModelMode: state.schedulerModelMode || '',
       marketRegime: state.marketRegime || state.marketData?.marketRegime || '',
       workTimeProgressRatio: state.workTimeProgressRatio || 0,

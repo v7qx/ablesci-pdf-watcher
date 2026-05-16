@@ -26,7 +26,7 @@ if (Test-Path $PrebuiltExe) {
   Copy-Item $PrebuiltExe $TargetExe -Force
 } else {
   if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-    throw "没有找到 Go。请先安装 Go，再重新运行 install_host.ps1。"
+    throw "Go was not found. Install Go first, then rerun install_host.ps1."
   }
   Push-Location $SourceGoDir
   try {
@@ -81,4 +81,4 @@ Write-Host "Host name: $HostName"
 Write-Host "Manifest : $ManifestPath"
 Write-Host "Helper   : $TargetExe"
 Write-Host "Allowed origins: $($AllowedOrigins -join ', ')"
-Write-Host "现在可以在插件设置页点击“测试 Native Helper”。"
+Write-Host "You can now click Test Native Helper in the extension options page."

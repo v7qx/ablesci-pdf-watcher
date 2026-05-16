@@ -19,7 +19,7 @@ if ($Output -eq "") {
 $Output = [System.IO.Path]::GetFullPath($Output)
 
 if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "没有找到 Go。请安装 Go 后再运行 build_helper.ps1。"
+  throw "Go was not found. Install Go first, then rerun build_helper.ps1."
 }
 
 $OutDir = Split-Path -Parent $Output

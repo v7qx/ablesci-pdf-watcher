@@ -631,23 +631,45 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>检查间隔</strong>
-          <span>量化调度关闭时使用；量化调度开启时作为兜底基准。</span>
+          <strong>调度模式</strong>
+          <span>固定间隔适合 1 分钟等高频测试；量化调度按观察和目标运行；高级调度启用实验模型。</span>
         </div>
-        <div class="setting-control">
-          <input id="watcherIntervalMinutes" type="number" min="10" max="60" step="1" value="30" aria-label="检查间隔分钟">
+        <div class="setting-control setting-control-wide">
+          <select id="watcherSchedulerMode" aria-label="调度模式">
+            <option value="fixed">固定间隔 / 测试</option>
+            <option value="quant">量化规则调度</option>
+            <option value="advanced">高级调度实验</option>
+          </select>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>量化调度</strong>
-          <span>按需求观察、工作时间、月目标和随机会话间隔安排下一次运行；默认边观察边按目标应助。</span>
+          <strong>检查间隔</strong>
+          <span>固定间隔模式直接使用；量化/高级模式只作为兜底边界。支持 1–1440 分钟，便于短时测试。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <div class="metric-grid">
+            <div class="metric-field">
+              <label for="watcherIntervalMinutes">基准</label>
+              <input id="watcherIntervalMinutes" type="number" min="1" max="1440" step="1" value="30" aria-label="检查间隔分钟">
+            </div>
+            <div class="metric-field">
+              <label for="watcherMinIntervalMinutes">最小</label>
+              <input id="watcherMinIntervalMinutes" type="number" min="1" max="1440" step="1" value="10" aria-label="最小检查间隔分钟">
+            </div>
+            <div class="metric-field">
+              <label for="watcherMaxIntervalMinutes">最大</label>
+              <input id="watcherMaxIntervalMinutes" type="number" min="1" max="1440" step="1" value="60" aria-label="最大检查间隔分钟">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>观察模式</strong>
+          <span>量化和高级调度会按需求观察、工作时间、月目标和随机会话间隔安排下一次运行。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle" title="启用量化调度">
-            <input id="watcherQuantSchedulerEnabled" type="checkbox">
-            <span></span>
-          </label>
           <select id="watcherObserveMode" aria-label="观察模式">
             <option value="assist">应助+观察</option>
             <option value="observe_only">纯观察</option>
@@ -734,13 +756,9 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>高级调度实验</strong>
-          <span>默认关闭。开启后使用 MarketData、TargetControl、Bandit、Session 和 RiskBudget 模型。</span>
+          <span>通过“调度模式”选择。高级模式使用 MarketData、TargetControl、Bandit、Session 和 RiskBudget 模型。</span>
         </div>
         <div class="setting-control setting-control-wide">
-          <label class="toggle-option" title="启用高级调度模型">
-            <span class="toggle"><input id="watcherAdvancedSchedulerEnabled" type="checkbox"><span></span></span>
-            <span class="toggle-text">启用</span>
-          </label>
           <div class="setting-hint">不会增加并发；仍然使用全局串行队列，遇到 CF / challenge 会暂停。</div>
         </div>
       </div>
@@ -759,6 +777,9 @@
             <div class="metric-field"><label>Risk</label><span id="advancedRiskBudget" class="pill">-</span></div>
             <div class="metric-field"><label>1h Delta</label><span id="advancedH1Delta" class="pill">-</span></div>
             <div class="metric-field"><label>Session</label><span id="advancedSessionStatus" class="pill">-</span></div>
+            <div class="metric-field"><label>Logic</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
+            <div class="metric-field"><label>Next</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field"><label>Runs</label><span id="watcherRunCounts" class="pill">-</span></div>
           </div>
           <div class="setting-hint" id="advancedBanditTop">Bandit top publishers: -</div>
         </div>

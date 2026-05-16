@@ -16,6 +16,7 @@ const DEFAULT_OPTIONS = {
   debugDownloadOnly: false,
   autoRemoveHtmlDownloads: false,
   watcherEnabled: false,
+  watcherSchedulerMode: 'quant',
   watcherIntervalMinutes: 30,
   watcherMinIntervalMinutes: 10,
   watcherMaxIntervalMinutes: 60,
@@ -105,7 +106,10 @@ function throwIfAborted(signal) {
 async function getOptions() {
   const keys = Object.keys(DEFAULT_OPTIONS);
   const local = await chrome.storage.local.get(keys);
-  const normalizeOptions = opts => ({
+  const normalizeOptions = opts => {
+    const schedulerMode = normalizeSchedulerMode(opts);
+    const intervals = normalizeWatcherIntervals(opts);
+    return {
     ...opts,
     nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
     downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
@@ -114,9 +118,8 @@ async function getOptions() {
     scienceDirectTabMode: 'silent_then_visible',
     minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
     maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
-    watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, 10, 60),
-    watcherMinIntervalMinutes: clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60),
-    watcherMaxIntervalMinutes: clampNumber(opts.watcherMaxIntervalMinutes, 60, 10, 1440),
+    watcherSchedulerMode: schedulerMode,
+    ...intervals,
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
@@ -128,8 +131,8 @@ async function getOptions() {
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
-    watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
-    watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
+    watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
+    watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
     watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
     watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
     watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
@@ -143,7 +146,8 @@ async function getOptions() {
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
     watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
-  });
+  };
+  };
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
 
@@ -172,6 +176,24 @@ function clampNumber(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+function normalizeSchedulerMode(opts) {
+  const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
+  if (raw === 'fixed' || raw === 'quant' || raw === 'advanced') return raw;
+  if (opts?.watcherAdvancedSchedulerEnabled === true) return 'advanced';
+  if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
+  return 'quant';
+}
+
+function normalizeWatcherIntervals(opts) {
+  const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
+  const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
+  return {
+    watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, min, max),
+    watcherMinIntervalMinutes: min,
+    watcherMaxIntervalMinutes: max
+  };
 }
 
 function normalizeWatcherListUrls(value) {

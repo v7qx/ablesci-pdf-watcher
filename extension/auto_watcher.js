@@ -91,6 +91,14 @@
     return urls.length ? urls : fallback.slice();
   }
 
+  function normalizeSchedulerMode(opts) {
+    const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
+    if (raw === 'fixed' || raw === 'quant' || raw === 'advanced') return raw;
+    if (opts?.watcherAdvancedSchedulerEnabled === true) return 'advanced';
+    if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
+    return 'quant';
+  }
+
   function randomIntInclusive(min, max) {
     const low = Math.ceil(min);
     const high = Math.floor(max);
@@ -124,11 +132,13 @@
   }
 
   function normalizeOptions(opts) {
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60);
+    const schedulerMode = normalizeSchedulerMode(opts);
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
     const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
     return {
       ...opts,
       watcherEnabled: opts.watcherEnabled === true,
+      watcherSchedulerMode: schedulerMode,
       watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, min, max),
       watcherMinIntervalMinutes: min,
       watcherMaxIntervalMinutes: max,
@@ -143,8 +153,8 @@
       watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
       watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
-      watcherQuantSchedulerEnabled: opts.watcherQuantSchedulerEnabled !== false,
-      watcherAdvancedSchedulerEnabled: opts.watcherAdvancedSchedulerEnabled === true,
+      watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
+      watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
       watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
       watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
       watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
@@ -277,8 +287,8 @@
       const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
       return Math.max(1, Math.min(sessionDelay, observeDelay));
     }
-    const base = clampNumber(opts.watcherIntervalMinutes, 30, 10, 60);
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 60);
+    const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
     const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
     const jitter = Math.max(1, Math.round(base * 0.2));
     const low = Math.max(min, base - jitter);
@@ -300,6 +310,9 @@
     const state = await getWatcherState();
     const delay = randomIntervalMinutes(opts, state);
     state.nextScheduledAt = Date.now() + delay * 60 * 1000;
+    state.currentSchedulerMode = opts.watcherSchedulerMode;
+    state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+    state.lastAlarmRefreshReason = reason;
     await saveWatcherState(state);
     await chrome.alarms.create(ALARM_NAME, { delayInMinutes: delay });
     await appendWatcherTrace('alarm_scheduled', {
@@ -438,6 +451,43 @@
     state.daily = state.daily || {};
     state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
     state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
+    await saveWatcherState(state);
+  }
+
+  function triggerMetricKey(trigger) {
+    if (trigger === 'alarm') return 'autoRuns';
+    if (trigger === 'manual-observe') return 'manualObserveRuns';
+    return 'manualRuns';
+  }
+
+  async function recordRunStart(trigger, opts) {
+    const state = await getWatcherState();
+    const key = todayKey();
+    const now = new Date().toISOString();
+    state.daily = state.daily || {};
+    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+    const daily = state.daily[key];
+    daily.totalRuns = Number(daily.totalRuns || 0) + 1;
+    daily[triggerMetricKey(trigger)] = Number(daily[triggerMetricKey(trigger)] || 0) + 1;
+    state.runStats = state.runStats || {};
+    state.runStats.totalRuns = Number(state.runStats.totalRuns || 0) + 1;
+    state.runStats[triggerMetricKey(trigger)] = Number(state.runStats[triggerMetricKey(trigger)] || 0) + 1;
+    state.lastRunStartedAt = now;
+    state.lastRunTrigger = trigger;
+    state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
+    state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+    await saveWatcherState(state);
+    return state;
+  }
+
+  async function recordRunFinish(trigger, result) {
+    const state = await getWatcherState();
+    state.lastRunFinishedAt = new Date().toISOString();
+    state.lastRunTrigger = trigger;
+    state.lastRunResult = {
+      ok: result?.ok === true,
+      reason: normalizeText(result?.reason || '').slice(0, 160)
+    };
     await saveWatcherState(state);
   }
 
@@ -1139,6 +1189,7 @@
     logs.unshift({
       time: new Date().toISOString(),
       sessionId: normalizeText(entry.sessionId).slice(0, 80),
+      trigger: normalizeText(entry.trigger).slice(0, 80),
       assistId: entry.assistId || '',
       title: normalizeText(entry.title).slice(0, 160),
       doi: normalizeText(entry.doi).slice(0, 160),
@@ -1300,8 +1351,8 @@
       csvHeader,
       reportRow('summary', {
         time: formatBeijingDateTime(new Date()),
-        status: state.schedulerModelMode || 'simple',
-        reason: `checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`,
+        status: state.currentExecutionModel || state.schedulerModelMode || 'simple',
+        reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} observe=${Number(daily.manualObserveRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`,
         totalSeeking: state.lastDemandSnapshot?.totalSeeking || '',
         supplementCount: state.lastDemandSnapshot?.supplementCount || '',
         delta: state.recentH1DemandDelta || state.marketData?.h1Delta || ''
@@ -1344,6 +1395,7 @@
       ...logs.map(log => reportRow('log', {
         time: formatBeijingDateTime(log.time),
         sessionId: log.sessionId || '',
+        trigger: log.trigger || '',
         assistId: log.assistId || '',
         doi: log.doi || '',
         journalName: log.journalName || '',
@@ -1379,6 +1431,10 @@
       `- Speed mode: ${state.speedMode || 'normal'}`,
       `- Demand regime: ${state.demandRegime || 'normal'}`,
       `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
+      `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
+      `- Next run: ${state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''}`,
+      `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
+      `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
       `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
       `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
@@ -1406,10 +1462,11 @@
       '',
       '## Recent Events',
       '',
-      '| Time | Status | Reason | Journal | DOI | Detail |',
-      '| --- | --- | --- | --- | --- | --- |',
+      '| Time | Trigger | Status | Reason | Journal | DOI | Detail |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
       ...logs.slice(0, 12).map(log => [
         formatBeijingDateTime(log.time),
+        log.trigger || '',
         log.status || '',
         log.reason || '',
         log.journalName || '',
@@ -1798,7 +1855,7 @@
     return { port: makeWatcherPort(context), result };
   }
 
-  async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null) {
+  async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null, trigger = '') {
     payload.triggeredBy = 'auto_watcher';
     const key = getProcessedKey(candidate, payload);
     const source = candidateSource(candidate, payload);
@@ -1807,6 +1864,7 @@
       detailUrl: candidate.detailUrl,
       tabId: detailTabId,
       sessionId: session?.id || '',
+      trigger: trigger || session?.trigger || '',
       assistId: key,
       source,
       autoDownload: opts.watcherAutoDownload,
@@ -1815,21 +1873,21 @@
     });
 
     if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
-      await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
+      await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
       await closeTabQuietly(detailTabId, 'high_risk_journal');
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await incrementDaily('skipped');
       await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
+      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
       return false;
     }
 
     if (!opts.watcherAutoDownload) {
-      await appendWatcherTrace('candidate_manual_detail_kept', { reason: 'auto_download_disabled', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
+      await appendWatcherTrace('candidate_manual_detail_kept', { reason: 'auto_download_disabled', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
       await notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
       await incrementDaily('notified');
       await updateProcessed(key, 'skipped', 'manual_detail_opened');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'manual_detail_opened' });
+      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'manual_detail_opened' });
       return true;
     }
 
@@ -1842,10 +1900,10 @@
     }
 
     if (deps.hasActiveTask()) {
-      await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', source });
+      await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
       await updateProcessed(key, 'skipped', 'active_task');
       await incrementDaily('skipped');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: 'active_task' });
+      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'active_task' });
       return false;
     }
 
@@ -1856,6 +1914,7 @@
       opts,
       source,
       sessionId: session?.id || '',
+      trigger: trigger || session?.trigger || '',
       startedAt: Date.now()
     };
     const sessionPort = opts.watcherAdvancedSchedulerEnabled ? makeSessionPortContext(portContext) : null;
@@ -1864,6 +1923,7 @@
       detailUrl: candidate.detailUrl,
       tabId: detailTabId,
       sessionId: session?.id || '',
+      trigger: trigger || session?.trigger || '',
       assistId: key,
       source,
       downloadOnly: payload.downloadOnly === true
@@ -1877,6 +1937,7 @@
       ...payload,
       detailUrl: candidate.detailUrl,
       sessionId: session?.id || '',
+      trigger: trigger || session?.trigger || '',
       status: payload.downloadOnly ? 'download_only' : 'queued_upload',
       reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
     });
@@ -1889,9 +1950,10 @@
     return true;
   }
 
-  async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult) {
+  async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger = '') {
     const session = {
       id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      trigger,
       startedAt: new Date().toISOString(),
       status: 'planning',
       plannedSize: 0,
@@ -2007,7 +2069,7 @@
         await incrementDaily('failed');
         await recordRiskEvent(opts, detail.reason, 'failed');
         await recordBanditOutcome(candidateSource(candidate), 'failure', 0, detail.reason);
-        await appendWatcherLog({ ...candidate, sessionId: session.id, status: 'failed', reason: detail.reason });
+          await appendWatcherLog({ ...candidate, sessionId: session.id, trigger, status: 'failed', reason: detail.reason });
       } else {
         const payload = detail.payload;
         const detailAllowed = isDetailAllowedForWatcher(payload, opts);
@@ -2018,9 +2080,9 @@
           await updateProcessed(key, 'skipped', detailAllowed.reason);
           await incrementDaily('skipped');
           await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
-          await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, status: 'skipped', reason: detailAllowed.reason });
+          await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, trigger, status: 'skipped', reason: detailAllowed.reason });
         } else {
-          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session);
+          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session, trigger);
           if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
           if (handled) handledCount += 1;
         }
@@ -2071,47 +2133,63 @@
       return { ok: false, reason: 'already_running' };
     }
     autoWatcherRunning = true;
+    let runResult = null;
+    function finish(result) {
+      runResult = result;
+      return result;
+    }
     try {
       await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
       const opts = normalizeOptions(await deps.getOptions());
+      await recordRunStart(trigger, opts);
       if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') {
         await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
-        return { ok: false, reason: 'disabled' };
+        return finish({ ok: false, reason: 'disabled' });
       }
       if (deps.hasActiveTask()) {
         await appendWatcherTrace('run_skip_active_task', { reason: 'active_task', trigger });
-        return { ok: false, reason: 'active_task' };
+        return finish({ ok: false, reason: 'active_task' });
       }
       if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
         await appendWatcherTrace('run_skip_outside_work_schedule', { reason: 'outside_work_schedule', trigger });
-        return { ok: true, reason: 'outside_work_schedule' };
+        return finish({ ok: true, reason: 'outside_work_schedule' });
       }
 
       const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
       if (observeResult?.reason === 'cf_challenge') {
         if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, opts.watcherDemandObserveUrl);
-        return { ok: false, reason: 'cf_challenge' };
+        return finish({ ok: false, reason: 'cf_challenge' });
       }
       if (trigger === 'manual-observe') {
-        return { ok: !!observeResult?.snapshot, reason: observeResult?.snapshot ? 'demand_observed' : 'demand_observe_skipped' };
+        return finish({ ok: !!observeResult?.snapshot, reason: observeResult?.snapshot ? 'demand_observed' : 'demand_observe_skipped' });
       }
       if (opts.watcherObserveMode === 'observe_only') {
-        return { ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' };
+        return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' });
       }
 
       const stateForTargets = await getWatcherState();
       if (opts.watcherAdvancedSchedulerEnabled && stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
         await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
-        return { ok: false, reason: 'risk_budget_paused' };
+        return finish({ ok: false, reason: 'risk_budget_paused' });
       }
       if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
-      const targetState = opts.watcherAdvancedSchedulerEnabled
+      const targetState = !opts.watcherQuantSchedulerEnabled
+        ? {
+            schedulerModelMode: 'fixed',
+            speedMode: 'fixed',
+            todayTarget: 0,
+            demandFactor: 1,
+            trendFactor: 1,
+            rateMultiplier: 1,
+            sessionIntensity: 0
+          }
+        : opts.watcherAdvancedSchedulerEnabled
         ? calculateAdvancedTargetState(stateForTargets, opts, stateForTargets.marketData || {})
         : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
       Object.assign(stateForTargets, targetState);
       await saveWatcherState(stateForTargets);
       await appendWatcherTrace('run_target_state', {
-        reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : 'simple_target',
+        reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : (opts.watcherQuantSchedulerEnabled ? 'quant_target' : 'fixed_interval'),
         trigger,
         speedMode: targetState.speedMode,
         todayTarget: targetState.todayTarget,
@@ -2121,11 +2199,11 @@
       });
       if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
         await appendWatcherTrace('run_skip_today_target_reached', { reason: 'today_target_reached', trigger, todayTarget: targetState.todayTarget });
-        return { ok: false, reason: 'today_target_reached' };
+        return finish({ ok: false, reason: 'today_target_reached' });
       }
       if (opts.watcherDailyLimit > 0 && await getDailyCount('downloaded') >= opts.watcherDailyLimit) {
         await appendWatcherTrace('run_skip_daily_limit', { reason: 'daily_limit', trigger, dailyLimit: opts.watcherDailyLimit });
-        return { ok: false, reason: 'daily_limit' };
+        return finish({ ok: false, reason: 'daily_limit' });
       }
 
       let handledCount = 0;
@@ -2133,9 +2211,9 @@
         ? advancedSessionSize(opts, stateForTargets)
         : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
       await appendWatcherTrace('run_session_size', { reason: 'session_size_calculated', trigger, targetSessionSize, advanced: opts.watcherAdvancedSchedulerEnabled });
-      if (targetSessionSize <= 0) return { ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' };
+      if (targetSessionSize <= 0) return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' });
       if (opts.watcherAdvancedSchedulerEnabled) {
-        return await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult);
+        return finish(await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger));
       }
 
       const runListUrls = listUrlsForRun(opts);
@@ -2160,7 +2238,7 @@
         const parsed = await parseListUrl(pickedListUrl);
         if (parsed.cfChallenge) {
           if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
-          return { ok: false, reason: 'cf_challenge' };
+          return finish({ ok: false, reason: 'cf_challenge' });
         }
         await resetCfChallengeStreak();
 
@@ -2173,7 +2251,7 @@
           orderedCount: candidates.length
         });
         for (const candidate of candidates) {
-          if (handledCount >= targetSessionSize) return { ok: true, reason: 'session_target_reached' };
+          if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
           const listAllowed = isListCandidateAllowed(candidate, opts);
           if (!listAllowed.ok) {
             await appendWatcherTrace('candidate_skip_list_filter', {
@@ -2207,7 +2285,7 @@
             await closeTabQuietly(detail.tabId, 'detail_extract_failed');
             await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
             await incrementDaily('failed');
-            await appendWatcherLog({ ...candidate, status: 'failed', reason: detail.reason });
+            await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason });
             continue;
           }
 
@@ -2219,30 +2297,31 @@
             await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
             await updateProcessed(key, 'skipped', detailAllowed.reason);
             await incrementDaily('skipped');
-            await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, status: 'skipped', reason: detailAllowed.reason });
+            await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason });
             continue;
           }
 
-          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId);
+          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, null, trigger);
           if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
           if (handled) {
             handledCount += 1;
             await appendWatcherTrace('candidate_handled', { reason: 'handled', trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key, handledCount, targetSessionSize });
             if (handledCount >= targetSessionSize || deps.hasActiveTask()) {
-              return { ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' };
+              return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
             }
           }
         }
       }
 
-      return { ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' };
+      return finish({ ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' });
     } catch (err) {
       await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
       await incrementDaily('failed');
-      await appendWatcherLog({ status: 'failed', reason: err?.message || String(err) });
-      return { ok: false, reason: err?.message || String(err) };
+      await appendWatcherLog({ trigger, status: 'failed', reason: err?.message || String(err) });
+      return finish({ ok: false, reason: err?.message || String(err) });
     } finally {
       await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
+      await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
       if (trigger === 'alarm') refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
       autoWatcherRunning = false;
