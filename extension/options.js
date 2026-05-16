@@ -316,10 +316,10 @@ function validateOptions(opts) {
   if (maxBytes > 0 && minBytes > maxBytes) throw new Error('最小体积不能大于最大体积。');
 
   if (opts.watcherIntervalMinutes < 1 || opts.watcherIntervalMinutes > 1440) {
-    throw new Error('低频值守检查间隔必须在 1–1440 分钟之间。');
+    throw new Error('低频值守应助间隔必须在 1–1440 分钟之间。');
   }
   if (opts.watcherMinIntervalMinutes < 1 || opts.watcherMaxIntervalMinutes > 1440 || opts.watcherMinIntervalMinutes > opts.watcherMaxIntervalMinutes) {
-    throw new Error('随机间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
+    throw new Error('随机应助间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
   if (opts.watcherMaxPerSession < 1 || opts.watcherMaxPerSession > 10) {
@@ -333,7 +333,7 @@ function validateOptions(opts) {
   }
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
   if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
-  if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求观察 URL 必须是 Ablesci HTTPS 链接。');
+  if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求采样 URL 必须是 Ablesci HTTPS 链接。');
 }
 
 async function save() {
@@ -509,6 +509,15 @@ async function copyAutoWatcherConfig() {
       currentExecutionModel: state.currentExecutionModel || '',
       nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
       nextAssistRunAt: state.nextAssistRunAt || '',
+      nextAssistStrategy: state.nextAssistStrategy || '',
+      nextAssistReason: state.nextAssistReason || '',
+      nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
+      nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
+      nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
+      nextAssistPlan: state.nextAssistPlan || null,
+      lastAssistStrategy: state.lastAssistStrategy || '',
+      lastAssistDecisionAt: state.lastAssistDecisionAt || '',
+      lastAssistDecision: state.lastAssistDecision || null,
       lastRunTrigger: state.lastRunTrigger || '',
       lastRunStartedAt: state.lastRunStartedAt || '',
       lastRunFinishedAt: state.lastRunFinishedAt || '',
@@ -583,9 +592,9 @@ async function runAutoWatcherNow() {
 }
 
 async function observeDemandNow() {
-  showPill('watcherRunStatus', '观察中');
+  showPill('watcherRunStatus', '采样中');
   const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
-  showPill('watcherRunStatus', res.ok ? (res.reason || '已观察') : ('失败：' + (res.reason || '未知错误')), !res.ok);
+  showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : ('失败：' + (res.reason || '未知错误')), !res.ok);
 }
 
 async function testWatcherNotification() {

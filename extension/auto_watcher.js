@@ -295,37 +295,196 @@
     return Math.max(0, Math.floor(cap));
   }
 
-  function quantAssistDelayMinutes(opts, state = null) {
+  function quotaResetDelayMinutes(opts, date = new Date()) {
+    const nowMinute = beijingMinutesNow(date);
+    const minutesUntilMidnight = 24 * 60 - nowMinute;
+    if (!opts?.watcherQuantSchedulerEnabled) return Math.max(1, minutesUntilMidnight + Math.random() * 5);
+    for (let d = 1; d <= 8; d += 1) {
+      const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
+      if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;
+      const firstStart = opts.watcherWorkWindows.map(w => w.start).sort((a, b) => a - b)[0] ?? 0;
+      return Math.max(1, minutesUntilMidnight + (d - 1) * 24 * 60 + firstStart + Math.random() * 10);
+    }
+    return Math.max(1, minutesUntilMidnight + Math.random() * 5);
+  }
+
+  function quotaHoldPlan(opts, state = {}) {
+    const downloaded = dailyDownloadedFromState(state);
+    if (Number(opts?.watcherDailyLimit || 0) > 0 && downloaded >= Number(opts.watcherDailyLimit || 0)) {
+      const minutes = quotaResetDelayMinutes(opts);
+      return {
+        minutes,
+        modelDelayMinutes: minutes,
+        guardMinutes: 0,
+        reason: 'daily_limit_reached',
+        strategy: 'quota_hold',
+        dailyDownloaded: downloaded,
+        dailyLimit: Number(opts.watcherDailyLimit || 0)
+      };
+    }
+    if (Number(state?.todayTarget || 0) > 0 && downloaded >= Number(state.todayTarget || 0)) {
+      const minutes = quotaResetDelayMinutes(opts);
+      return {
+        minutes,
+        modelDelayMinutes: minutes,
+        guardMinutes: 0,
+        reason: 'today_target_reached',
+        strategy: 'target_hold',
+        dailyDownloaded: downloaded,
+        todayTarget: Number(state.todayTarget || 0)
+      };
+    }
+    return null;
+  }
+
+  function assistGuardMinutes(opts) {
     const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
     const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
-    const base = clampNumber(opts.watcherIntervalMinutes, 30, min, max);
-    const assistMin = Math.max(min, base);
+    return clampNumber(opts.watcherIntervalMinutes, 30, min, max);
+  }
+
+  function targetDrivenAssistPlan(opts, state = {}, reason = 'target_model') {
+    const hold = quotaHoldPlan(opts, state);
+    if (hold) return hold;
+    const guardMinutes = assistGuardMinutes(opts);
     const now = Date.now();
-    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
-    if (Number.isFinite(nextAssistMs) && nextAssistMs > now) {
-      return Math.max(1, (nextAssistMs - now) / 60000);
-    }
     if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
       const pauseMs = new Date(state.riskPausedUntil).getTime() - now;
-      if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
+      if (pauseMs > 0) {
+        const minutes = Math.max(guardMinutes, pauseMs / 60000);
+        return {
+          minutes,
+          modelDelayMinutes: pauseMs / 60000,
+          guardMinutes,
+          reason: 'risk_pause',
+          strategy: 'risk_pause'
+        };
+      }
     }
     if (opts.watcherAdvancedSchedulerEnabled && state?.lastSession) {
       const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
       if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > now) {
-        return Math.max(1, (cooldownUntilMs - now) / 60000);
+        const modelDelay = (cooldownUntilMs - now) / 60000;
+        return {
+          minutes: Math.max(guardMinutes, modelDelay),
+          modelDelayMinutes: modelDelay,
+          guardMinutes,
+          reason: 'session_cooldown',
+          strategy: 'session_cooldown'
+        };
       }
       const finishedAtMs = state.lastSession.finishedAt ? new Date(state.lastSession.finishedAt).getTime() : 0;
       const cooldownMinutes = Number(state.lastSession.cooldownMinutes || 0);
       if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
         const remaining = cooldownMinutes - ((now - finishedAtMs) / 60000);
-        if (remaining > 0) return Math.max(1, remaining);
+        if (remaining > 0) {
+          return {
+            minutes: Math.max(guardMinutes, remaining),
+            modelDelayMinutes: remaining,
+            guardMinutes,
+            reason: 'session_cooldown',
+            strategy: 'session_cooldown'
+          };
+        }
       }
     }
     const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-    const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
-    const boundedDelay = Math.max(assistMin, Math.min(max, sessionDelay));
-    if (state) state.nextAssistRunAt = new Date(now + boundedDelay * 60 * 1000).toISOString();
-    return boundedDelay;
+    const rawModelDelay = logNormalMinutes(mode.median, mode.min, mode.max);
+    const targetError = Number(state.targetError ?? state.lag ?? 0);
+    const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
+    const lagBoost = targetError > 0 ? Math.min(1.6, 1 + Math.min(1, targetError / monthlyTarget) * 2.5) : 1;
+    const rateMultiplier = Number(state.rateMultiplier || 1);
+    const demandFactor = Number(state.demandFactor || 1);
+    const trendFactor = Number(state.trendFactor || 1);
+    const h1Delta = Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0);
+    const marketRegime = state.marketRegime || state.demandRegime || state.marketData?.marketRegime || 'normal';
+    const marketBoost = marketRegime === 'very_busy' ? 1.25 : (marketRegime === 'quiet' ? 0.8 : 1);
+    const trendBoost = h1Delta > 20 ? 1.15 : (h1Delta < -20 ? 0.9 : 1);
+    const risk = riskSnapshot(state, opts);
+    const riskPenalty = risk.nearLimit ? 0.55 : 1;
+    const combined = Math.max(0.25, Math.min(3, rateMultiplier * demandFactor * trendFactor * lagBoost * marketBoost * trendBoost * riskPenalty));
+    const modelDelay = rawModelDelay / combined;
+    const minutes = Math.max(guardMinutes, modelDelay);
+    return {
+      minutes,
+      modelDelayMinutes: modelDelay,
+      rawModelDelayMinutes: rawModelDelay,
+      guardMinutes,
+      reason,
+      strategy: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : 'quant_target_market',
+      speedMode: state.speedMode || 'normal',
+      rateMultiplier,
+      targetError,
+      marketRegime,
+      h1Delta,
+      combinedMultiplier: combined
+    };
+  }
+
+  function ensureNextAssistSchedule(opts, state = {}, reason = 'ensure') {
+    if (!opts.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
+    const now = Date.now();
+    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+    if (Number.isFinite(nextAssistMs) && nextAssistMs > now) {
+      return {
+        minutes: Math.max(1, (nextAssistMs - now) / 60000),
+        reason: state.nextAssistReason || reason,
+        strategy: state.nextAssistStrategy || ''
+      };
+    }
+    const plan = targetDrivenAssistPlan(opts, state, reason);
+    state.nextAssistRunAt = new Date(now + plan.minutes * 60 * 1000).toISOString();
+    state.nextAssistReason = plan.reason;
+    state.nextAssistStrategy = plan.strategy;
+    state.nextAssistDelayMinutes = Number(plan.minutes.toFixed(2));
+    state.nextAssistModelDelayMinutes = Number((plan.modelDelayMinutes || plan.minutes).toFixed(2));
+    state.nextAssistGuardMinutes = Number((plan.guardMinutes || 0).toFixed(2));
+    state.nextAssistPlan = {
+      strategy: plan.strategy,
+      reason: plan.reason,
+      speedMode: plan.speedMode || '',
+      rateMultiplier: plan.rateMultiplier || '',
+      targetError: plan.targetError || 0,
+      marketRegime: plan.marketRegime || '',
+      h1Delta: plan.h1Delta || 0,
+      dailyDownloaded: plan.dailyDownloaded ?? dailyDownloadedFromState(state),
+      dailyLimit: plan.dailyLimit ?? Number(opts.watcherDailyLimit || 0),
+      todayTarget: plan.todayTarget ?? Number(state.todayTarget || 0),
+      combinedMultiplier: plan.combinedMultiplier || '',
+      rawModelDelayMinutes: plan.rawModelDelayMinutes ? Number(plan.rawModelDelayMinutes.toFixed(2)) : '',
+      modelDelayMinutes: plan.modelDelayMinutes ? Number(plan.modelDelayMinutes.toFixed(2)) : '',
+      guardMinutes: plan.guardMinutes ? Number(plan.guardMinutes.toFixed(2)) : '',
+      finalDelayMinutes: Number(plan.minutes.toFixed(2))
+    };
+    return plan;
+  }
+
+  async function scheduleNextAssistAfterRun(opts, result, trigger) {
+    if (!opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
+    if (trigger === 'manual-observe') return null;
+    const reason = String(result?.reason || '');
+    if (/assist_not_due|observe_only|outside_work_schedule|already_running|disabled/i.test(reason)) return null;
+    const state = await getWatcherState();
+    delete state.nextAssistRunAt;
+    delete state.nextAssistReason;
+    delete state.nextAssistStrategy;
+    delete state.nextAssistDelayMinutes;
+    delete state.nextAssistModelDelayMinutes;
+    delete state.nextAssistGuardMinutes;
+    delete state.nextAssistPlan;
+    const plan = ensureNextAssistSchedule(opts, state, `after_${reason || 'run'}`);
+    await saveWatcherState(state);
+    await appendWatcherTrace('assist_next_scheduled', {
+      reason: state.nextAssistReason || '',
+      trigger,
+      nextAssistRunAt: state.nextAssistRunAt || '',
+      delayMinutes: state.nextAssistDelayMinutes || '',
+      modelDelayMinutes: state.nextAssistModelDelayMinutes || '',
+      guardMinutes: state.nextAssistGuardMinutes || '',
+      strategy: state.nextAssistStrategy || '',
+      plan: state.nextAssistPlan || {}
+    });
+    return plan;
   }
 
   function isAssistDue(state = null) {
@@ -334,11 +493,14 @@
   }
 
   function randomIntervalMinutes(opts, state = null) {
+    const hold = quotaHoldPlan(opts, state || {});
+    if (hold && !opts.watcherQuantSchedulerEnabled) return Math.max(1, hold.minutes);
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
       const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
       if (outsideDelay !== null) return Math.max(1, Math.min(outsideDelay, observeDelay));
-      const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : quantAssistDelayMinutes(opts, state);
+      const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
+      const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : Number(assistPlan?.minutes || Number.POSITIVE_INFINITY);
       return Math.max(1, Math.min(assistDelay, observeDelay));
     }
     const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
@@ -364,6 +526,12 @@
     const state = await getWatcherState();
     if (String(reason || '').startsWith('storage_changed:')) {
       delete state.nextAssistRunAt;
+      delete state.nextAssistReason;
+      delete state.nextAssistStrategy;
+      delete state.nextAssistDelayMinutes;
+      delete state.nextAssistModelDelayMinutes;
+      delete state.nextAssistGuardMinutes;
+      delete state.nextAssistPlan;
     }
     const delay = randomIntervalMinutes(opts, state);
     state.nextScheduledAt = Date.now() + delay * 60 * 1000;
@@ -377,6 +545,8 @@
       delayMinutes: Number(delay.toFixed(2)),
       nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
       nextAssistRunAt: state.nextAssistRunAt || '',
+      nextAssistStrategy: state.nextAssistStrategy || '',
+      nextAssistReason: state.nextAssistReason || '',
       observeIntervalMinutes: opts.watcherObserveIntervalMinutes || '',
       speedMode: state.speedMode || '',
       rateMultiplier: state.rateMultiplier || ''
@@ -1392,7 +1562,8 @@
       'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
       'targetError', 'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
       'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
-      'step', 'trigger', 'tabId', 'url', 'details'
+      'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
+      'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'step', 'trigger', 'tabId', 'url', 'details'
     ];
     const baseReportFields = {
       marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
@@ -1405,7 +1576,14 @@
       riskLimit: state.riskLimit || '',
       sessionSize: state.lastSession?.targetSessionSize || '',
       sessionHandledCount: state.lastSession?.handledCount || '',
-      sessionDurationMs: state.lastSession?.sessionDurationMs || ''
+      sessionDurationMs: state.lastSession?.sessionDurationMs || '',
+      currentStrategy: state.lastAssistStrategy || state.currentExecutionModel || '',
+      nextAssistRunAt: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
+      nextAssistStrategy: state.nextAssistStrategy || '',
+      nextAssistReason: state.nextAssistReason || '',
+      nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
+      nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
+      nextAssistGuardMinutes: state.nextAssistGuardMinutes || ''
     };
     function reportRow(type, values = {}) {
       const row = { record_type: type, ...baseReportFields, ...values };
@@ -1426,6 +1604,16 @@
         sessionId: state.lastSession?.id || '',
         status: state.lastSession?.status || '',
         reason: state.lastSession?.cooldownMinutes ? `cooldown=${state.lastSession.cooldownMinutes}m` : ''
+      }),
+      reportRow('assist_strategy', {
+        time: state.lastAssistDecisionAt ? formatBeijingDateTime(state.lastAssistDecisionAt) : formatBeijingDateTime(new Date()),
+        status: state.lastAssistStrategy || '',
+        reason: JSON.stringify(state.lastAssistDecision || {})
+      }),
+      reportRow('next_assist', {
+        time: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
+        status: state.nextAssistStrategy || '',
+        reason: JSON.stringify(state.nextAssistPlan || {})
       }),
       ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
         time: formatBeijingDateTime(new Date()),
@@ -1496,7 +1684,11 @@
       `- Demand regime: ${state.demandRegime || 'normal'}`,
       `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
       `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
-      `- Next run: ${state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''}`,
+      `- Current assist strategy: ${state.lastAssistStrategy || ''}`,
+      `- Next alarm: ${state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''}`,
+      `- Next assist: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
+      `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
+      `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
       `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
       `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
@@ -2206,6 +2398,7 @@
     }
     autoWatcherRunning = true;
     let runResult = null;
+    let currentRunOpts = null;
     function finish(result) {
       runResult = result;
       return result;
@@ -2213,6 +2406,7 @@
     try {
       await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
       const opts = normalizeOptions(await deps.getOptions());
+      currentRunOpts = opts;
       await recordRunStart(trigger, opts);
       if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') {
         await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
@@ -2271,6 +2465,22 @@
         ? calculateAdvancedTargetState(stateForTargets, opts, stateForTargets.marketData || {})
         : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
       Object.assign(stateForTargets, targetState);
+      stateForTargets.lastAssistStrategy = opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : (opts.watcherQuantSchedulerEnabled ? 'quant_target_market' : 'fixed_interval');
+      stateForTargets.lastAssistDecisionAt = new Date().toISOString();
+      stateForTargets.lastAssistDecision = {
+        trigger,
+        strategy: stateForTargets.lastAssistStrategy,
+        speedMode: targetState.speedMode,
+        todayTarget: targetState.todayTarget || 0,
+        hourTarget: targetState.hourTarget || 0,
+        rateMultiplier: targetState.rateMultiplier || 1,
+        targetError: targetState.targetError ?? targetState.lag ?? 0,
+        marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
+        recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
+        riskUsed: targetState.riskUsed || 0,
+        riskLimit: targetState.riskLimit || 0,
+        dailyLimit: opts.watcherDailyLimit || 0
+      };
       await saveWatcherState(stateForTargets);
       await appendWatcherTrace('run_target_state', {
         reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : (opts.watcherQuantSchedulerEnabled ? 'quant_target' : 'fixed_interval'),
@@ -2419,6 +2629,7 @@
     } finally {
       await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
       await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
+      if (currentRunOpts) await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
       if (trigger === 'alarm') refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
       autoWatcherRunning = false;
