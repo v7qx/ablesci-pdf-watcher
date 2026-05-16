@@ -277,7 +277,8 @@
   function randomIntervalMinutes(opts, state = null) {
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
-      if (outsideDelay !== null) return outsideDelay;
+      const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
+      if (outsideDelay !== null) return Math.max(1, Math.min(outsideDelay, observeDelay));
       if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
         const pauseMs = new Date(state.riskPausedUntil).getTime() - Date.now();
         if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
@@ -287,7 +288,6 @@
       }
       const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
       const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
-      const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
       return Math.max(1, Math.min(sessionDelay, observeDelay));
     }
     const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
@@ -2158,10 +2158,6 @@
         await appendWatcherTrace('run_skip_active_task', { reason: 'active_task', trigger });
         return finish({ ok: false, reason: 'active_task' });
       }
-      if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
-        await appendWatcherTrace('run_skip_outside_work_schedule', { reason: 'outside_work_schedule', trigger });
-        return finish({ ok: true, reason: 'outside_work_schedule' });
-      }
 
       const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
       if (observeResult?.reason === 'cf_challenge') {
@@ -2173,6 +2169,13 @@
       }
       if (opts.watcherObserveMode === 'observe_only') {
         return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' });
+      }
+      if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
+        await appendWatcherTrace('run_skip_outside_work_schedule', {
+          reason: observeResult?.snapshot ? 'observed_then_outside_work_schedule' : 'outside_work_schedule',
+          trigger
+        });
+        return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_outside_work_schedule' : 'outside_work_schedule' });
       }
 
       const stateForTargets = await getWatcherState();
