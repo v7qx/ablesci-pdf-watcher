@@ -151,7 +151,7 @@ async function getOptions() {
     watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10)
   };
   };
   const missingLocal = keys.some(k => local[k] === undefined);

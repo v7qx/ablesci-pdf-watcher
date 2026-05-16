@@ -217,7 +217,7 @@ async function loadOptions() {
     watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10)
   };
   };
   const missingLocal = ids.some(id => local[id] === undefined);
@@ -321,6 +321,9 @@ function validateOptions(opts) {
     throw new Error('随机间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
+  if (opts.watcherMaxPerSession < 1 || opts.watcherMaxPerSession > 10) {
+    throw new Error('每会话最多候选必须在 1–10 之间。');
+  }
   if (opts.watcherNoDownloadTimeoutMinutes <= 0 || opts.watcherDownloadTimeoutMinutes <= 0 || opts.watcherTaskTimeoutMinutes <= 0) {
     throw new Error('任务超时时间必须大于 0。');
   }
@@ -382,7 +385,7 @@ async function save() {
   opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);
   opts.watcherMinDailyTarget = clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500);
   opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
-  opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 4);
+  opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
 
   try {
     validateOptions(opts);

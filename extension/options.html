@@ -742,15 +742,15 @@
               <input id="watcherMaxDailyTarget" type="number" min="1" max="500" step="1" value="40" aria-label="最大日目标">
             </div>
             <div class="metric-field">
-              <label for="watcherMaxPerSession">会话候选</label>
-              <input id="watcherMaxPerSession" type="number" min="1" max="4" step="1" value="1" aria-label="每会话最多候选">
+              <label for="watcherMaxPerSession">会话上限</label>
+              <input id="watcherMaxPerSession" type="number" min="1" max="10" step="1" value="1" aria-label="每会话最多候选">
             </div>
             <div class="metric-field">
               <label for="watcherRiskBudgetLimit">风险预算</label>
               <input id="watcherRiskBudgetLimit" type="number" min="1" max="100" step="1" value="10" aria-label="每日风险预算">
             </div>
           </div>
-          <div class="setting-hint">会话候选只是单轮上限，实际仍受每日上限、当前串行队列和下载/上传状态限制。</div>
+          <div class="setting-hint">会话候选可手动输入 1–10；这是单轮硬上限，实际数量仍受每日上限、目标剩余量、风险预算和全局串行队列限制。</div>
         </div>
       </div>
       <div class="setting-row">

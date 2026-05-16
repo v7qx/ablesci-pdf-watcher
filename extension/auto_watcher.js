@@ -10,6 +10,7 @@
   const MAX_LOGS = 200;
   const MAX_TRACE_LOGS = 1200;
   const MAX_DEMAND_SNAPSHOTS = 500;
+  const MAX_SESSION_CANDIDATES = 10;
   const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
@@ -30,9 +31,9 @@
     Unknown: 0.4
   };
   const SESSION_MODES = {
-    slow: { median: 28, min: 15, max: 60, sizeWeights: [0.15, 0.45, 0.30, 0.10, 0.00] },
-    normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.40, 0.25, 0.10] },
-    fast: { median: 10, min: 6, max: 25, sizeWeights: [0.02, 0.10, 0.35, 0.35, 0.18] }
+    slow: { median: 28, min: 15, max: 60, sizeWeights: [0.14, 0.48, 0.25, 0.10, 0.03, 0, 0, 0, 0, 0, 0] },
+    normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.34, 0.24, 0.11, 0.04, 0.02, 0, 0, 0, 0] },
+    fast: { median: 10, min: 6, max: 25, sizeWeights: [0.02, 0.08, 0.22, 0.27, 0.20, 0.11, 0.06, 0.025, 0.01, 0.004, 0.001] }
   };
   const ADVANCED_ITEM_GAP = { median: 3, min: 1, max: 8 };
   const ADVANCED_COOLDOWN = { median: 18, min: 6, max: 90 };
@@ -170,7 +171,7 @@
       watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
       watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
       watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 4)
+      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, MAX_SESSION_CANDIDATES)
     };
   }
 
@@ -274,6 +275,26 @@
     return weights.length - 1;
   }
 
+  function maxSessionCandidates(opts) {
+    return Math.round(clampNumber(opts?.watcherMaxPerSession, 1, 1, MAX_SESSION_CANDIDATES));
+  }
+
+  function dailyDownloadedFromState(state) {
+    return Number(state?.daily?.[todayKey()]?.downloaded || 0);
+  }
+
+  function sessionExecutionCap(opts, state, respectTodayTarget = true) {
+    let cap = maxSessionCandidates(opts);
+    const downloaded = dailyDownloadedFromState(state);
+    if (Number(opts?.watcherDailyLimit || 0) > 0) {
+      cap = Math.min(cap, Math.max(0, Number(opts.watcherDailyLimit || 0) - downloaded));
+    }
+    if (respectTodayTarget && Number(state?.todayTarget || 0) > 0) {
+      cap = Math.min(cap, Math.max(0, Number(state.todayTarget || 0) - downloaded));
+    }
+    return Math.max(0, Math.floor(cap));
+  }
+
   function randomIntervalMinutes(opts, state = null) {
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
@@ -283,8 +304,17 @@
         const pauseMs = new Date(state.riskPausedUntil).getTime() - Date.now();
         if (pauseMs > 0) return Math.max(1, pauseMs / 60000);
       }
-      if (opts.watcherAdvancedSchedulerEnabled && Number(state?.lastSession?.cooldownMinutes || 0) > 0) {
-        return Math.max(1, Number(state.lastSession.cooldownMinutes));
+      if (opts.watcherAdvancedSchedulerEnabled && state?.lastSession) {
+        const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
+        if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
+          return Math.max(1, (cooldownUntilMs - Date.now()) / 60000);
+        }
+        const finishedAtMs = state.lastSession.finishedAt ? new Date(state.lastSession.finishedAt).getTime() : 0;
+        const cooldownMinutes = Number(state.lastSession.cooldownMinutes || 0);
+        if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
+          const remaining = cooldownMinutes - ((Date.now() - finishedAtMs) / 60000);
+          if (remaining > 0) return Math.max(1, remaining);
+        }
       }
       const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
       const sessionDelay = logNormalMinutes(mode.median, mode.min, mode.max);
@@ -1167,18 +1197,23 @@
   function sessionSize(opts, state) {
     const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
     const picked = weightedPickIndex(mode.sizeWeights);
-    return Math.min(opts.watcherMaxPerSession, Math.max(0, picked));
+    const cap = sessionExecutionCap(opts, state, opts?.watcherQuantSchedulerEnabled !== false);
+    return Math.min(cap, Math.max(0, picked));
   }
 
   function advancedSessionSize(opts, state) {
     const risk = riskSnapshot(state, opts);
     if (risk.exhausted) return 0;
+    const cap = Math.min(sessionExecutionCap(opts, state, true), risk.remaining);
+    if (cap <= 0) return 0;
+    const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
+    const modeSize = weightedPickIndex(mode.sizeWeights);
     const multiplier = Number(state.rateMultiplier || 1);
     const intensity = Number(state.sessionIntensity || 0.4);
-    const base = Math.ceil(opts.watcherMaxPerSession * Math.max(0.2, intensity));
-    const boosted = multiplier > 1.4 ? base + 1 : base;
-    const cappedByRisk = Math.min(boosted, risk.remaining);
-    return Math.max(0, Math.min(4, opts.watcherMaxPerSession, cappedByRisk));
+    const parentOrderSize = Math.ceil(maxSessionCandidates(opts) * Math.max(0.12, intensity) * 0.75);
+    const boost = multiplier > 2.0 ? 2 : (multiplier > 1.45 ? 1 : 0);
+    const desired = Math.max(modeSize, parentOrderSize) + boost;
+    return Math.max(0, Math.min(cap, desired));
   }
 
   async function sleepMinutes(minutes) {
@@ -2114,13 +2149,15 @@
 
     const finalState = await getWatcherState();
     const durationMs = Date.now() - startedMs;
+    const cooldownMinutes = Number((logNormalMinutes(ADVANCED_COOLDOWN.median, ADVANCED_COOLDOWN.min, ADVANCED_COOLDOWN.max) / Math.max(0.25, Number(finalState.rateMultiplier || 1))).toFixed(2));
     finalState.lastSession = {
       ...finalState.currentSession,
       status: 'done',
       finishedAt: new Date().toISOString(),
       handledCount,
       sessionDurationMs: durationMs,
-      cooldownMinutes: Number((logNormalMinutes(ADVANCED_COOLDOWN.median, ADVANCED_COOLDOWN.min, ADVANCED_COOLDOWN.max) / Math.max(0.25, Number(finalState.rateMultiplier || 1))).toFixed(2))
+      cooldownMinutes,
+      cooldownUntil: new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString()
     };
     finalState.currentSession = { ...finalState.lastSession };
     await saveWatcherState(finalState);
@@ -2130,7 +2167,8 @@
       handledCount,
       targetSessionSize,
       sessionDurationMs: durationMs,
-      cooldownMinutes: finalState.lastSession.cooldownMinutes
+      cooldownMinutes: finalState.lastSession.cooldownMinutes,
+      cooldownUntil: finalState.lastSession.cooldownUntil
     });
     return { ok: true, reason: handledCount ? 'advanced_session_done' : (observeResult?.snapshot ? 'observe_only_session' : 'advanced_no_candidate') };
   }
@@ -2218,10 +2256,23 @@
       }
 
       let handledCount = 0;
+      const sessionCap = sessionExecutionCap(opts, stateForTargets, opts.watcherQuantSchedulerEnabled !== false);
+      const riskForSizing = riskSnapshot(stateForTargets, opts);
       const targetSessionSize = opts.watcherAdvancedSchedulerEnabled
         ? advancedSessionSize(opts, stateForTargets)
         : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
-      await appendWatcherTrace('run_session_size', { reason: 'session_size_calculated', trigger, targetSessionSize, advanced: opts.watcherAdvancedSchedulerEnabled });
+      await appendWatcherTrace('run_session_size', {
+        reason: 'session_size_calculated',
+        trigger,
+        targetSessionSize,
+        maxPerSession: maxSessionCandidates(opts),
+        sessionCap,
+        dailyDownloaded: dailyDownloadedFromState(stateForTargets),
+        todayTarget: stateForTargets.todayTarget || 0,
+        dailyLimit: opts.watcherDailyLimit || 0,
+        riskRemaining: riskForSizing.remaining,
+        advanced: opts.watcherAdvancedSchedulerEnabled
+      });
       if (targetSessionSize <= 0) return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' });
       if (opts.watcherAdvancedSchedulerEnabled) {
         return finish(await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger));
