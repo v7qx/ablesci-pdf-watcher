@@ -338,9 +338,7 @@
   }
 
   function assistGuardMinutes(opts) {
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
-    const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
-    return clampNumber(opts.watcherIntervalMinutes, 30, min, max);
+    return clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
   }
 
   function targetDrivenAssistPlan(opts, state = {}, reason = 'target_model') {
@@ -454,6 +452,7 @@
       rawModelDelayMinutes: plan.rawModelDelayMinutes ? Number(plan.rawModelDelayMinutes.toFixed(2)) : '',
       modelDelayMinutes: plan.modelDelayMinutes ? Number(plan.modelDelayMinutes.toFixed(2)) : '',
       guardMinutes: plan.guardMinutes ? Number(plan.guardMinutes.toFixed(2)) : '',
+      guardSource: plan.guardMinutes ? 'watcherMinIntervalMinutes' : '',
       finalDelayMinutes: Number(plan.minutes.toFixed(2))
     };
     return plan;
