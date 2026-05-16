@@ -865,6 +865,28 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>任务超时</strong>
+          <span>区分未触发下载、下载中超时和任务最长时间；超时会取消当前任务并释放队列。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <div class="metric-grid">
+            <div class="metric-field">
+              <label for="watcherNoDownloadTimeoutMinutes">未触发下载</label>
+              <input id="watcherNoDownloadTimeoutMinutes" type="number" min="0.25" max="60" step="0.25" value="1" aria-label="未触发下载超时分钟">
+            </div>
+            <div class="metric-field">
+              <label for="watcherDownloadTimeoutMinutes">下载中</label>
+              <input id="watcherDownloadTimeoutMinutes" type="number" min="1" max="120" step="1" value="5" aria-label="下载中超时分钟">
+            </div>
+            <div class="metric-field">
+              <label for="watcherTaskTimeoutMinutes">单任务最长</label>
+              <input id="watcherTaskTimeoutMinutes" type="number" min="1" max="180" step="1" value="10" aria-label="单任务最长超时分钟">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>验证页处理</strong>
           <span>遇到 Cloudflare 或真人验证时跳过本轮；连续达到阈值后暂停低频值守。</span>
         </div>

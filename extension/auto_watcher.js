@@ -149,6 +149,9 @@
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
+      watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
+      watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
+      watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
       watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
       watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
@@ -1797,6 +1800,7 @@
             ...context.payload,
             detailUrl: context.detailUrl,
             sessionId: context.sessionId || '',
+            trigger: context.trigger || '',
             status: 'failed',
             reason: msg.message || 'upload_failed'
           }).then(writeDailyReports).catch(() => {});
@@ -1819,6 +1823,7 @@
             ...context.payload,
             detailUrl: context.detailUrl,
             sessionId: context.sessionId || '',
+            trigger: context.trigger || '',
             status: 'failed',
             reason: msg.message || 'blocked'
           }).then(writeDailyReports).catch(() => {});
@@ -1850,7 +1855,8 @@
         if (timer) clearTimeout(timer);
         resolve(value);
       };
-      timer = setTimeout(() => resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: 12 * 60 * 1000 }), 12 * 60 * 1000);
+      const timeoutMs = Math.max(60 * 1000, (Number(context.opts?.watcherTaskTimeoutMinutes || 10) + 1) * 60 * 1000);
+      timer = setTimeout(() => resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs }), timeoutMs);
     });
     return { port: makeWatcherPort(context), result };
   }
@@ -1917,7 +1923,7 @@
       trigger: trigger || session?.trigger || '',
       startedAt: Date.now()
     };
-    const sessionPort = opts.watcherAdvancedSchedulerEnabled ? makeSessionPortContext(portContext) : null;
+    const sessionPort = makeSessionPortContext(portContext);
     await appendWatcherTrace('candidate_enqueue', {
       reason: payload.downloadOnly ? 'download_only' : 'auto_upload',
       detailUrl: candidate.detailUrl,
@@ -1929,7 +1935,6 @@
       downloadOnly: payload.downloadOnly === true
     });
     deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
-    if (!payload.downloadOnly) await closeTabQuietly(detailTabId, 'auto_upload_enqueued');
     await incrementDaily('downloaded');
     if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
     await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
@@ -1945,6 +1950,9 @@
     await incrementDaily('notified');
     if (sessionPort) {
       const result = await sessionPort.result;
+      if (!payload.downloadOnly) {
+        await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
+      }
       return result.ok;
     }
     return true;

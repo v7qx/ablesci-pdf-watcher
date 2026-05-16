@@ -46,6 +46,9 @@ const DEFAULT_OPTIONS = {
   watcherSkipHighRiskJournal: true,
   watcherDailyReportEnabled: true,
   watcherReportDir: '',
+  watcherNoDownloadTimeoutMinutes: 1,
+  watcherDownloadTimeoutMinutes: 5,
+  watcherTaskTimeoutMinutes: 10,
   watcherNotifyMode: 'native',
   watcherTelegramNotifyEnabled: false,
   watcherTelegramConfigPath: '',
@@ -193,6 +196,9 @@ async function loadOptions() {
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
+    watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
+    watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
@@ -310,6 +316,12 @@ function validateOptions(opts) {
     throw new Error('随机间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
+  if (opts.watcherNoDownloadTimeoutMinutes <= 0 || opts.watcherDownloadTimeoutMinutes <= 0 || opts.watcherTaskTimeoutMinutes <= 0) {
+    throw new Error('任务超时时间必须大于 0。');
+  }
+  if (opts.watcherTaskTimeoutMinutes < opts.watcherNoDownloadTimeoutMinutes || opts.watcherTaskTimeoutMinutes < opts.watcherDownloadTimeoutMinutes) {
+    throw new Error('任务最长时间不能小于未触发下载或下载中超时时间。');
+  }
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
   if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
   if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求观察 URL 必须是 Ablesci HTTPS 链接。');
@@ -344,6 +356,9 @@ async function save() {
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
+  opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
+  opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);
+  opts.watcherTaskTimeoutMinutes = clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180);
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
   opts.watcherTelegramNotifyEnabled = opts.watcherTelegramNotifyEnabled === true;
   opts.watcherTelegramConfigPath = String(opts.watcherTelegramConfigPath || '').trim();

@@ -40,6 +40,9 @@ const DEFAULT_OPTIONS = {
   watcherSkipHighRiskJournal: true,
   watcherDailyReportEnabled: true,
   watcherReportDir: '',
+  watcherNoDownloadTimeoutMinutes: 1,
+  watcherDownloadTimeoutMinutes: 5,
+  watcherTaskTimeoutMinutes: 10,
   watcherNotifyMode: 'native',
   watcherTelegramNotifyEnabled: false,
   watcherTelegramConfigPath: '',
@@ -127,6 +130,9 @@ async function getOptions() {
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
+    watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
+    watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
@@ -354,7 +360,9 @@ function classifyJournalAccessFailureReason(err) {
   if (raw.includes(HTML_DOWNLOAD_MESSAGE)) return 'html_login_or_error_page';
   if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
   if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
-  if (/等待出版商页面触发 PDF 下载超时/i.test(raw)) return 'publisher_timeout';
+  if (/未触发 PDF 下载超时|等待出版商页面触发 PDF 下载超时|后台标签页没有触发 PDF 下载/i.test(raw)) return 'download_not_triggered_timeout';
+  if (/下载中超时|下载超时/i.test(raw)) return 'download_timeout';
+  if (/任务总超时|单任务最长时间/i.test(raw)) return 'task_timeout';
   if (/下载中断/i.test(raw)) return 'download_interrupted';
   return '';
 }
@@ -629,6 +637,7 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
     let timer = null;
     let statePoller = null;
     let abortListener = null;
+    let timedOut = false;
 
     function cleanup() {
       if (timer) clearTimeout(timer);
@@ -647,6 +656,9 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
     function finishError(msg) {
       if (settled) return;
       settled = true;
+      if (timedOut) {
+        try { chrome.downloads.cancel(downloadId); } catch (_) {}
+      }
       cleanup();
       reject(new Error(msg));
     }
@@ -708,7 +720,8 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
     }
 
     timer = setTimeout(() => {
-      finishError('下载超时');
+      timedOut = true;
+      finishError('下载中超时');
     }, timeoutMs);
 
     chrome.downloads.onChanged.addListener(listener);
@@ -721,21 +734,25 @@ function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
   });
 }
 
-async function downloadByDownloadsAPI(pdfUrl, filenameRel, signal = null) {
+async function downloadByDownloadsAPI(pdfUrl, filenameRel, signal = null, options = {}) {
   throwIfAborted(signal);
+  const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
   const downloadId = await chrome.downloads.download({
     url: pdfUrl,
     filename: filenameRel,
     conflictAction: 'uniquify',
     saveAs: false
   });
-  const item = await onceDownloadComplete(downloadId, 180000, signal);
+  const item = await onceDownloadComplete(downloadId, downloadTimeoutMs, signal);
   item._ablesciCreatedByPlugin = true;
   item._ablesciMatchSource = 'chrome.downloads.download';
   return item;
 }
 
-async function downloadByBackgroundTab(pdfUrl, timeoutMs = 180000, signal = null) {
+async function downloadByBackgroundTab(pdfUrl, options = {}) {
+  const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 60 * 1000);
+  const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
+  const signal = options.signal || null;
   return await new Promise(async (resolve, reject) => {
     let tabId = null;
     let downloadId = null;
@@ -753,7 +770,11 @@ async function downloadByBackgroundTab(pdfUrl, timeoutMs = 180000, signal = null
       if (downloadId !== null) return;
       if (!isLikelyTargetDownload(item, hostnameOf(pdfUrl), pdfUrl)) return;
       downloadId = item.id;
-      onceDownloadComplete(downloadId, timeoutMs, signal)
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      onceDownloadComplete(downloadId, downloadTimeoutMs, signal)
         .then(item => {
           item._ablesciCreatedByPlugin = true;
           item._ablesciPublisherTabId = tabId;
@@ -775,8 +796,8 @@ async function downloadByBackgroundTab(pdfUrl, timeoutMs = 180000, signal = null
       tabId = tab.id;
       timer = setTimeout(() => {
         cleanup();
-        reject(new Error('后台标签页没有触发 PDF 下载；请确认 Chrome 已设置“下载 PDF，而不是在 Chrome 中打开”。'));
-      }, timeoutMs);
+        reject(new Error('未触发 PDF 下载超时；请确认 Chrome 已设置“下载 PDF，而不是在 Chrome 中打开”，或当前账号有权限。'));
+      }, noDownloadTimeoutMs);
     } catch (err) {
       cleanup();
       reject(err);
@@ -785,7 +806,8 @@ async function downloadByBackgroundTab(pdfUrl, timeoutMs = 180000, signal = null
 }
 
 async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
-  const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
+  const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 60 * 1000);
+  const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
   const active = options.active !== false;
   const revealAfterMs = Number(options.revealAfterMs || 0);
   const signal = options.signal || null;
@@ -793,7 +815,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
   return await new Promise(async (resolve, reject) => {
     let tabId = null;
     let downloadId = null;
-    let timer = null;
+    let noDownloadTimer = null;
     let poller = null;
     let settled = false;
     let revealed = active;
@@ -806,7 +828,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
     const seenIds = new Set();
 
     function cleanup(closeTab = true) {
-      if (timer) clearTimeout(timer);
+      if (noDownloadTimer) clearTimeout(noDownloadTimer);
       if (poller) clearInterval(poller);
       if (revealTimer) clearTimeout(revealTimer);
       if (abortListener && signal) signal.removeEventListener('abort', abortListener);
@@ -846,8 +868,12 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
 
       seenIds.add(item.id);
       downloadId = item.id;
+      if (noDownloadTimer) {
+        clearTimeout(noDownloadTimer);
+        noDownloadTimer = null;
+      }
       post(port, 'progress', `检测到浏览器下载 #${item.id}（${source}），等待完成...`);
-      onceDownloadComplete(downloadId, timeoutMs, signal)
+      onceDownloadComplete(downloadId, downloadTimeoutMs, signal)
         .then(item => {
           item._ablesciCreatedByPlugin = true;
           item._ablesciPublisherTabId = tabId;
@@ -908,9 +934,9 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
       setTimeout(pollDownloads, 500);
       setTimeout(pollDownloads, 2000);
 
-      timer = setTimeout(() => {
-        finishError(new Error('等待出版商页面触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。'));
-      }, timeoutMs);
+      noDownloadTimer = setTimeout(() => {
+        finishError(new Error('未触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。'));
+      }, noDownloadTimeoutMs);
     } catch (err) {
       finishError(err);
     }
@@ -920,6 +946,9 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
 async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
   const filenameRel = makeDownloadFilename(opts.downloadSubdir, suggestedFilename);
   const mode = opts.downloadMode || 'auto';
+  const noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
+  const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes) * 60 * 1000);
+  const timeoutOptions = { noDownloadTimeoutMs, downloadTimeoutMs, signal };
 
   // ScienceDirect 必须从原生 article 页进入 View PDF。不要用 PII 拼接
   // /pdfft?download=true；站点现在会生成带 crasolve/token/original/rack 等
@@ -928,52 +957,52 @@ async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null)
     const sdMode = opts.scienceDirectTabMode || 'silent_then_visible';
     if (mode === 'publisher_tab' || sdMode === 'visible') {
       post(port, 'progress', 'ScienceDirect 使用可见原生 View PDF 模式。');
-      return await downloadByInteractivePublisherTab(pdfUrl, port, { active: true, signal });
+      return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
     }
     if (mode === 'background_tab' || sdMode === 'silent') {
       post(port, 'progress', 'ScienceDirect 使用后台静默原生 View PDF 模式。');
-      return await downloadByInteractivePublisherTab(pdfUrl, port, { active: false, revealAfterMs: 0, signal });
+      return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 0 });
     }
     post(port, 'progress', 'ScienceDirect 使用后台静默原生 View PDF 模式；如 30 秒内未触发下载，会自动切到前台。');
-    return await downloadByInteractivePublisherTab(pdfUrl, port, { active: false, revealAfterMs: 30000, signal });
+    return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
   }
 
   if (isNatureUrl(pdfUrl)) {
     if (mode === 'publisher_tab') {
       post(port, 'progress', 'Nature 使用可见文章页原生 PDF 下载模式。');
-      return await downloadByInteractivePublisherTab(pdfUrl, port, { active: true, signal });
+      return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
     }
     post(port, 'progress', 'Nature 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-    return await downloadByInteractivePublisherTab(pdfUrl, port, { active: false, revealAfterMs: 30000, signal });
+    return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
   }
 
   if (isRscDirectPdfUrl(pdfUrl)) {
     post(port, 'progress', 'RSC articlepdf 使用 chrome.downloads 直接下载。');
-    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal);
+    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal, { downloadTimeoutMs });
   }
 
   if (mode === 'publisher_tab') {
     post(port, 'progress', '通过可见出版商标签页触发下载...');
-    return await downloadByInteractivePublisherTab(pdfUrl, port, { active: true, signal });
+    return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
   }
 
   if (mode === 'background_tab') {
     post(port, 'progress', '通过后台标签页触发下载...');
-    return await downloadByBackgroundTab(pdfUrl, 180000, signal);
+    return await downloadByBackgroundTab(pdfUrl, timeoutOptions);
   }
 
   if (mode === 'chrome_downloads') {
     post(port, 'progress', '通过 chrome.downloads 下载...');
-    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal);
+    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal, { downloadTimeoutMs });
   }
 
   // 其他直链：先 chrome.downloads；只有网络层失败才用后台标签页。
   try {
     post(port, 'progress', '通过 chrome.downloads 下载...');
-    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal);
+    return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal, { downloadTimeoutMs });
   } catch (err) {
     post(port, 'progress', '直接下载失败，尝试后台标签页：' + (err.message || err));
-    return await downloadByBackgroundTab(pdfUrl, 180000, signal);
+    return await downloadByBackgroundTab(pdfUrl, timeoutOptions);
   }
 }
 
@@ -1117,9 +1146,9 @@ function normalizeOSSData(data) {
   };
 }
 
-async function handleUpload(port, payload, signal = null) {
+async function handleUpload(port, payload, signal = null, optsOverride = null) {
   throwIfAborted(signal);
-  const opts = await getOptions();
+  const opts = optsOverride || await getOptions();
   const diag = makeDiagnosticBase(payload, opts);
 
   if (!payload?.pdfUrl) throw new Error('缺少 pdfUrl');
@@ -1293,10 +1322,11 @@ function removeQueuedTask(task) {
   if (idx >= 0) taskQueue.splice(idx, 1);
 }
 
-function cancelTask(task, reason) {
+function cancelTask(task, reason, options = {}) {
   if (!task || task.cancelled) return;
   task.cancelled = true;
   task.cancelReason = reason || '任务已取消';
+  task.silentCancel = options.silent === true;
   removeQueuedTask(task);
 
   if (activeTask === task && task.abortController) {
@@ -1316,8 +1346,15 @@ function processQueue() {
 
   (async () => {
     post(port, 'progress', `开始处理任务：${label}`);
+    let opts = null;
+    let taskTimer = null;
     try {
-      await handleUpload(port, payload, abortController.signal);
+      opts = await getOptions();
+      const taskTimeoutMs = Math.max(1000, Number(opts.watcherTaskTimeoutMinutes || DEFAULT_OPTIONS.watcherTaskTimeoutMinutes) * 60 * 1000);
+      taskTimer = setTimeout(() => {
+        cancelTask(task, `任务总超时：${label} 已超过 ${opts.watcherTaskTimeoutMinutes} 分钟`, { silent: false });
+      }, taskTimeoutMs);
+      await handleUpload(port, payload, abortController.signal, opts);
     } catch (err) {
       const failureReason = classifyJournalAccessFailureReason(err);
       if (failureReason) {
@@ -1327,7 +1364,7 @@ function processQueue() {
         });
       }
 
-      if (!task.cancelled) {
+      if (!task.cancelled || !task.silentCancel) {
         await saveErrorDiagnostic(payload, err);
         if (isNonPdfAccessPageError(err)) {
           post(port, 'done', HTML_DOWNLOAD_MESSAGE, {
@@ -1343,6 +1380,7 @@ function processQueue() {
         }
       }
     } finally {
+      if (taskTimer) clearTimeout(taskTimer);
       if (activeTask === task) activeTask = null;
       processQueue();
     }
@@ -1369,7 +1407,7 @@ function enqueueUpload(port, payload) {
   port.onDisconnect.addListener(() => {
     // 关键修复：Ablesci 页面关闭/刷新后，不再让这个任务继续占用串行队列。
     // 如果它正在等待 ScienceDirect 验证/下载，会立刻关闭本任务创建的出版商页，并启动下一个队列任务。
-    cancelTask(task, `Ablesci 页面已关闭或刷新，取消任务：${label}`);
+    cancelTask(task, `Ablesci 页面已关闭或刷新，取消任务：${label}`, { silent: true });
     processQueue();
   });
 
