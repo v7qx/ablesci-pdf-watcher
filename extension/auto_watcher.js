@@ -69,6 +69,38 @@
     return `${day} ${parts.hour}:${parts.minute}:${parts.second}`;
   }
 
+  function formatBeijingTimeOnly(value) {
+    const full = formatBeijingDateTime(value);
+    const match = String(full).match(/\s(\d{2}:\d{2}:\d{2})$/);
+    return match ? match[1] : full;
+  }
+
+  function formatBeijingDateOnly(value) {
+    return formatBeijingDateTime(value, true);
+  }
+
+  function looksLikeIsoDate(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value);
+  }
+
+  function looksLikeTimestampMs(value) {
+    return Number.isFinite(Number(value)) && Number(value) > 1600000000000 && Number(value) < 4100000000000;
+  }
+
+  function reportValueForJson(value, key = '') {
+    if (looksLikeIsoDate(value)) return formatBeijingDateTime(value);
+    if (/at$|time|until|scheduled/i.test(String(key || '')) && looksLikeTimestampMs(value)) return formatBeijingDateTime(Number(value));
+    if (Array.isArray(value)) return value.map(item => reportValueForJson(item));
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, reportValueForJson(v, k)]));
+    }
+    return value;
+  }
+
+  function reportJson(value) {
+    return JSON.stringify(reportValueForJson(value || {}));
+  }
+
   function todayKey() {
     return formatBeijingDateTime(new Date(), true);
   }
@@ -627,6 +659,52 @@
       speedMode: state.speedMode || '',
       rateMultiplier: state.rateMultiplier || ''
     });
+  }
+
+  async function scheduleWakeForExistingAssist(opts, state, reason = 'existing_assist_due') {
+    if (!opts?.watcherEnabled || !opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
+    const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+    if (!Number.isFinite(nextAssistMs) || nextAssistMs <= 0) return null;
+    await chrome.alarms.clear(ALARM_NAME);
+    const delay = Math.max(0.05, (nextAssistMs - Date.now()) / 60000);
+    state.nextScheduledAt = Date.now() + delay * 60 * 1000;
+    state.currentSchedulerMode = opts.watcherSchedulerMode;
+    state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : 'quant_rules';
+    state.lastAlarmRefreshReason = reason;
+    await saveWatcherState(state);
+    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: delay });
+    const alarm = await chrome.alarms.get(ALARM_NAME).catch(() => null);
+    if (alarm?.scheduledTime) {
+      state.chromeAlarmScheduledAt = new Date(alarm.scheduledTime).toISOString();
+      state.nextScheduledAt = alarm.scheduledTime;
+      await saveWatcherState(state);
+    }
+    await appendWatcherTrace('alarm_scheduled_existing_assist', {
+      reason,
+      delayMinutes: Number(delay.toFixed(2)),
+      nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
+      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
+      nextAssistRunAt: state.nextAssistRunAt || ''
+    });
+    return delay;
+  }
+
+  async function refreshAlarmAfterRun(opts, result, attempt, trigger) {
+    if (trigger !== 'alarm') return null;
+    const reason = String(result?.reason || '');
+    if (reason === 'observed_assist_not_due' && attempt?.nextAssistBefore) {
+      const state = await getWatcherState();
+      const beforeMs = new Date(attempt.nextAssistBefore).getTime();
+      const currentMs = state.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
+      if (Number.isFinite(beforeMs) && beforeMs > 0 && (!Number.isFinite(currentMs) || currentMs <= 0 || currentMs > beforeMs)) {
+        state.nextAssistRunAt = attempt.nextAssistBefore;
+        state.nextAssistReason = state.nextAssistReason || 'preserved_after_observe';
+        state.nextAssistStrategy = state.nextAssistStrategy || 'quant_target_market';
+      }
+      const delay = await scheduleWakeForExistingAssist(opts, state, 'after_observe_assist_not_due');
+      if (delay !== null) return delay;
+    }
+    return refreshAutoWatcherAlarm(true, 'after_alarm_run');
   }
 
   async function notifyWatcherNeedsAttention(reason, url) {
@@ -1889,17 +1967,17 @@
       reportRow('assist_strategy', {
         time: state.lastAssistDecisionAt ? formatBeijingDateTime(state.lastAssistDecisionAt) : formatBeijingDateTime(new Date()),
         status: state.lastAssistStrategy || '',
-        reason: JSON.stringify(state.lastAssistDecision || {})
+        reason: reportJson(state.lastAssistDecision || {})
       }),
       reportRow('next_assist', {
         time: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
         status: state.nextAssistStrategy || '',
-        reason: JSON.stringify(state.nextAssistPlan || {})
+        reason: reportJson(state.nextAssistPlan || {})
       }),
       reportRow('last_attempt', {
         time: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
         status: lastAttempt.resultReason || '',
-        reason: JSON.stringify(lastAttempt || {}),
+        reason: reportJson(lastAttempt || {}),
         trigger: lastAttempt.trigger || '',
         url: lastAttempt.pickedListUrl || ''
       }),
@@ -1952,10 +2030,30 @@
         trigger: trace.trigger || '',
         tabId: trace.tabId || '',
         url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`,
-        details: JSON.stringify(trace.details || {})
+        details: reportJson(trace.details || {})
       }))
     ];
     const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
+    const skipDecisionRows = [
+      ...logs
+        .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
+        .map(log => ({
+          time: log.time,
+          trigger: log.trigger || '',
+          step: log.status || '',
+          reason: log.reason || '',
+          detail: reportDetailValue(log) || log.journalName || log.doi || ''
+        })),
+      ...traces
+        .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
+        .map(trace => ({
+          time: trace.time,
+          trigger: trace.trigger || '',
+          step: trace.step || '',
+          reason: trace.reason || '',
+          detail: reportJson(trace.details || {}).slice(0, 220)
+        }))
+    ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
 
     const md = [
       `# Ablesci Watcher Daily Report ${date}`,
@@ -2019,28 +2117,16 @@
       '',
       '## Skips And Decisions',
       '',
-      '| Time | Trigger | Step | Reason | Detail |',
-      '| --- | --- | --- | --- | --- |',
-      ...logs
-        .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
-        .slice(0, 20)
-        .map(log => [
-          formatBeijingDateTime(log.time),
-          log.trigger || '',
-          log.status || '',
-          log.reason || '',
-          reportDetailValue(log) || log.journalName || log.doi || ''
-        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
-      ...traces
-        .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
-        .slice(0, 20)
-        .map(trace => [
-          formatBeijingDateTime(trace.time),
-          trace.trigger || '',
-          trace.step || '',
-          trace.reason || '',
-          JSON.stringify(trace.details || {}).slice(0, 220)
-        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
+      '| Time | Trigger | Step | Reason | Detail | Date |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...skipDecisionRows.map(row => [
+        formatBeijingTimeOnly(row.time),
+        row.trigger,
+        row.step,
+        row.reason,
+        row.detail,
+        formatBeijingDateOnly(row.time)
+      ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
       '',
       '## Recent Events',
       '',
@@ -2800,6 +2886,8 @@
           reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
           trigger,
           nextAssistRunAt: stateForTargets.nextAssistRunAt || '',
+          nextAssistRunAtBeijing: stateForTargets.nextAssistRunAt ? formatBeijingDateTime(stateForTargets.nextAssistRunAt) : '',
+          secondsUntilAssist: stateForTargets.nextAssistRunAt ? Math.round((new Date(stateForTargets.nextAssistRunAt).getTime() - Date.now()) / 1000) : '',
           observeSnapshot: observeResult?.snapshot ? true : false
         });
         return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
@@ -3025,7 +3113,7 @@
       await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
       await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       if (currentRunOpts) await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
-      if (trigger === 'alarm') await refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
+      if (currentRunOpts) await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
       await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
       autoWatcherRunning = false;
