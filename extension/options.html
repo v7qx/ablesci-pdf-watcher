@@ -677,7 +677,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>应助间隔</strong>
-          <span>固定间隔模式按基准/最小/最大随机应助；量化/高级模式只把最小值作为防高频下限，基准和最大值不参与目标模型计算。</span>
+          <span>固定间隔模式按基准/最小/最大随机应助；量化/高级模式用最小值做软防高频，模型低于最小时会融合计算，不直接截断。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">

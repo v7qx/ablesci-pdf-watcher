@@ -341,6 +341,35 @@
     return clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
   }
 
+  function applySoftAssistGuard(modelDelay, guardMinutes) {
+    const model = Math.max(0, Number(modelDelay) || 0);
+    const guard = Math.max(0, Number(guardMinutes) || 0);
+    if (guard <= 0 || model >= guard) {
+      return {
+        minutes: model,
+        guardApplied: false,
+        guardLiftMinutes: 0,
+        guardWeight: 0,
+        hardFloorMinutes: 0,
+        guardMode: 'none'
+      };
+    }
+
+    const ratio = Math.max(0, Math.min(1, model / guard));
+    const guardWeight = Math.max(0.25, Math.min(0.8, 0.25 + 0.55 * (1 - ratio)));
+    const blended = model + (guard - model) * guardWeight;
+    const hardFloor = Math.max(1, guard * 0.5);
+    const minutes = Math.max(hardFloor, blended);
+    return {
+      minutes,
+      guardApplied: true,
+      guardLiftMinutes: minutes - model,
+      guardWeight,
+      hardFloorMinutes: hardFloor,
+      guardMode: 'soft_blend'
+    };
+  }
+
   function targetDrivenAssistPlan(opts, state = {}, reason = 'target_model') {
     const hold = quotaHoldPlan(opts, state);
     if (hold) return hold;
@@ -349,11 +378,12 @@
     if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
       const pauseMs = new Date(state.riskPausedUntil).getTime() - now;
       if (pauseMs > 0) {
-        const minutes = Math.max(guardMinutes, pauseMs / 60000);
+        const guarded = applySoftAssistGuard(pauseMs / 60000, guardMinutes);
         return {
-          minutes,
+          minutes: guarded.minutes,
           modelDelayMinutes: pauseMs / 60000,
           guardMinutes,
+          ...guarded,
           reason: 'risk_pause',
           strategy: 'risk_pause'
         };
@@ -363,10 +393,12 @@
       const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
       if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > now) {
         const modelDelay = (cooldownUntilMs - now) / 60000;
+        const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
         return {
-          minutes: Math.max(guardMinutes, modelDelay),
+          minutes: guarded.minutes,
           modelDelayMinutes: modelDelay,
           guardMinutes,
+          ...guarded,
           reason: 'session_cooldown',
           strategy: 'session_cooldown'
         };
@@ -376,10 +408,12 @@
       if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
         const remaining = cooldownMinutes - ((now - finishedAtMs) / 60000);
         if (remaining > 0) {
+          const guarded = applySoftAssistGuard(remaining, guardMinutes);
           return {
-            minutes: Math.max(guardMinutes, remaining),
+            minutes: guarded.minutes,
             modelDelayMinutes: remaining,
             guardMinutes,
+            ...guarded,
             reason: 'session_cooldown',
             strategy: 'session_cooldown'
           };
@@ -402,12 +436,13 @@
     const riskPenalty = risk.nearLimit ? 0.55 : 1;
     const combined = Math.max(0.25, Math.min(3, rateMultiplier * demandFactor * trendFactor * lagBoost * marketBoost * trendBoost * riskPenalty));
     const modelDelay = rawModelDelay / combined;
-    const minutes = Math.max(guardMinutes, modelDelay);
+    const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
     return {
-      minutes,
+      minutes: guarded.minutes,
       modelDelayMinutes: modelDelay,
       rawModelDelayMinutes: rawModelDelay,
       guardMinutes,
+      ...guarded,
       reason,
       strategy: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : 'quant_target_market',
       speedMode: state.speedMode || 'normal',
@@ -437,6 +472,10 @@
     state.nextAssistDelayMinutes = Number(plan.minutes.toFixed(2));
     state.nextAssistModelDelayMinutes = Number((plan.modelDelayMinutes || plan.minutes).toFixed(2));
     state.nextAssistGuardMinutes = Number((plan.guardMinutes || 0).toFixed(2));
+    state.nextAssistGuardApplied = plan.guardApplied === true;
+    state.nextAssistGuardLiftMinutes = Number((plan.guardLiftMinutes || 0).toFixed(2));
+    state.nextAssistGuardWeight = Number((plan.guardWeight || 0).toFixed(3));
+    state.nextAssistGuardMode = plan.guardMode || '';
     state.nextAssistPlan = {
       strategy: plan.strategy,
       reason: plan.reason,
@@ -453,6 +492,11 @@
       modelDelayMinutes: plan.modelDelayMinutes ? Number(plan.modelDelayMinutes.toFixed(2)) : '',
       guardMinutes: plan.guardMinutes ? Number(plan.guardMinutes.toFixed(2)) : '',
       guardSource: plan.guardMinutes ? 'watcherMinIntervalMinutes' : '',
+      guardMode: plan.guardMode || '',
+      guardApplied: plan.guardApplied === true,
+      guardWeight: plan.guardWeight ? Number(plan.guardWeight.toFixed(3)) : '',
+      guardLiftMinutes: plan.guardLiftMinutes ? Number(plan.guardLiftMinutes.toFixed(2)) : '',
+      hardFloorMinutes: plan.hardFloorMinutes ? Number(plan.hardFloorMinutes.toFixed(2)) : '',
       finalDelayMinutes: Number(plan.minutes.toFixed(2))
     };
     return plan;
@@ -470,6 +514,10 @@
     delete state.nextAssistDelayMinutes;
     delete state.nextAssistModelDelayMinutes;
     delete state.nextAssistGuardMinutes;
+    delete state.nextAssistGuardApplied;
+    delete state.nextAssistGuardLiftMinutes;
+    delete state.nextAssistGuardWeight;
+    delete state.nextAssistGuardMode;
     delete state.nextAssistPlan;
     const plan = ensureNextAssistSchedule(opts, state, `after_${reason || 'run'}`);
     await saveWatcherState(state);
@@ -480,6 +528,9 @@
       delayMinutes: state.nextAssistDelayMinutes || '',
       modelDelayMinutes: state.nextAssistModelDelayMinutes || '',
       guardMinutes: state.nextAssistGuardMinutes || '',
+      guardApplied: state.nextAssistGuardApplied === true,
+      guardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
+      guardWeight: state.nextAssistGuardWeight || '',
       strategy: state.nextAssistStrategy || '',
       plan: state.nextAssistPlan || {}
     });
@@ -530,6 +581,10 @@
       delete state.nextAssistDelayMinutes;
       delete state.nextAssistModelDelayMinutes;
       delete state.nextAssistGuardMinutes;
+      delete state.nextAssistGuardApplied;
+      delete state.nextAssistGuardLiftMinutes;
+      delete state.nextAssistGuardWeight;
+      delete state.nextAssistGuardMode;
       delete state.nextAssistPlan;
     }
     const delay = randomIntervalMinutes(opts, state);
@@ -1562,7 +1617,8 @@
       'targetError', 'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
       'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
       'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
-      'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'step', 'trigger', 'tabId', 'url', 'details'
+      'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
+      'nextAssistGuardWeight', 'step', 'trigger', 'tabId', 'url', 'details'
     ];
     const baseReportFields = {
       marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
@@ -1582,7 +1638,10 @@
       nextAssistReason: state.nextAssistReason || '',
       nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
       nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
-      nextAssistGuardMinutes: state.nextAssistGuardMinutes || ''
+      nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
+      nextAssistGuardMode: state.nextAssistGuardMode || '',
+      nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
+      nextAssistGuardWeight: state.nextAssistGuardWeight || ''
     };
     function reportRow(type, values = {}) {
       const row = { record_type: type, ...baseReportFields, ...values };
@@ -1688,6 +1747,7 @@
       `- Next assist: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
       `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
       `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
+      `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
       `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
       `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
