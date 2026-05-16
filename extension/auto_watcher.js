@@ -172,7 +172,8 @@
       watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
       watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
       watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, MAX_SESSION_CANDIDATES)
+      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, MAX_SESSION_CANDIDATES),
+      watcherAllowZeroSession: opts.watcherAllowZeroSession === true
     };
   }
 
@@ -266,14 +267,20 @@
   }
 
   function weightedPickIndex(weights) {
-    const total = weights.reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-    if (total <= 0) return 0;
-    let r = Math.random() * total;
-    for (let i = 0; i < weights.length; i += 1) {
-      r -= Math.max(0, Number(weights[i]) || 0);
-      if (r <= 0) return i;
+    return weightedPickIndexWithDebug(weights).index;
+  }
+
+  function weightedPickIndexWithDebug(weights) {
+    const normalized = weights.map(value => Math.max(0, Number(value) || 0));
+    const total = normalized.reduce((sum, value) => sum + value, 0);
+    if (total <= 0) return { index: 0, random: 0, total, weights: normalized };
+    const random = Math.random() * total;
+    let r = random;
+    for (let i = 0; i < normalized.length; i += 1) {
+      r -= normalized[i];
+      if (r <= 0) return { index: i, random, total, weights: normalized };
     }
-    return weights.length - 1;
+    return { index: normalized.length - 1, random, total, weights: normalized };
   }
 
   function maxSessionCandidates(opts) {
@@ -600,10 +607,19 @@
     state.lastAlarmRefreshReason = reason;
     await saveWatcherState(state);
     await chrome.alarms.create(ALARM_NAME, { delayInMinutes: delay });
+    const alarm = await chrome.alarms.get(ALARM_NAME).catch(() => null);
+    if (alarm?.scheduledTime) {
+      state.chromeAlarmScheduledAt = new Date(alarm.scheduledTime).toISOString();
+      state.nextScheduledAt = alarm.scheduledTime;
+      await saveWatcherState(state);
+    } else {
+      state.chromeAlarmScheduledAt = '';
+    }
     await appendWatcherTrace('alarm_scheduled', {
       reason,
       delayMinutes: Number(delay.toFixed(2)),
       nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
+      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
       nextAssistRunAt: state.nextAssistRunAt || '',
       nextAssistStrategy: state.nextAssistStrategy || '',
       nextAssistReason: state.nextAssistReason || '',
@@ -787,10 +803,56 @@
     await saveWatcherState(state);
   }
 
+  async function recordAttemptFinish(attempt, result) {
+    const state = await getWatcherState();
+    const counters = dailyCounterSnapshot(state);
+    const finished = {
+      ...attempt,
+      finishedAt: new Date().toISOString(),
+      resultReason: normalizeText(result?.reason || 'unknown').slice(0, 160),
+      nextAssistAfter: state.nextAssistRunAt || '',
+      nextAlarmAfter: state.nextScheduledAt || '',
+      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
+      checkedAfter: counters.checked,
+      downloadedAfter: counters.downloaded,
+      failedAfter: counters.failed,
+      skippedAfter: counters.skipped
+    };
+    finished.checkedDelta = Number(finished.checkedAfter || 0) - Number(finished.checkedBefore || 0);
+    finished.downloadedDelta = Number(finished.downloadedAfter || 0) - Number(finished.downloadedBefore || 0);
+    finished.failedDelta = Number(finished.failedAfter || 0) - Number(finished.failedBefore || 0);
+    finished.skippedDelta = Number(finished.skippedAfter || 0) - Number(finished.skippedBefore || 0);
+    state.lastAttempt = finished;
+    await saveWatcherState(state);
+    await appendWatcherTrace('run_attempt_summary', {
+      reason: finished.resultReason,
+      trigger: finished.trigger,
+      observeSnapshot: finished.observeSnapshot,
+      targetSessionSize: finished.targetSessionSize,
+      checkedDelta: finished.checkedDelta,
+      downloadedDelta: finished.downloadedDelta,
+      listScanStarted: finished.listScanStarted,
+      pickedListUrl: finished.pickedListUrl,
+      nextAssistBefore: finished.nextAssistBefore,
+      nextAssistAfter: finished.nextAssistAfter,
+      nextAlarmAfter: finished.nextAlarmAfter
+    });
+  }
+
   async function getDailyCount(field) {
     const state = await getWatcherState();
     const item = state.daily?.[todayKey()] || {};
     return Number(item[field] || 0);
+  }
+
+  function dailyCounterSnapshot(state) {
+    const item = state?.daily?.[todayKey()] || {};
+    return {
+      checked: Number(item.checked || 0),
+      downloaded: Number(item.downloaded || 0),
+      failed: Number(item.failed || 0),
+      skipped: Number(item.skipped || 0)
+    };
   }
 
   function monthKey() {
@@ -1551,9 +1613,23 @@
 
   function sessionSize(opts, state) {
     const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-    const picked = weightedPickIndex(mode.sizeWeights);
+    const decision = weightedPickIndexWithDebug(mode.sizeWeights);
+    const picked = decision.index;
     const cap = sessionExecutionCap(opts, state, opts?.watcherQuantSchedulerEnabled !== false);
-    return Math.min(cap, Math.max(0, picked));
+    const finalSize = Math.min(cap, Math.max(0, picked));
+    if (state) {
+      state.lastSessionSizeDecision = {
+        mode: state.speedMode || 'normal',
+        picked,
+        cap,
+        finalSize,
+        random: Number(decision.random.toFixed(6)),
+        total: Number(decision.total.toFixed(6)),
+        weights: decision.weights,
+        allowZero: opts?.watcherAllowZeroSession === true
+      };
+    }
+    return finalSize;
   }
 
   function advancedSessionSize(opts, state) {
@@ -1562,13 +1638,29 @@
     const cap = Math.min(sessionExecutionCap(opts, state, true), risk.remaining);
     if (cap <= 0) return 0;
     const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-    const modeSize = weightedPickIndex(mode.sizeWeights);
+    const decision = weightedPickIndexWithDebug(mode.sizeWeights);
+    const modeSize = decision.index;
     const multiplier = Number(state.rateMultiplier || 1);
     const intensity = Number(state.sessionIntensity || 0.4);
     const parentOrderSize = Math.ceil(maxSessionCandidates(opts) * Math.max(0.12, intensity) * 0.75);
     const boost = multiplier > 2.0 ? 2 : (multiplier > 1.45 ? 1 : 0);
     const desired = Math.max(modeSize, parentOrderSize) + boost;
-    return Math.max(0, Math.min(cap, desired));
+    const finalSize = Math.max(0, Math.min(cap, desired));
+    if (state) {
+      state.lastSessionSizeDecision = {
+        mode: state.speedMode || 'normal',
+        picked: modeSize,
+        cap,
+        finalSize,
+        random: Number(decision.random.toFixed(6)),
+        total: Number(decision.total.toFixed(6)),
+        weights: decision.weights,
+        allowZero: opts?.watcherAllowZeroSession === true,
+        parentOrderSize,
+        boost
+      };
+    }
+    return finalSize;
   }
 
   async function sleepMinutes(minutes) {
@@ -1708,6 +1800,9 @@
     const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY]);
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
+    const chromeAlarm = await chrome.alarms.get(ALARM_NAME).catch(() => null);
+    const chromeAlarmScheduledAt = chromeAlarm?.scheduledTime ? new Date(chromeAlarm.scheduledTime).toISOString() : (state.chromeAlarmScheduledAt || '');
+    const lastAttempt = state.lastAttempt || {};
     const demandSnapshots = (Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [])
       .filter(item => item.dayKey === date);
     const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
@@ -1724,7 +1819,11 @@
       'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
       'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
       'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
-      'nextAssistGuardWeight', 'step', 'trigger', 'tabId', 'url', 'details'
+      'nextAssistGuardWeight', 'nextWakeAt', 'chromeAlarmScheduledAt',
+      'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',
+      'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
+      'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'randomSessionPicked', 'randomSessionFinalSize',
+      'randomValue', 'step', 'trigger', 'tabId', 'url', 'details'
     ];
     const baseReportFields = {
       marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
@@ -1751,7 +1850,21 @@
       nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
       nextAssistGuardMode: state.nextAssistGuardMode || '',
       nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
-      nextAssistGuardWeight: state.nextAssistGuardWeight || ''
+      nextAssistGuardWeight: state.nextAssistGuardWeight || '',
+      nextWakeAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''),
+      chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
+      lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
+      lastAttemptFinishedAt: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
+      lastAttemptResult: lastAttempt.resultReason || '',
+      lastAttemptObserveSnapshot: lastAttempt.observeSnapshot === true ? 'true' : '',
+      lastAttemptTargetSessionSize: lastAttempt.targetSessionSize ?? '',
+      lastAttemptCheckedDelta: lastAttempt.checkedDelta ?? '',
+      lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',
+      lastAttemptListScanStarted: lastAttempt.listScanStarted === true ? 'true' : '',
+      lastAttemptPickedListUrl: lastAttempt.pickedListUrl || '',
+      randomSessionPicked: lastAttempt.randomSessionPicked ?? '',
+      randomSessionFinalSize: lastAttempt.randomSessionFinalSize ?? '',
+      randomValue: lastAttempt.randomValue ?? ''
     };
     function reportRow(type, values = {}) {
       const row = { record_type: type, ...baseReportFields, ...values };
@@ -1782,6 +1895,13 @@
         time: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
         status: state.nextAssistStrategy || '',
         reason: JSON.stringify(state.nextAssistPlan || {})
+      }),
+      reportRow('last_attempt', {
+        time: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
+        status: lastAttempt.resultReason || '',
+        reason: JSON.stringify(lastAttempt || {}),
+        trigger: lastAttempt.trigger || '',
+        url: lastAttempt.pickedListUrl || ''
       }),
       ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
         time: formatBeijingDateTime(new Date()),
@@ -1853,13 +1973,23 @@
       `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
       `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
       `- Current assist strategy: ${state.lastAssistStrategy || ''}`,
-      `- Next alarm: ${state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''}`,
-      `- Next assist: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
+      `- Next wake: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
+      `- Next assist attempt: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
       `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
       `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
       `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
       `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
       `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
+      `- Last attempt time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
+      `- Last attempt trigger: ${lastAttempt.trigger || ''}`,
+      `- Last attempt result: ${lastAttempt.resultReason || ''}`,
+      `- Last attempt observe: ${lastAttempt.observeSnapshot === true ? 'yes' : 'no'} ${lastAttempt.observeReason || ''}`,
+      `- Last attempt target session size: ${lastAttempt.targetSessionSize ?? ''}`,
+      `- Last attempt checked delta: ${lastAttempt.checkedDelta ?? ''}`,
+      `- Last attempt downloaded delta: ${lastAttempt.downloadedDelta ?? ''}`,
+      `- Last attempt list scan started: ${lastAttempt.listScanStarted === true ? 'yes' : 'no'}`,
+      `- Last attempt picked list URL: ${lastAttempt.pickedListUrl || ''}`,
+      `- Last attempt random session: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, random=${lastAttempt.randomValue ?? ''}`,
       `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
       `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
       `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
@@ -1886,6 +2016,31 @@
       ...(state.banditTopPublishers || []).slice(0, 8).map(item =>
         `| ${String(item.source || '').replace(/\|/g, '\\|')} | ${Number(item.score || 0).toFixed(4)} | ${Number(item.estimatedSuccessRate || 0).toFixed(4)} | ${Number(item.demandPressure || 0).toFixed(4)} |`
       ),
+      '',
+      '## Skips And Decisions',
+      '',
+      '| Time | Trigger | Step | Reason | Detail |',
+      '| --- | --- | --- | --- | --- |',
+      ...logs
+        .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
+        .slice(0, 20)
+        .map(log => [
+          formatBeijingDateTime(log.time),
+          log.trigger || '',
+          log.status || '',
+          log.reason || '',
+          reportDetailValue(log) || log.journalName || log.doi || ''
+        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
+      ...traces
+        .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
+        .slice(0, 20)
+        .map(trace => [
+          formatBeijingDateTime(trace.time),
+          trace.trigger || '',
+          trace.step || '',
+          trace.reason || '',
+          JSON.stringify(trace.details || {}).slice(0, 220)
+        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
       '',
       '## Recent Events',
       '',
@@ -2559,7 +2714,7 @@
       cooldownMinutes: finalState.lastSession.cooldownMinutes,
       cooldownUntil: finalState.lastSession.cooldownUntil
     });
-    return { ok: true, reason: handledCount ? 'advanced_session_done' : (observeResult?.snapshot ? 'observe_only_session' : 'advanced_no_candidate') };
+    return { ok: true, reason: handledCount ? 'advanced_session_done' : 'advanced_no_candidate', observeSnapshot: observeResult?.snapshot ? true : false };
   }
 
   async function runAutoWatcherOnce(trigger = 'alarm') {
@@ -2570,6 +2725,33 @@
     autoWatcherRunning = true;
     let runResult = null;
     let currentRunOpts = null;
+    const attempt = {
+      startedAt: new Date().toISOString(),
+      trigger,
+      resultReason: '',
+      observeSnapshot: false,
+      observeReason: '',
+      nextAssistBefore: '',
+      nextAssistAfter: '',
+      nextAlarmAfter: '',
+      checkedBefore: 0,
+      checkedAfter: 0,
+      downloadedBefore: 0,
+      downloadedAfter: 0,
+      failedBefore: 0,
+      failedAfter: 0,
+      skippedBefore: 0,
+      skippedAfter: 0,
+      targetSessionSize: '',
+      sessionCap: '',
+      speedMode: '',
+      randomSessionPicked: '',
+      randomSessionFinalSize: '',
+      randomSessionWeights: '',
+      randomValue: '',
+      listScanStarted: false,
+      pickedListUrl: ''
+    };
     function finish(result) {
       runResult = result;
       return result;
@@ -2579,6 +2761,9 @@
       const opts = normalizeOptions(await deps.getOptions());
       currentRunOpts = opts;
       await recordRunStart(trigger, opts);
+      const initialState = await getWatcherState();
+      attempt.nextAssistBefore = initialState.nextAssistRunAt || '';
+      Object.assign(attempt, Object.fromEntries(Object.entries(dailyCounterSnapshot(initialState)).map(([key, value]) => [`${key}Before`, value])));
       if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') {
         await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
         return finish({ ok: false, reason: 'disabled' });
@@ -2589,6 +2774,8 @@
       }
 
       const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
+      attempt.observeSnapshot = observeResult?.snapshot ? true : false;
+      attempt.observeReason = observeResult?.reason || '';
       if (observeResult?.reason === 'cf_challenge') {
         if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, opts.watcherDemandObserveUrl);
         return finish({ ok: false, reason: 'cf_challenge' });
@@ -2644,16 +2831,16 @@
         speedMode: targetState.speedMode,
         todayTarget: targetState.todayTarget || 0,
         hourTarget: targetState.hourTarget || 0,
-      rateMultiplier: targetState.rateMultiplier || 1,
-      targetError: targetState.targetError ?? targetState.lag ?? 0,
-      workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
-      activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
-      availabilityFactor: targetState.availabilityFactor || 1,
-      availabilityActualWakeCount: targetState.availabilityActualWakeCount || 0,
-      availabilityExpectedWakeCount: targetState.availabilityExpectedWakeCount || 0,
-      marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
-      recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
-      riskUsed: targetState.riskUsed || 0,
+        rateMultiplier: targetState.rateMultiplier || 1,
+        targetError: targetState.targetError ?? targetState.lag ?? 0,
+        workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
+        activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
+        availabilityFactor: targetState.availabilityFactor || 1,
+        availabilityActualWakeCount: targetState.availabilityActualWakeCount || 0,
+        availabilityExpectedWakeCount: targetState.availabilityExpectedWakeCount || 0,
+        marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
+        recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
+        riskUsed: targetState.riskUsed || 0,
         riskLimit: targetState.riskLimit || 0,
         dailyLimit: opts.watcherDailyLimit || 0
       };
@@ -2682,13 +2869,40 @@
       let handledCount = 0;
       const sessionCap = sessionExecutionCap(opts, stateForTargets, opts.watcherQuantSchedulerEnabled !== false);
       const riskForSizing = riskSnapshot(stateForTargets, opts);
-      const targetSessionSize = opts.watcherAdvancedSchedulerEnabled
+      let targetSessionSize = opts.watcherAdvancedSchedulerEnabled
         ? advancedSessionSize(opts, stateForTargets)
         : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
+      const zeroForcedToOne = !opts.watcherAllowZeroSession
+        && trigger === 'alarm'
+        && opts.watcherObserveMode !== 'observe_only'
+        && targetSessionSize <= 0
+        && sessionCap > 0
+        && (Number(targetState.todayTarget || 0) <= 0 || dailyDownloadedFromState(stateForTargets) < Number(targetState.todayTarget || 0))
+        && (Number(opts.watcherDailyLimit || 0) <= 0 || dailyDownloadedFromState(stateForTargets) < Number(opts.watcherDailyLimit || 0));
+      if (zeroForcedToOne) {
+        targetSessionSize = 1;
+        stateForTargets.lastSessionSizeDecision = {
+          ...(stateForTargets.lastSessionSizeDecision || {}),
+          finalSize: 1,
+          forcedMinOne: true,
+          forceReason: 'alarm_due_no_zero_session'
+        };
+        await saveWatcherState(stateForTargets);
+      }
+      const sizeDecision = stateForTargets.lastSessionSizeDecision || {};
+      attempt.targetSessionSize = targetSessionSize;
+      attempt.sessionCap = sessionCap;
+      attempt.speedMode = targetState.speedMode || '';
+      attempt.randomSessionPicked = sizeDecision.picked ?? '';
+      attempt.randomSessionFinalSize = sizeDecision.finalSize ?? targetSessionSize;
+      attempt.randomSessionWeights = Array.isArray(sizeDecision.weights) ? sizeDecision.weights.join('|') : '';
+      attempt.randomValue = sizeDecision.random ?? '';
       await appendWatcherTrace('run_session_size', {
         reason: 'session_size_calculated',
         trigger,
         targetSessionSize,
+        zeroForcedToOne,
+        decision: stateForTargets.lastSessionSizeDecision || {},
         maxPerSession: maxSessionCandidates(opts),
         sessionCap,
         dailyDownloaded: dailyDownloadedFromState(stateForTargets),
@@ -2697,7 +2911,7 @@
         riskRemaining: riskForSizing.remaining,
         advanced: opts.watcherAdvancedSchedulerEnabled
       });
-      if (targetSessionSize <= 0) return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_session' : 'session_size_zero' });
+      if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero', observeSnapshot: observeResult?.snapshot ? true : false });
       if (opts.watcherAdvancedSchedulerEnabled) {
         return finish(await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger));
       }
@@ -2710,6 +2924,8 @@
       });
       for (const listUrl of runListUrls) {
         const pickedListUrl = randomizeAssistListUrl(listUrl);
+        attempt.listScanStarted = true;
+        attempt.pickedListUrl = pickedListUrl;
         await appendWatcherTrace('list_scan_start', {
           reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
           trigger,
@@ -2809,8 +3025,9 @@
       await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
       await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       if (currentRunOpts) await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
+      if (trigger === 'alarm') await refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
+      await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
-      if (trigger === 'alarm') refreshAutoWatcherAlarm(true, 'after_alarm_run').catch(() => {});
       autoWatcherRunning = false;
     }
   }

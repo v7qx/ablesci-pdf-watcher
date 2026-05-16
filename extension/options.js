@@ -67,7 +67,8 @@ const DEFAULT_OPTIONS = {
   watcherMonthlyTarget: 2000,
   watcherMinDailyTarget: 5,
   watcherMaxDailyTarget: 40,
-  watcherMaxPerSession: 1
+  watcherMaxPerSession: 1,
+  watcherAllowZeroSession: false
 };
 
 const ids = Object.keys(DEFAULT_OPTIONS);
@@ -217,7 +218,8 @@ async function loadOptions() {
     watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10)
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10),
+    watcherAllowZeroSession: opts.watcherAllowZeroSession === true
   };
   };
   const missingLocal = ids.some(id => local[id] === undefined);
@@ -296,7 +298,7 @@ async function renderAdvancedWatcherStatus() {
   setText('advancedH1Delta', String(Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)));
   setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
   setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
-  setText('watcherNextRunAt', formatBeijingDateTime(state.nextScheduledAt));
+  setText('watcherNextRunAt', formatBeijingDateTime(state.chromeAlarmScheduledAt || state.nextScheduledAt));
   setText('watcherNextAssistAt', formatBeijingDateTime(state.nextAssistRunAt));
   setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
   setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
@@ -389,6 +391,7 @@ async function save() {
   opts.watcherMinDailyTarget = clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500);
   opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
   opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
+  opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
 
   try {
     validateOptions(opts);
@@ -521,6 +524,8 @@ async function copyAutoWatcherConfig() {
       nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
       nextAssistGuardWeight: state.nextAssistGuardWeight || '',
       nextAssistPlan: state.nextAssistPlan || null,
+      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
+      lastAttempt: state.lastAttempt || null,
       lastAssistStrategy: state.lastAssistStrategy || '',
       lastAssistDecisionAt: state.lastAssistDecisionAt || '',
       lastAssistDecision: state.lastAssistDecision || null,
