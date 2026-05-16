@@ -364,6 +364,42 @@
       transform: translateY(-35%) rotate(225deg);
     }
 
+    details.setting-details {
+      border-top: 1px solid #f3f4f6;
+    }
+
+    details.setting-details summary {
+      position: relative;
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 44px 14px 18px;
+      font-weight: 600;
+      user-select: none;
+    }
+
+    details.setting-details summary::-webkit-details-marker { display: none; }
+
+    details.setting-details summary::after {
+      content: "";
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: translateY(-60%) rotate(45deg);
+      transition: transform .16s ease;
+    }
+
+    details.setting-details[open] summary {
+      border-bottom: 1px solid var(--border);
+    }
+
+    details.setting-details[open] summary::after {
+      transform: translateY(-35%) rotate(225deg);
+    }
+
     .footer {
       display: flex;
       align-items: center;
@@ -492,11 +528,11 @@
       </div>
     </section>
 
-    <section class="card">
-      <h2 class="card-title">按钮外观</h2>
+    <details class="card">
+      <summary>更多设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>显示名称</strong>
+          <strong>按钮显示名称</strong>
           <span>显示在 Ablesci 页面按钮上的文字。</span>
         </div>
         <div class="setting-control">
@@ -505,7 +541,7 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>颜色</strong>
+          <strong>按钮颜色</strong>
           <span>默认状态下的按钮背景和文字颜色。</span>
         </div>
         <div class="setting-control">
@@ -517,7 +553,7 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>显示位置</strong>
+          <strong>按钮显示位置</strong>
           <span>没有快捷应助区域时，回退到 DOI 区域最后。</span>
         </div>
         <div class="setting-control">
@@ -527,10 +563,6 @@
           </select>
         </div>
       </div>
-    </section>
-
-    <details class="card">
-      <summary>更多设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>Native Host 名称</strong>
@@ -676,6 +708,8 @@
           </select>
         </div>
       </div>
+      <details class="setting-details">
+        <summary>低频值守更多设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>观察 URL</strong>
@@ -946,15 +980,24 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>本地记录</strong>
-          <span>已处理记录、watcher 日志和 trace 只保存在本机。</span>
+          <strong>本地记录维护</strong>
+          <span>仅清理本机保存的已处理记录、watcher 日志和 trace。</span>
+        </div>
+        <div class="setting-control">
+          <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
+          <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
+        </div>
+      </div>
+      </details>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>值守操作</strong>
+          <span>手动触发、观察和复制排查配置；清理类操作放在更多设置中。</span>
         </div>
         <div class="setting-control">
           <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
           <button id="observeDemandNow" class="secondary" type="button">立即观察</button>
           <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
-          <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
-          <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
           <span id="watcherRunStatus" class="pill">未检查</span>
           <span id="watcherConfigStatus" class="pill">未复制</span>
         </div>
