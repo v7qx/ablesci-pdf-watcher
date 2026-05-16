@@ -266,6 +266,18 @@ function formatBeijingDateTime(value) {
   return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
+function countdownText(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '-';
+  const seconds = Math.max(0, Math.round((date.getTime() - Date.now()) / 1000));
+  if (seconds <= 0) return '到点';
+  const minutes = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  if (minutes < 60) return `${minutes}分${String(sec).padStart(2, '0')}秒`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}时${String(minutes % 60).padStart(2, '0')}分`;
+}
+
 function todayKeyBeijing() {
   const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -300,6 +312,8 @@ async function renderAdvancedWatcherStatus() {
   setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
   setText('watcherNextRunAt', formatBeijingDateTime(state.chromeAlarmScheduledAt || state.nextScheduledAt));
   setText('watcherNextAssistAt', formatBeijingDateTime(state.nextAssistRunAt));
+  setText('watcherAssistCountdown', countdownText(state.nextAssistRunAt));
+  setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
   setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
   setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
   const top = (state.banditTopPublishers || [])
@@ -639,7 +653,10 @@ async function clearAutoWatcherLogs() {
   showText('status', res.ok ? '已清除 watcher 日志和 trace。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
 }
 
-document.addEventListener('DOMContentLoaded', load);
+document.addEventListener('DOMContentLoaded', () => {
+  load();
+  setInterval(renderAdvancedWatcherStatus, 1000);
+});
 el('save').addEventListener('click', save);
 el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);

@@ -101,6 +101,34 @@
     return JSON.stringify(reportValueForJson(value || {}));
   }
 
+  function countdownText(value, now = Date.now()) {
+    const t = value ? new Date(value).getTime() : 0;
+    if (!Number.isFinite(t) || t <= 0) return '';
+    const seconds = Math.max(0, Math.round((t - now) / 1000));
+    if (seconds <= 0) return 'due';
+    const minutes = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    if (minutes < 60) return `${minutes}m${String(sec).padStart(2, '0')}s`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h${String(minutes % 60).padStart(2, '0')}m`;
+  }
+
+  async function updateActionBadge(state = null) {
+    try {
+      const current = state || await getWatcherState();
+      const text = countdownText(current.nextAssistRunAt);
+      const shortText = text === 'due'
+        ? 'due'
+        : (text ? text.replace(/(\d+)m\d+s$/, '$1m').replace(/(\d+)h(\d+)m$/, '$1h') : '');
+      await chrome.action.setBadgeText({ text: shortText.slice(0, 4) });
+      await chrome.action.setBadgeBackgroundColor({ color: text === 'due' ? '#dc2626' : '#2563eb' });
+      const title = text
+        ? `Ablesci PDF Watcher\n下一次应助尝试：${formatBeijingDateTime(current.nextAssistRunAt)}\n倒计时：${text}`
+        : 'Ablesci PDF Watcher';
+      await chrome.action.setTitle({ title });
+    } catch (_) {}
+  }
+
   function todayKey() {
     return formatBeijingDateTime(new Date(), true);
   }
@@ -551,14 +579,15 @@
       hardFloorMinutes: plan.hardFloorMinutes ? Number(plan.hardFloorMinutes.toFixed(2)) : '',
       finalDelayMinutes: Number(plan.minutes.toFixed(2))
     };
+    updateActionBadge(state).catch(() => {});
     return plan;
   }
 
   async function scheduleNextAssistAfterRun(opts, result, trigger) {
     if (!opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
-    if (trigger === 'manual-observe') return null;
+    if (trigger === 'manual' || trigger === 'manual-observe') return null;
     const reason = String(result?.reason || '');
-    if (/assist_not_due|observe_only|outside_work_schedule|already_running|disabled/i.test(reason)) return null;
+    if (/assist_not_due|observe_only|outside_work_schedule|already_running|active_task|disabled/i.test(reason)) return null;
     const state = await getWatcherState();
     delete state.nextAssistRunAt;
     delete state.nextAssistReason;
@@ -703,6 +732,7 @@
     } else {
       state.chromeAlarmScheduledAt = '';
     }
+    updateActionBadge(state).catch(() => {});
     await appendWatcherTrace('alarm_scheduled', {
       reason,
       delayMinutes: Number(delay.toFixed(2)),
@@ -717,12 +747,12 @@
     });
   }
 
-  async function scheduleWakeForExistingAssist(opts, state, reason = 'existing_assist_due') {
+  async function scheduleWakeForExistingAssist(opts, state, reason = 'existing_assist_due', minDelayMinutes = 0.05) {
     if (!opts?.watcherEnabled || !opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
     const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
     if (!Number.isFinite(nextAssistMs) || nextAssistMs <= 0) return null;
     await chrome.alarms.clear(ALARM_NAME);
-    const delay = Math.max(0.05, (nextAssistMs - Date.now()) / 60000);
+    const delay = Math.max(minDelayMinutes, (nextAssistMs - Date.now()) / 60000);
     state.nextScheduledAt = Date.now() + delay * 60 * 1000;
     state.currentSchedulerMode = opts.watcherSchedulerMode;
     state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : 'quant_rules';
@@ -735,6 +765,7 @@
       state.nextScheduledAt = alarm.scheduledTime;
       await saveWatcherState(state);
     }
+    updateActionBadge(state).catch(() => {});
     await appendWatcherTrace('alarm_scheduled_existing_assist', {
       reason,
       delayMinutes: Number(delay.toFixed(2)),
@@ -748,6 +779,16 @@
   async function refreshAlarmAfterRun(opts, result, attempt, trigger) {
     if (trigger !== 'alarm') return null;
     const reason = String(result?.reason || '');
+    if (reason === 'active_task' && attempt?.nextAssistBefore) {
+      const state = await getWatcherState();
+      if (!state.nextAssistRunAt) {
+        state.nextAssistRunAt = attempt.nextAssistBefore;
+        state.nextAssistReason = state.nextAssistReason || 'preserved_after_active_task';
+        state.nextAssistStrategy = state.nextAssistStrategy || 'quant_target_market';
+      }
+      const delay = await scheduleWakeForExistingAssist(opts, state, 'retry_after_active_task', 1);
+      if (delay !== null) return delay;
+    }
     if (reason === 'observed_assist_not_due' && attempt?.nextAssistBefore) {
       const state = await getWatcherState();
       const beforeMs = new Date(attempt.nextAssistBefore).getTime();
@@ -958,6 +999,7 @@
     finished.skippedDelta = Number(finished.skippedAfter || 0) - Number(finished.skippedBefore || 0);
     state.lastAttempt = finished;
     await saveWatcherState(state);
+    updateActionBadge(state).catch(() => {});
     await appendWatcherTrace('run_attempt_summary', {
       reason: finished.resultReason,
       trigger: finished.trigger,
@@ -3205,7 +3247,7 @@
 
   function initPrivateAutoWatcher(nextDeps) {
     deps = nextDeps;
-    try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+    updateActionBadge().catch(() => {});
 
     chrome.alarms.onAlarm.addListener(alarm => {
       if (alarm.name === ALARM_NAME) runAutoWatcherOnce('alarm');
