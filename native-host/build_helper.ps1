@@ -24,7 +24,7 @@ if (!(Get-Command go -ErrorAction SilentlyContinue)) {
 
 $OutDir = Split-Path -Parent $Output
 if (!(Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-$TelegramTemplate = Join-Path $HelperDir "telegram.local.json"
+$TelegramTemplate = Join-Path $ScriptDir "telegram.example.json"
 
 Push-Location $HelperDir
 try {
@@ -33,7 +33,7 @@ try {
   $env:CGO_ENABLED = "0"
   go build -trimpath -ldflags "-s -w" -o $Output .
   if (Test-Path $TelegramTemplate) {
-    Copy-Item -LiteralPath $TelegramTemplate -Destination (Join-Path $OutDir "telegram.local.json") -Force
+    Copy-Item -LiteralPath $TelegramTemplate -Destination (Join-Path $OutDir "telegram.example.json") -Force
   }
   Write-Host "Built: $Output"
 } finally {

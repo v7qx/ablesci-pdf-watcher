@@ -1,9 +1,0 @@
-{
-  "enabled": false,
-  "bot_token": "123456789:replace-with-your-bot-token",
-  "chat_id": "replace-with-chat-id",
-  "message_thread_id": "",
-  "reply_to_message_id": "",
-  "parse_mode": "",
-  "disable_notification": false
-}

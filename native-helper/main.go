@@ -222,9 +222,6 @@ func handleSendTelegram(req Request) error {
 	if err != nil {
 		return err
 	}
-	if !cfg.Enabled {
-		return writeResponse(Response{OK: false, Action: "send_telegram", Error: "telegram config disabled"})
-	}
 	if strings.TrimSpace(cfg.BotToken) == "" {
 		return errors.New("telegram bot_token is empty")
 	}

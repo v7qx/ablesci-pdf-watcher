@@ -27,6 +27,7 @@ Thumbs.db
 
 # local native host config
 native-host/*.local.json
+native-helper/telegram.local.json
 
 # optional local build artifacts
 native-helper/bin/
