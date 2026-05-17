@@ -320,6 +320,13 @@
       watcherListUrls: normalizeListUrls(opts.watcherListUrls, deps.defaultListUrls),
       watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
       watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+      watcherSkipReported: opts.watcherSkipReported !== false,
+      watcherSkipRejected: opts.watcherSkipRejected !== false,
+      watcherSkipSupplement: opts.watcherSkipSupplement !== false,
+      watcherSkipRemark: opts.watcherSkipRemark !== false,
+      watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
+      watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
+      watcherSkipRiskText: opts.watcherSkipRiskText !== false,
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
@@ -1987,7 +1994,7 @@
       detailUrl: sanitizeReportUrl(entry.detailUrl || ''),
       detailUrlHostPath: deps.urlHostPath(entry.detailUrl || ''),
       status: normalizeText(entry.status).slice(0, 80),
-      reason: normalizeText(entry.reason).slice(0, 160)
+      reason: describeWatcherReason(normalizeText(entry.reason)).slice(0, 220)
     });
     await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: logs.slice(0, MAX_LOGS) });
   }
@@ -2411,6 +2418,33 @@
     return '';
   }
 
+  function describeWatcherReason(reason) {
+    const code = normalizeText(reason);
+    const labels = {
+      missing_detail_url: '列表项没有求助详情链接',
+      sticky_assist: '置顶求助默认跳过',
+      not_waiting: '当前不是可应助状态',
+      reported: '已按设置跳过举报/违规提示求助',
+      rejected: '已按设置跳过驳回应助记录求助',
+      supplement: '已按设置跳过补充材料求助',
+      book_chapter: '已按设置跳过书籍章节求助',
+      patent_report: '已按设置跳过专利/报告类求助',
+      risk_text: '已按设置跳过含异常文本的求助',
+      missing_assist_id: '详情页缺少求助 ID',
+      missing_doi: '已按设置跳过没有 DOI 的求助',
+      missing_pdf_url: '详情页没有识别到可下载 PDF',
+      detail_book_chapter: '详情页识别为书籍章节，已跳过',
+      detail_patent_report: '详情页识别为专利/报告类，已跳过',
+      detail_supplement: '详情页识别为补充材料，已跳过',
+      detail_rejected_history: '详情页存在驳回应助历史，已跳过',
+      detail_reported_warning: '详情页存在举报/违规提示，已跳过',
+      detail_system_risk: '详情页存在系统风险提示，已跳过',
+      detail_remark: '详情页存在备注，已按设置跳过',
+      detail_risk_text: '详情页命中风险文本，已跳过'
+    };
+    return labels[code] ? `${code} - ${labels[code]}` : code;
+  }
+
   function candidateModelScore(candidate, state) {
     const model = state?.publisherModel || {};
     const publisher = candidatePublisherName(candidate);
@@ -2521,8 +2555,8 @@
     if (opts.watcherSkipReported && candidate.reported) return { ok: false, reason: 'reported' };
     if (opts.watcherSkipRejected && candidate.rejected) return { ok: false, reason: 'rejected' };
     if (opts.watcherSkipSupplement && candidate.supplement) return { ok: false, reason: 'supplement' };
-    if (candidate.documentType === 'book_chapter') return { ok: false, reason: 'book_chapter' };
-    if (candidate.documentType === 'patent_report') return { ok: false, reason: 'patent_report' };
+    if (opts.watcherSkipBookChapter && candidate.documentType === 'book_chapter') return { ok: false, reason: 'book_chapter' };
+    if (opts.watcherSkipPatentReport && candidate.documentType === 'patent_report') return { ok: false, reason: 'patent_report' };
     if (opts.watcherSkipRiskText && /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue)) {
       return { ok: false, reason: 'risk_text' };
     }
@@ -2534,17 +2568,20 @@
     if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
     if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
 
+    const flags = payload.riskFlags || {};
     const textValue = [
       payload.statusText || '',
       payload.riskText || '',
-      payload.title || '',
-      payload.documentTypeLabel || '',
-      ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : [])
+      payload.documentTypeLabel || ''
     ].join(' ');
 
-    if (payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
-    if (payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
-    if (/举报|被举报|驳回|已驳回|投诉|补充材料|Supplement|supporting information/i.test(textValue)) {
+    if (opts.watcherSkipBookChapter && payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
+    if (opts.watcherSkipPatentReport && payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
+    if (opts.watcherSkipSupplement && flags.supplement) return { ok: false, reason: 'detail_supplement' };
+    if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
+    if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
+    if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
+    if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
       return { ok: false, reason: 'detail_risk_text' };
     }
     return { ok: true };
@@ -2939,6 +2976,7 @@
         if (!listAllowed.ok) {
           await appendWatcherTrace('candidate_skip_list_filter', {
             reason: listAllowed.reason,
+            reasonText: describeWatcherReason(listAllowed.reason),
             sessionId: session.id,
             detailUrl: candidate.detailUrl,
             assistId: candidate.assistId || '',
@@ -3015,7 +3053,7 @@
         const detailAllowed = isDetailAllowedForWatcher(payload, opts);
         const key = getProcessedKey(candidate, payload);
         if (!detailAllowed.ok) {
-          await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, sessionId: session.id, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
+          await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), sessionId: session.id, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
           await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
           await updateProcessed(key, 'skipped', detailAllowed.reason);
           await incrementDaily('skipped');
@@ -3342,6 +3380,7 @@
           if (!listAllowed.ok) {
             await appendWatcherTrace('candidate_skip_list_filter', {
               reason: listAllowed.reason,
+              reasonText: describeWatcherReason(listAllowed.reason),
               trigger,
               detailUrl: candidate.detailUrl,
               assistId: candidate.assistId || '',
@@ -3379,7 +3418,7 @@
           const detailAllowed = isDetailAllowedForWatcher(payload, opts);
           const key = getProcessedKey(candidate, payload);
           if (!detailAllowed.ok) {
-            await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
+            await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
             await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
             await updateProcessed(key, 'skipped', detailAllowed.reason);
             await incrementDaily('skipped');

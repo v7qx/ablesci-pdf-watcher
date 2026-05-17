@@ -325,9 +325,17 @@
 
   function detectPageRisk() {
     const reasons = [];
+    const flags = {
+      supplement: false,
+      rejectedHistory: false,
+      reportedWarning: false,
+      systemRisk: false,
+      remark: false
+    };
     const titleText = visibleText($('.assist-title'));
 
     if (/求助补充材料|补充材料求助|supporting information|supplementary material/i.test(titleText)) {
+      flags.supplement = true;
       reasons.push('当前求助类型是补充材料/SI，插件尚未支持补充材料自动应助。');
     }
 
@@ -335,6 +343,7 @@
       .map(visibleText)
       .filter(t => /驳回|应助历史|核实您的应助文件/.test(t));
     if (rejectAlerts.length > 0) {
+      flags.rejectedHistory = true;
       reasons.push('当前求助存在驳回应助记录，可能需要先人工核对应助文件。');
     }
 
@@ -345,6 +354,7 @@
         return /涉嫌违规|正在被举报/.test(title) || /涉嫌违规.*举报|正在被举报/.test(text);
       });
     if (reportWarnings) {
+      flags.reportedWarning = true;
       reasons.push('当前求助被网站标记为涉嫌违规或正在被举报。');
     }
 
@@ -353,6 +363,7 @@
       .filter(t => /系统提示/.test(t))
       .filter(t => /Supplementary|补充材料|并非全文|不是全文/i.test(t));
     if (systemWarnings.length > 0) {
+      flags.systemRisk = true;
       reasons.push('网站系统提示 DOI 可能对应补充材料或并非全文，需要人工核对。');
     }
 
@@ -369,12 +380,15 @@
       .map(visibleText)
       .some(t => /该求助存在备注|以备注为准/.test(t));
     if (remarkRows.length > 0 || remarkNotice) {
+      flags.remark = true;
       reasons.push('当前求助存在备注，可能要求特定版本或附加条件，需以备注为准人工核对。');
     }
 
     return {
       downloadOnly: reasons.length > 0,
-      reasons
+      reasons,
+      flags,
+      remarkText: remarkRows.map(row => row.value).filter(Boolean).join('；')
     };
   }
 
@@ -483,6 +497,9 @@
       journalName,
       documentType: documentTypeInfo.type,
       documentTypeLabel: documentTypeInfo.label,
+      hasRemark: risk.flags?.remark === true,
+      remarkText: risk.remarkText || '',
+      riskFlags: risk.flags || {},
       pdfUrl: picked.url,
       pdfUrlSource: picked.source,
       suggestedFilename,

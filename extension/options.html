@@ -828,7 +828,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
-          <span>每行一个。Elsevier 运行时随机第 3-100 页，RSC 运行时随机第 1-5 页。</span>
+          <span>每行一个，可自定义其他 Ablesci 求助列表链接。Elsevier 运行时按后排优先曲线随机第 3-200 页，RSC 运行时随机第 1-5 页；未内置曲线的其他链接会按你配置的原始 URL 直接使用。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherListUrls" spellcheck="false"></textarea>
@@ -846,9 +846,9 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>候选筛选</strong>
-          <span>跳过置顶、举报、驳回、补充材料和明显异常文本；详情页会二次确认 DOI。</span>
+          <span>统一控制候选跳过条件。列表页先筛一次，详情页再按备注、文献类型、风险提示二次确认。</span>
         </div>
-        <div class="setting-control">
+        <div class="setting-control setting-control-wide">
           <label class="toggle-option" title="只处理有 DOI 的求助">
             <span class="toggle"><input id="watcherRequireDoi" type="checkbox"><span></span></span>
             <span class="toggle-text">有 DOI</span>
@@ -865,10 +865,23 @@
             <span class="toggle"><input id="watcherSkipSupplement" type="checkbox"><span></span></span>
             <span class="toggle-text">补充材料</span>
           </label>
+          <label class="toggle-option" title="跳过存在备注的求助">
+            <span class="toggle"><input id="watcherSkipRemark" type="checkbox"><span></span></span>
+            <span class="toggle-text">备注</span>
+          </label>
+          <label class="toggle-option" title="跳过书籍章节">
+            <span class="toggle"><input id="watcherSkipBookChapter" type="checkbox"><span></span></span>
+            <span class="toggle-text">书籍章节</span>
+          </label>
+          <label class="toggle-option" title="跳过专利或报告类">
+            <span class="toggle"><input id="watcherSkipPatentReport" type="checkbox"><span></span></span>
+            <span class="toggle-text">专利/报告</span>
+          </label>
           <label class="toggle-option" title="跳过异常文本">
             <span class="toggle"><input id="watcherSkipRiskText" type="checkbox"><span></span></span>
             <span class="toggle-text">异常文本</span>
           </label>
+          <div class="setting-hint">跳过原因会在 watcher 日志和日报里显示为“代码 + 中文说明”，例如 `detail_remark - 详情页存在备注，已按设置跳过`。</div>
         </div>
       </div>
       <div class="setting-row">

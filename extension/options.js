@@ -35,6 +35,9 @@ const DEFAULT_OPTIONS = {
   watcherSkipReported: true,
   watcherSkipRejected: true,
   watcherSkipSupplement: true,
+  watcherSkipRemark: true,
+  watcherSkipBookChapter: true,
+  watcherSkipPatentReport: true,
   watcherSkipRiskText: true,
   watcherOpenDetail: true,
   watcherAutoDownload: true,
@@ -710,6 +713,19 @@ async function copyTextToClipboard(text) {
     return ok;
   }
 }
+
+document.addEventListener('copy', event => {
+  const active = document.activeElement;
+  const tag = String(active?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || active?.isContentEditable) return;
+  const selection = window.getSelection?.();
+  const text = selection ? String(selection.toString() || '') : '';
+  if (!text) return;
+  const cleaned = text.replace(/\r\n/g, '\n').replace(/[\r\n]+$/, '');
+  if (cleaned === text) return;
+  event.preventDefault();
+  event.clipboardData?.setData('text/plain', cleaned);
+});
 
 async function runAutoWatcherNow() {
   showPill('watcherRunStatus', '检查中');
