@@ -385,6 +385,16 @@
       .trim();
   }
 
+  function extractDocumentTypeInfo() {
+    const raw = visibleText(document.querySelector('.assist-title [title="文献类型"], .assist-title .paper-type, .assist-title .layui-badge'));
+    const label = normalizeText(raw);
+    if (!label) return { type: '', label: '' };
+    if (/补充材料|supporting information|supplement/i.test(label)) return { type: 'supplement', label };
+    if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(label)) return { type: 'book_chapter', label };
+    if (/专利、报告等|专利|patent|report/i.test(label)) return { type: 'patent_report', label };
+    return { type: '', label };
+  }
+
   function extractJournalName() {
     const rows = Array.from(document.querySelectorAll('.assist-detail tr'));
     for (const tr of rows) {
@@ -461,6 +471,7 @@
     const title = visibleText($('.assist-title')) || document.title || suggestedFilename;
     const journalName = extractJournalName();
     const risk = detectPageRisk();
+    const documentTypeInfo = extractDocumentTypeInfo();
 
     return {
       pageUrl: location.href,
@@ -470,6 +481,8 @@
       doi,
       title,
       journalName,
+      documentType: documentTypeInfo.type,
+      documentTypeLabel: documentTypeInfo.label,
       pdfUrl: picked.url,
       pdfUrlSource: picked.source,
       suggestedFilename,

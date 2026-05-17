@@ -17,7 +17,15 @@
   const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
   const ASSIST_RANDOM_PAGE_RANGES = {
-    elsevier: { min: 3, max: 100 },
+    elsevier: {
+      min: 3,
+      max: 200,
+      curve: 'mixed_backlog_power',
+      frontProbability: 0.20,
+      frontMin: 3,
+      frontMax: 50,
+      alpha: 1.2
+    },
     rsc: { min: 1, max: 5 }
   };
   const ADVANCED_MODEL_MIN_DAYS = 2;
@@ -202,21 +210,90 @@
     return low + Math.floor(Math.random() * Math.max(1, high - low + 1));
   }
 
-  function randomizeAssistListUrl(url) {
+  function clampInt(value, min, max) {
+    return Math.max(min, Math.min(max, Math.round(value)));
+  }
+
+  function pageRangeMetaFromUrl(url) {
     try {
       const u = new URL(url);
       const isAblesci = /(^|\.)ablesci\.com$/i.test(u.hostname);
       const isAssistList = /\/assist\/index$/i.test(u.pathname);
       const publisher = String(u.searchParams.get('publisher') || '').toLowerCase();
       const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
-      if (isAblesci && isAssistList && u.searchParams.get('status') === 'waiting' && range) {
-        u.searchParams.set('page', String(randomIntInclusive(range.min, range.max)));
-        return u.toString();
+      if (!isAblesci || !isAssistList || u.searchParams.get('status') !== 'waiting' || !range) {
+        return null;
       }
+      return { publisher, range };
     } catch (_) {
-      // Keep the configured URL if it cannot be parsed.
+      return null;
     }
-    return url;
+  }
+
+  function pickAssistPage(range) {
+    const min = clampInt(range?.min ?? 1, 1, 9999);
+    const max = clampInt(range?.max ?? min, min, 9999);
+    const curve = String(range?.curve || 'uniform').trim().toLowerCase();
+    if (curve !== 'mixed_backlog_power') {
+      return {
+        pickedPage: randomIntInclusive(min, max),
+        pageCurve: 'uniform',
+        pageMin: min,
+        pageMax: max,
+        frontHit: false,
+        alpha: ''
+      };
+    }
+
+    const frontProbability = clampNumber(range?.frontProbability, 0.20, 0, 1);
+    const frontMin = clampInt(range?.frontMin ?? min, min, max);
+    const frontMax = clampInt(range?.frontMax ?? frontMin, frontMin, max);
+    const alpha = clampNumber(range?.alpha, 1.2, 0, 4);
+    const frontHit = Math.random() < frontProbability;
+    const pickedPage = frontHit
+      ? randomIntInclusive(frontMin, frontMax)
+      : clampInt(min + Math.pow(Math.random(), 1 / (alpha + 1)) * (max - min), min, max);
+    return {
+      pickedPage,
+      pageCurve: 'mixed_backlog_power',
+      pageMin: min,
+      pageMax: max,
+      frontHit,
+      alpha
+    };
+  }
+
+  function randomizeAssistListUrlWithMeta(url) {
+    const meta = {
+      configuredUrl: url,
+      pickedListUrl: url,
+      publisher: '',
+      pageCurve: '',
+      pickedPage: '',
+      pageMin: '',
+      pageMax: '',
+      frontHit: false,
+      alpha: ''
+    };
+    try {
+      const u = new URL(url);
+      const pageMeta = pageRangeMetaFromUrl(url);
+      if (!pageMeta) return meta;
+      const picked = pickAssistPage(pageMeta.range);
+      u.searchParams.set('page', String(picked.pickedPage));
+      return {
+        ...picked,
+        publisher: pageMeta.publisher,
+        configuredUrl: url,
+        pickedListUrl: u.toString()
+      };
+    } catch (_) {
+      return meta;
+    }
+  }
+
+  function randomizeAssistListUrl(url) {
+    return randomizeAssistListUrlWithMeta(url).pickedListUrl || url;
   }
 
   function listUrlsForRun(opts) {
@@ -1045,6 +1122,8 @@
       downloadedDelta: finished.downloadedDelta,
       listScanStarted: finished.listScanStarted,
       pickedListUrl: finished.pickedListUrl,
+      pickedPage: finished.pickedPage,
+      pageCurve: finished.pageCurve,
       nextAssistBefore: finished.nextAssistBefore,
       nextAssistAfter: finished.nextAssistAfter,
       nextAlarmAfter: finished.nextAlarmAfter
@@ -2048,7 +2127,8 @@
       'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextAssistMarketDataAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
       'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',
       'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
-      'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'randomSessionPicked', 'randomSessionFinalSize',
+      'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'pickedPage', 'pageCurve', 'pageMin', 'pageMax',
+      'pageFrontHit', 'pageAlpha', 'randomSessionPicked', 'randomSessionFinalSize',
       'randomValue', 'step', 'trigger', 'tabId', 'url', 'details'
     ];
     const baseReportFields = {
@@ -2090,6 +2170,12 @@
       lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',
       lastAttemptListScanStarted: lastAttempt.listScanStarted === true ? 'true' : '',
       lastAttemptPickedListUrl: lastAttempt.pickedListUrl || '',
+      pickedPage: lastAttempt.pickedPage ?? '',
+      pageCurve: lastAttempt.pageCurve || '',
+      pageMin: lastAttempt.pageMin ?? '',
+      pageMax: lastAttempt.pageMax ?? '',
+      pageFrontHit: lastAttempt.frontHit === true ? 'true' : '',
+      pageAlpha: lastAttempt.alpha ?? '',
       randomSessionPicked: lastAttempt.randomSessionPicked ?? '',
       randomSessionFinalSize: lastAttempt.randomSessionFinalSize ?? '',
       randomValue: lastAttempt.randomValue ?? ''
@@ -2316,6 +2402,15 @@
     return publisherAlias(candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
   }
 
+  function normalizeDocumentType(text) {
+    const value = normalizeText(text);
+    if (!value) return '';
+    if (/补充材料|supporting information|supplement/i.test(value)) return 'supplement';
+    if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(value)) return 'book_chapter';
+    if (/专利、报告等|专利|patent|report/i.test(value)) return 'patent_report';
+    return '';
+  }
+
   function candidateModelScore(candidate, state) {
     const model = state?.publisherModel || {};
     const publisher = candidatePublisherName(candidate);
@@ -2393,6 +2488,8 @@
       const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
       const journalShortName = detailAnchor?.querySelector('span[title]')?.getAttribute('title') ||
         row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
+      const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
+      const documentType = normalizeDocumentType(typeText || rowText);
       const doi = doiFrom(rowText);
       return {
         assistId,
@@ -2404,7 +2501,9 @@
         journalShortName,
         reported: /举报|被举报|涉嫌违规/.test(rowText),
         rejected: /驳回|已驳回/.test(rowText),
-        supplement: /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
+        supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
+        documentType,
+        documentTypeText: normalizeText(typeText),
         statusText,
         sticky: /stick-assist|置顶/.test(classText + ' ' + rowText),
         index
@@ -2422,6 +2521,8 @@
     if (opts.watcherSkipReported && candidate.reported) return { ok: false, reason: 'reported' };
     if (opts.watcherSkipRejected && candidate.rejected) return { ok: false, reason: 'rejected' };
     if (opts.watcherSkipSupplement && candidate.supplement) return { ok: false, reason: 'supplement' };
+    if (candidate.documentType === 'book_chapter') return { ok: false, reason: 'book_chapter' };
+    if (candidate.documentType === 'patent_report') return { ok: false, reason: 'patent_report' };
     if (opts.watcherSkipRiskText && /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue)) {
       return { ok: false, reason: 'risk_text' };
     }
@@ -2437,9 +2538,12 @@
       payload.statusText || '',
       payload.riskText || '',
       payload.title || '',
+      payload.documentTypeLabel || '',
       ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : [])
     ].join(' ');
 
+    if (payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
+    if (payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
     if (/举报|被举报|驳回|已驳回|投诉|补充材料|Supplement|supporting information/i.test(textValue)) {
       return { ok: false, reason: 'detail_risk_text' };
     }
@@ -2804,12 +2908,21 @@
     const plan = [];
     for (const listUrl of runListUrls) {
       if (plan.length >= targetSessionSize) break;
-      const pickedListUrl = randomizeAssistListUrl(listUrl);
+      const pagePick = randomizeAssistListUrlWithMeta(listUrl);
+      const pickedListUrl = pagePick.pickedListUrl;
       await appendWatcherTrace('session_plan_url', {
         reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
         sessionId: session.id,
         listUrl: pickedListUrl,
-        configuredUrl: listUrl
+        configuredUrl: listUrl,
+        publisher: pagePick.publisher,
+        pageCurve: pagePick.pageCurve,
+        pickedPage: pagePick.pickedPage,
+        pageMin: pagePick.pageMin,
+        pageMax: pagePick.pageMax,
+        frontHit: pagePick.frontHit,
+        alpha: pagePick.alpha,
+        pickedListUrl: pagePick.pickedListUrl
       });
       stateForTargets.lastPickedListUrl = pickedListUrl;
       await saveWatcherState(stateForTargets);
@@ -2990,7 +3103,13 @@
       randomSessionWeights: '',
       randomValue: '',
       listScanStarted: false,
-      pickedListUrl: ''
+      pickedListUrl: '',
+      pickedPage: '',
+      pageCurve: '',
+      pageMin: '',
+      pageMax: '',
+      frontHit: false,
+      alpha: ''
     };
     function finish(result) {
       runResult = result;
@@ -3174,14 +3293,28 @@
         listUrls: runListUrls
       });
       for (const listUrl of runListUrls) {
-        const pickedListUrl = randomizeAssistListUrl(listUrl);
+        const pagePick = randomizeAssistListUrlWithMeta(listUrl);
+        const pickedListUrl = pagePick.pickedListUrl;
         attempt.listScanStarted = true;
         attempt.pickedListUrl = pickedListUrl;
+        attempt.pickedPage = pagePick.pickedPage;
+        attempt.pageCurve = pagePick.pageCurve;
+        attempt.pageMin = pagePick.pageMin;
+        attempt.pageMax = pagePick.pageMax;
+        attempt.frontHit = pagePick.frontHit;
+        attempt.alpha = pagePick.alpha;
         await appendWatcherTrace('list_scan_start', {
           reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
           trigger,
           listUrl: pickedListUrl,
           configuredUrl: listUrl,
+          publisher: pagePick.publisher,
+          pageCurve: pagePick.pageCurve,
+          pickedPage: pagePick.pickedPage,
+          pageMin: pagePick.pageMin,
+          pageMax: pagePick.pageMax,
+          frontHit: pagePick.frontHit,
+          alpha: pagePick.alpha,
           handledCount,
           targetSessionSize
         });
