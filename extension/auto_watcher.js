@@ -332,12 +332,14 @@
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
+      watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
       watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
       watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
       watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
       watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
       watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
+      watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
       watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
       watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
@@ -356,6 +358,31 @@
       watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, MAX_SESSION_CANDIDATES),
       watcherAllowZeroSession: opts.watcherAllowZeroSession === true
     };
+  }
+
+  async function hydrateJournalAccessRulesFromConfig(opts) {
+    if (!deps?.sendNativeMessage) return opts;
+    try {
+      const res = await deps.sendNativeMessage(opts.nativeHostName, {
+        action: 'read_config_file',
+        dir: opts.watcherConfigDir || '',
+        config_path: opts.watcherJournalAccessConfigPath || '',
+        filename: 'journal-access.json'
+      });
+      if (!res?.body) return opts;
+      const parsed = parseJournalAccessRules(res.body);
+      const text = JSON.stringify(parsed, null, 2);
+      return {
+        ...opts,
+        watcherJournalAccessRules: text,
+        watcherJournalAccessRulesSource: res.path || 'config.local/journal-access.json'
+      };
+    } catch (_) {
+      return {
+        ...opts,
+        watcherJournalAccessRulesSource: opts.watcherJournalAccessRules ? 'chrome.storage.local cache' : ''
+      };
+    }
   }
 
   function normalizeObserveTimes(value) {
@@ -2111,7 +2138,8 @@
   }
 
   async function writeDailyReports() {
-    const opts = normalizeOptions(await deps.getOptions());
+    let opts = normalizeOptions(await deps.getOptions());
+    opts = await hydrateJournalAccessRulesFromConfig(opts);
     if (!opts.watcherDailyReportEnabled) return;
 
     const date = todayKey();
@@ -2225,7 +2253,8 @@
     const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
     const journalAccessJson = JSON.stringify(reportValueForJson({
       updatedAt: new Date().toISOString(),
-      note: '本文件用于本地排查和手动维护参考。真正生效的手动名单在设置页“期刊访问名单”中。',
+      note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 config.local/journal-access.json 或设置页指定路径。',
+      source: opts.watcherJournalAccessRulesSource || 'chrome.storage.local cache',
       manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
       stats: journalAccessStats
     }), null, 2) + '\n';
@@ -3241,7 +3270,8 @@
     }
     try {
       await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
-      const opts = normalizeOptions(await deps.getOptions());
+      let opts = normalizeOptions(await deps.getOptions());
+      opts = await hydrateJournalAccessRulesFromConfig(opts);
       currentRunOpts = opts;
       await recordRunStart(trigger, opts);
       const initialState = await getWatcherState();

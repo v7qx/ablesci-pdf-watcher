@@ -1,0 +1,12 @@
+{
+  "blocked": [
+    {
+      "publisher": "Elsevier",
+      "short": "EPSL",
+      "full": "Earth and Planetary Science Letters",
+      "aliases": []
+    }
+  ],
+  "allowed": [],
+  "partial": []
+}

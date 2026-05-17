@@ -95,6 +95,12 @@ func run() error {
 		return handleNotifyUser(req)
 	case "send_telegram":
 		return handleSendTelegram(req)
+	case "open_config_dir":
+		return handleOpenConfigDir(req)
+	case "read_config_file":
+		return handleReadConfigFile(req)
+	case "write_config_file":
+		return handleWriteConfigFile(req)
 	case "write_text_file":
 		return handleWriteTextFile(req)
 	default:
@@ -270,10 +276,15 @@ func loadTelegramConfig(configPath string) (TelegramConfig, error) {
 	if env := strings.TrimSpace(os.Getenv("ABLESCI_WATCHER_TG_CONFIG")); env != "" {
 		candidates = append(candidates, env)
 	}
+	for _, dir := range configDirCandidates("") {
+		candidates = append(candidates, filepath.Join(dir, "telegram.json"))
+	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "telegram.local.json"))
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "telegram.json"))
 	}
 	candidates = append(candidates, "telegram.local.json")
+	candidates = append(candidates, "telegram.json")
 
 	for _, path := range candidates {
 		path = strings.Trim(path, "\" ")
@@ -299,6 +310,163 @@ func loadTelegramConfig(configPath string) (TelegramConfig, error) {
 		return cfg, nil
 	}
 	return TelegramConfig{}, errors.New("telegram config not found")
+}
+
+func handleOpenConfigDir(req Request) error {
+	dir, err := resolveConfigDir(req.Dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		if err := exec.Command("explorer.exe", dir).Start(); err != nil {
+			return err
+		}
+		return writeResponse(Response{OK: true, Action: "open_config_dir", Path: dir})
+	}
+	return writeResponse(Response{OK: true, Action: "open_config_dir", Path: dir})
+}
+
+func handleReadConfigFile(req Request) error {
+	path, err := resolveConfigFile(req, false)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return writeResponse(Response{OK: true, Action: "read_config_file", Path: path, Filename: filepath.Base(path), Size: int64(len(data)), Body: string(data)})
+}
+
+func handleWriteConfigFile(req Request) error {
+	path, err := resolveConfigFile(req, true)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(req.Content), 0600); err != nil {
+		return err
+	}
+	return writeResponse(Response{OK: true, Action: "write_config_file", Path: path, Filename: filepath.Base(path), Size: int64(len(req.Content))})
+}
+
+func resolveConfigFile(req Request, forWrite bool) (string, error) {
+	if strings.TrimSpace(req.ConfigPath) != "" {
+		path := cleanConfigPath(req.ConfigPath)
+		if path == "" {
+			return "", errors.New("invalid config path")
+		}
+		base := filepath.Base(path)
+		if !allowedConfigFilename(base) {
+			return "", fmt.Errorf("unsupported config file: %s", base)
+		}
+		if !forWrite {
+			if _, err := os.Stat(path); err != nil {
+				return "", err
+			}
+		}
+		return path, nil
+	}
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		filename = "journal-access.json"
+	}
+	filename = filepath.Base(filename)
+	if !allowedConfigFilename(filename) {
+		return "", fmt.Errorf("unsupported config file: %s", filename)
+	}
+	if forWrite {
+		dir, err := resolveConfigDir(req.Dir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, filename), nil
+	}
+	for _, dir := range configDirCandidates(req.Dir) {
+		path := filepath.Join(dir, filename)
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("%s not found in local config dirs", filename)
+}
+
+func resolveConfigDir(dir string) (string, error) {
+	for _, candidate := range configDirCandidates(dir) {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", errors.New("no config dir candidate")
+}
+
+func configDirCandidates(explicitDir string) []string {
+	candidates := []string{}
+	if strings.TrimSpace(explicitDir) != "" {
+		candidates = append(candidates, explicitDir)
+	}
+	if env := strings.TrimSpace(os.Getenv("ABLESCI_WATCHER_CONFIG_DIR")); env != "" {
+		candidates = append(candidates, env)
+	}
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "config.local"),
+			filepath.Join(filepath.Dir(exeDir), "config.local"),
+		)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(cwd, "config.local"),
+			filepath.Join(filepath.Dir(cwd), "config.local"),
+		)
+	}
+
+	seen := map[string]bool{}
+	out := []string{}
+	for _, candidate := range candidates {
+		path := cleanConfigPath(candidate)
+		if path == "" {
+			continue
+		}
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
+}
+
+func cleanConfigPath(path string) string {
+	path = strings.Trim(path, "\" ")
+	if path == "" {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		path = strings.ReplaceAll(path, "/", `\`)
+	}
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+	return filepath.Clean(path)
+}
+
+func allowedConfigFilename(filename string) bool {
+	switch strings.ToLower(filepath.Base(filename)) {
+	case "journal-access.json", "telegram.json", "telegram.local.json", "watcher-rules.json":
+		return true
+	default:
+		return false
+	}
 }
 
 func handleWriteTextFile(req Request) error {

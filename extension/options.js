@@ -51,12 +51,14 @@ const DEFAULT_OPTIONS = {
   watcherDailyReportEnabled: true,
   watcherBadgeCountdownEnabled: true,
   watcherReportDir: '',
+  watcherConfigDir: '',
   watcherNoDownloadTimeoutMinutes: 1,
   watcherDownloadTimeoutMinutes: 5,
   watcherTaskTimeoutMinutes: 10,
   watcherNotifyMode: 'native',
   watcherTelegramNotifyEnabled: false,
   watcherTelegramConfigPath: '',
+  watcherJournalAccessConfigPath: '',
   watcherCfPauseThreshold: 3,
   watcherQuantSchedulerEnabled: true,
   watcherAdvancedSchedulerEnabled: false,
@@ -211,12 +213,14 @@ async function loadOptions() {
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
     watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
     watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
     watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
+    watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
     watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
     watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
@@ -255,6 +259,7 @@ async function load() {
     else node.value = opts[id] ?? '';
   }
   await renderAdvancedWatcherStatus();
+  await renderJournalAccessConfigStatus(opts);
 }
 
 function setText(id, value) {
@@ -440,14 +445,16 @@ function validateOptions(opts) {
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
   if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
   if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求采样 URL 必须是 Ablesci HTTPS 链接。');
-  try {
-    const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('期刊访问名单必须是 JSON 对象。');
-    for (const key of ['blocked', 'allowed', 'partial']) {
-      if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`${key} 必须是数组。`);
+  if (String(opts.watcherJournalAccessRules || '').trim()) {
+    try {
+      const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('期刊访问名单必须是 JSON 对象。');
+      for (const key of ['blocked', 'allowed', 'partial']) {
+        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`${key} 必须是数组。`);
+      }
+    } catch (err) {
+      throw new Error('期刊访问名单 JSON 无效：' + (err?.message || String(err)));
     }
-  } catch (err) {
-    throw new Error('期刊访问名单 JSON 无效：' + (err?.message || String(err)));
   }
 }
 
@@ -481,12 +488,14 @@ async function save() {
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
+  opts.watcherConfigDir = String(opts.watcherConfigDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
   opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);
   opts.watcherTaskTimeoutMinutes = clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180);
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'browser' ? 'browser' : 'native';
   opts.watcherTelegramNotifyEnabled = opts.watcherTelegramNotifyEnabled === true;
   opts.watcherTelegramConfigPath = String(opts.watcherTelegramConfigPath || '').trim();
+  opts.watcherJournalAccessConfigPath = String(opts.watcherJournalAccessConfigPath || '').trim();
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
   opts.watcherAdvancedSchedulerEnabled = opts.watcherSchedulerMode === 'advanced';
@@ -504,7 +513,7 @@ async function save() {
   opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
   opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
-  opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim();
+  opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || '').trim();
 
   try {
     validateOptions(opts);
@@ -562,6 +571,96 @@ async function copyDiagnostic() {
   } catch (_) {
     showPill('diagnosticStatus', '复制失败', true);
   }
+}
+
+function parseJournalAccessRules(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || '{}'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
+    return {
+      blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
+      allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
+      partial: Array.isArray(parsed.partial) ? parsed.partial : []
+    };
+  } catch (_) {
+    return { blocked: [], allowed: [], partial: [] };
+  }
+}
+
+function journalAccessSummary(raw) {
+  const rules = parseJournalAccessRules(raw);
+  return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length}`;
+}
+
+function nativeConfigMessage(action, extra = {}) {
+  const hostName = el('nativeHostName')?.value.trim() || DEFAULT_OPTIONS.nativeHostName;
+  return new Promise(resolve => {
+    chrome.runtime.sendNativeMessage(hostName, { action, ...extra }, response => {
+      const lastErr = chrome.runtime.lastError;
+      if (lastErr) return resolve({ ok: false, error: lastErr.message });
+      resolve(response || { ok: false, error: 'Native Helper 没有返回内容' });
+    });
+  });
+}
+
+async function readJournalAccessConfig(opts = null) {
+  const current = opts || await loadOptions();
+  return nativeConfigMessage('read_config_file', {
+    dir: current.watcherConfigDir || '',
+    config_path: current.watcherJournalAccessConfigPath || '',
+    filename: 'journal-access.json'
+  });
+}
+
+async function renderJournalAccessConfigStatus(opts = null) {
+  const current = opts || await loadOptions();
+  const cached = String(current.watcherJournalAccessRules || '').trim();
+  setText('journalAccessCacheSummary', cached ? journalAccessSummary(cached) : '缓存为空');
+  setText('journalAccessConfigSource', current.watcherJournalAccessConfigPath || current.watcherConfigDir || '默认 config.local/journal-access.json');
+  const res = await readJournalAccessConfig(current);
+  if (res.ok) {
+    const rules = parseJournalAccessRules(res.body || '');
+    const text = JSON.stringify(rules, null, 2);
+    const hidden = el('watcherJournalAccessRules');
+    if (hidden) hidden.value = text;
+    setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已读取`);
+    setText('journalAccessConfigSource', res.path || current.watcherJournalAccessConfigPath || 'config.local/journal-access.json');
+    showPill('journalAccessConfigStatus', '已加载文件');
+    return;
+  }
+  setText('journalAccessFileSummary', `未读取文件，使用缓存：${cached ? journalAccessSummary(cached) : '空名单'}`);
+  showPill('journalAccessConfigStatus', '使用缓存', false);
+}
+
+async function reloadJournalAccessConfig() {
+  await save();
+  const opts = await loadOptions();
+  const res = await readJournalAccessConfig(opts);
+  if (!res.ok) {
+    showPill('journalAccessConfigStatus', '读取失败：' + (res.error || '未找到文件'), true);
+    return;
+  }
+  try {
+    const parsed = parseJournalAccessRules(res.body || '');
+    const text = JSON.stringify(parsed, null, 2);
+    await chrome.storage.local.set({ watcherJournalAccessRules: text });
+    const hidden = el('watcherJournalAccessRules');
+    if (hidden) hidden.value = text;
+    setText('journalAccessCacheSummary', journalAccessSummary(text));
+    setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已同步到缓存`);
+    setText('journalAccessConfigSource', res.path || '');
+    showPill('journalAccessConfigStatus', '已重载');
+  } catch (err) {
+    showPill('journalAccessConfigStatus', 'JSON 无效：' + (err?.message || String(err)), true);
+  }
+}
+
+async function openConfigDir() {
+  await save();
+  const opts = await loadOptions();
+  const res = await nativeConfigMessage('open_config_dir', { dir: opts.watcherConfigDir || '' });
+  showPill('journalAccessConfigStatus', res.ok ? '已打开目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
+  if (res.ok && res.path) setText('journalAccessConfigSource', res.path);
 }
 
 function sanitizeUrlForExport(value) {
@@ -802,3 +901,5 @@ el('testWatcherNotification')?.addEventListener('click', testWatcherNotification
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
+el('openWatcherConfigDir')?.addEventListener('click', openConfigDir);
+el('reloadJournalAccessConfig')?.addEventListener('click', reloadJournalAccessConfig);

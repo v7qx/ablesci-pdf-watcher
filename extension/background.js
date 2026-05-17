@@ -45,12 +45,14 @@ const DEFAULT_OPTIONS = {
   watcherDailyReportEnabled: true,
   watcherBadgeCountdownEnabled: true,
   watcherReportDir: '',
+  watcherConfigDir: '',
   watcherNoDownloadTimeoutMinutes: 1,
   watcherDownloadTimeoutMinutes: 5,
   watcherTaskTimeoutMinutes: 10,
   watcherNotifyMode: 'native',
   watcherTelegramNotifyEnabled: false,
   watcherTelegramConfigPath: '',
+  watcherJournalAccessConfigPath: '',
   watcherCfPauseThreshold: 3,
   watcherQuantSchedulerEnabled: true,
   watcherAdvancedSchedulerEnabled: false,
@@ -144,12 +146,14 @@ async function getOptions() {
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
     watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
     watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
     watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
     watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
     watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
     watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
+    watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
     watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
     watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
     watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
@@ -372,6 +376,42 @@ function parseJournalAccessRules(raw) {
   }
 }
 
+async function readJournalAccessRulesFromConfig(opts) {
+  try {
+    const res = await sendNativeMessage(opts.nativeHostName, {
+      action: 'read_config_file',
+      dir: opts.watcherConfigDir || '',
+      config_path: opts.watcherJournalAccessConfigPath || '',
+      filename: 'journal-access.json'
+    });
+    return {
+      ok: true,
+      path: res.path || '',
+      raw: String(res.body || '')
+    };
+  } catch (_) {
+    return { ok: false, path: '', raw: '' };
+  }
+}
+
+async function writeJournalAccessRulesToConfig(opts, rules, existingPath = '') {
+  const content = JSON.stringify(rules, null, 2) + '\n';
+  if (!existingPath && !opts.watcherConfigDir && !opts.watcherJournalAccessConfigPath) return false;
+  try {
+    await sendNativeMessage(opts.nativeHostName, {
+      action: 'write_config_file',
+      dir: opts.watcherConfigDir || '',
+      config_path: existingPath || opts.watcherJournalAccessConfigPath || '',
+      filename: 'journal-access.json',
+      content
+    });
+    return true;
+  } catch (err) {
+    console.warn('[Ablesci PDF Watcher] journal access config write failed', err);
+    return false;
+  }
+}
+
 function removeRuleMatchingJournal(list, journalName) {
   const target = normalizeJournalKey(journalName);
   if (!target) return { list, removed: false };
@@ -387,7 +427,8 @@ function removeRuleMatchingJournal(list, journalName) {
 async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
   const journal = String(journalName || '').trim();
   if (!journal) return;
-  const raw = String(opts?.watcherJournalAccessRules || '').trim();
+  const fileRules = await readJournalAccessRulesFromConfig(opts);
+  const raw = fileRules.ok ? fileRules.raw : String(opts?.watcherJournalAccessRules || '').trim();
   const rules = parseJournalAccessRules(raw);
   const blocked = removeRuleMatchingJournal(rules.blocked, journal);
   const hasKnown = [...rules.allowed, ...rules.partial].some(entry =>
@@ -401,7 +442,9 @@ async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
       { full: journal, source: 'upload_success', updatedAt: new Date().toISOString() }
     ];
   }
-  await chrome.storage.local.set({ watcherJournalAccessRules: JSON.stringify(rules, null, 2) });
+  const text = JSON.stringify(rules, null, 2);
+  await chrome.storage.local.set({ watcherJournalAccessRules: text });
+  await writeJournalAccessRulesToConfig(opts, rules, fileRules.path);
 }
 
 async function recordJournalAccessResult(payload, result) {

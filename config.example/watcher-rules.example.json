@@ -1,0 +1,8 @@
+{
+  "note": "Advanced local watcher rules can be placed here later. Current versions read journal-access.json and telegram.json first.",
+  "candidateFilters": {
+    "skipRemark": true,
+    "skipBookChapter": true,
+    "skipPatentReport": true
+  }
+}

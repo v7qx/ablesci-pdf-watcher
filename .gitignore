@@ -25,9 +25,14 @@ Thumbs.db
 .env
 .env.*
 
+# local watcher config
+config.local/
+config/
+
 # local native host config
 native-host/*.local.json
 native-helper/telegram.local.json
+native-helper/telegram.json
 
 # optional local build artifacts
 native-helper/bin/
