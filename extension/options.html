@@ -886,6 +886,16 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>期刊访问名单</strong>
+          <span>本地 JSON，可手动维护。列表页若命中 blocked 会直接跳过，allowed / partial 会提高候选优先级；上传成功会把同名 blocked 记录转入 partial。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <textarea id="watcherJournalAccessRules" spellcheck="false" aria-label="期刊访问名单 JSON"></textarea>
+          <div class="setting-hint">示例：`{"blocked":[{"publisher":"Elsevier","short":"EPSL","full":"Earth and Planetary Science Letters"}],"allowed":[],"partial":[]}`。可以只写字符串，也可以写对象；匹配会做大小写和符号归一化。</div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>处理方式</strong>
           <span>默认自动打开详情、下载并校验；上传前仍需人工确认。</span>
         </div>

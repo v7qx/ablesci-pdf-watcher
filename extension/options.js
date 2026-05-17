@@ -39,6 +39,7 @@ const DEFAULT_OPTIONS = {
   watcherSkipBookChapter: true,
   watcherSkipPatentReport: true,
   watcherSkipRiskText: true,
+  watcherJournalAccessRules: '{\n  "blocked": [],\n  "allowed": [],\n  "partial": []\n}',
   watcherOpenDetail: true,
   watcherAutoDownload: true,
   watcherAutoUpload: false,
@@ -198,6 +199,14 @@ async function loadOptions() {
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
     watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherSkipReported: opts.watcherSkipReported !== false,
+    watcherSkipRejected: opts.watcherSkipRejected !== false,
+    watcherSkipSupplement: opts.watcherSkipSupplement !== false,
+    watcherSkipRemark: opts.watcherSkipRemark !== false,
+    watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
+    watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
+    watcherSkipRiskText: opts.watcherSkipRiskText !== false,
+    watcherJournalAccessRules: String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim(),
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
@@ -431,6 +440,15 @@ function validateOptions(opts) {
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
   if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
   if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求采样 URL 必须是 Ablesci HTTPS 链接。');
+  try {
+    const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('期刊访问名单必须是 JSON 对象。');
+    for (const key of ['blocked', 'allowed', 'partial']) {
+      if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`${key} 必须是数组。`);
+    }
+  } catch (err) {
+    throw new Error('期刊访问名单 JSON 无效：' + (err?.message || String(err)));
+  }
 }
 
 async function save() {
@@ -486,6 +504,7 @@ async function save() {
   opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
   opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
+  opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim();
 
   try {
     validateOptions(opts);

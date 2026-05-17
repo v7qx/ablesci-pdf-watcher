@@ -33,6 +33,7 @@ const DEFAULT_OPTIONS = {
   watcherSkipBookChapter: true,
   watcherSkipPatentReport: true,
   watcherSkipRiskText: true,
+  watcherJournalAccessRules: '{\n  "blocked": [],\n  "allowed": [],\n  "partial": []\n}',
   watcherOpenDetail: true,
   watcherAutoDownload: true,
   watcherAutoUpload: false,
@@ -131,6 +132,14 @@ async function getOptions() {
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
     watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherSkipReported: opts.watcherSkipReported !== false,
+    watcherSkipRejected: opts.watcherSkipRejected !== false,
+    watcherSkipSupplement: opts.watcherSkipSupplement !== false,
+    watcherSkipRemark: opts.watcherSkipRemark !== false,
+    watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
+    watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
+    watcherSkipRiskText: opts.watcherSkipRiskText !== false,
+    watcherJournalAccessRules: String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim(),
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
@@ -327,6 +336,74 @@ function makeDiagnosticBase(payload, opts) {
   };
 }
 
+function normalizeJournalKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function journalRuleNames(entry) {
+  if (typeof entry === 'string') return [entry];
+  if (!entry || typeof entry !== 'object') return [];
+  const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
+  return [
+    entry.short,
+    entry.full,
+    entry.journal,
+    entry.name,
+    ...aliases
+  ].filter(Boolean);
+}
+
+function parseJournalAccessRules(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || '{}'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
+    return {
+      blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
+      allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
+      partial: Array.isArray(parsed.partial) ? parsed.partial : []
+    };
+  } catch (_) {
+    return { blocked: [], allowed: [], partial: [] };
+  }
+}
+
+function removeRuleMatchingJournal(list, journalName) {
+  const target = normalizeJournalKey(journalName);
+  if (!target) return { list, removed: false };
+  let removed = false;
+  const next = list.filter(entry => {
+    const matched = journalRuleNames(entry).some(name => normalizeJournalKey(name) === target);
+    if (matched) removed = true;
+    return !matched;
+  });
+  return { list: next, removed };
+}
+
+async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
+  const journal = String(journalName || '').trim();
+  if (!journal) return;
+  const raw = String(opts?.watcherJournalAccessRules || '').trim();
+  const rules = parseJournalAccessRules(raw);
+  const blocked = removeRuleMatchingJournal(rules.blocked, journal);
+  const hasKnown = [...rules.allowed, ...rules.partial].some(entry =>
+    journalRuleNames(entry).some(name => normalizeJournalKey(name) === normalizeJournalKey(journal))
+  );
+  if (!blocked.removed && hasKnown) return;
+  rules.blocked = blocked.list;
+  if (!hasKnown) {
+    rules.partial = [
+      ...rules.partial,
+      { full: journal, source: 'upload_success', updatedAt: new Date().toISOString() }
+    ];
+  }
+  await chrome.storage.local.set({ watcherJournalAccessRules: JSON.stringify(rules, null, 2) });
+}
+
 async function recordJournalAccessResult(payload, result) {
   const journal = String(payload?.journalName || '').trim();
   if (!journal) return;
@@ -371,6 +448,10 @@ async function recordJournalAccessResult(payload, result) {
 
   stats[journal] = item;
   await chrome.storage.local.set({ [JOURNAL_ACCESS_STATS_KEY]: stats });
+  if (result?.ok) {
+    const opts = await getOptions();
+    await promoteJournalAccessRuleAfterSuccess(journal, opts);
+  }
 }
 
 function classifyJournalAccessFailureReason(err) {

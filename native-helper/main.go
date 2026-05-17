@@ -582,7 +582,7 @@ func sanitizeReportFilename(name string) string {
 	name = strings.TrimSpace(filepath.Base(name))
 	name = strings.ReplaceAll(name, "\x00", "")
 	ext := strings.ToLower(filepath.Ext(name))
-	if ext != ".csv" && ext != ".md" && ext != ".txt" {
+	if ext != ".csv" && ext != ".md" && ext != ".txt" && ext != ".json" && ext != ".jsonl" {
 		return ""
 	}
 	if name == ext {

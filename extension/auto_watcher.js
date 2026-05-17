@@ -327,6 +327,7 @@
       watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
       watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
       watcherSkipRiskText: opts.watcherSkipRiskText !== false,
+      watcherJournalAccessRules: String(opts.watcherJournalAccessRules || '').trim(),
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
@@ -1560,7 +1561,9 @@
     const recentFailurePenalty = lastFailMs < 6 * 60 * 60 * 1000 ? 0.35 : 0;
     const avgDurationPenalty = Math.min(0.3, Number(item.avgDurationMs || 0) / (8 * 60 * 1000) * 0.2);
     const doiBonus = candidate?.hasDoi ? 0.15 : 0;
-    const score = estimatedSuccessRate + explorationBonus * 0.35 + demandPressure * 0.8 + sourceTrend * 0.25 + doiBonus - recentFailurePenalty - avgDurationPenalty;
+    const accessRule = journalAccessRuleFor(candidate, state?.optionsSnapshot || {});
+    const accessBonus = accessRule.state === 'allowed' ? 0.45 : (accessRule.state === 'partial' ? 0.22 : 0);
+    const score = estimatedSuccessRate + explorationBonus * 0.35 + demandPressure * 0.8 + sourceTrend * 0.25 + doiBonus + accessBonus - recentFailurePenalty - avgDurationPenalty;
     return {
       source,
       score: Math.max(0.01, Number(score.toFixed(4))),
@@ -1570,7 +1573,9 @@
       sourceTrend,
       recentFailurePenalty,
       avgDurationPenalty,
-      doiBonus
+      doiBonus,
+      accessRule: accessRule.state,
+      accessBonus
     };
   }
 
@@ -1991,6 +1996,7 @@
       title: normalizeText(entry.title).slice(0, 160),
       doi: normalizeText(entry.doi).slice(0, 160),
       journalName: normalizeText(entry.journalName).slice(0, 160),
+      journalShortName: normalizeText(entry.journalShortName).slice(0, 160),
       detailUrl: sanitizeReportUrl(entry.detailUrl || ''),
       detailUrlHostPath: deps.urlHostPath(entry.detailUrl || ''),
       status: normalizeText(entry.status).slice(0, 80),
@@ -2109,7 +2115,7 @@
     if (!opts.watcherDailyReportEnabled) return;
 
     const date = todayKey();
-    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY]);
+    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY, JOURNAL_ACCESS_STATS_KEY]);
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
     const chromeAlarm = await chrome.alarms.get(ALARM_NAME).catch(() => null);
@@ -2121,6 +2127,7 @@
       .filter(log => formatBeijingDateTime(log.time, true) === date);
     const traces = (Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [])
       .filter(log => formatBeijingDateTime(log.time, true) === date);
+    const journalAccessStats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
 
     const csvHeader = [
       'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
@@ -2191,6 +2198,37 @@
       const row = { record_type: type, ...baseReportFields, ...values };
       return csvHeader.map(key => row[key] ?? '');
     }
+    function jsonLine(type, value = {}) {
+      return JSON.stringify(reportValueForJson({
+        record_type: type,
+        exportedAt: new Date().toISOString(),
+        dayKey: date,
+        ...value
+      }));
+    }
+    const observeEvents = traces
+      .filter(trace => /observe_|market_sample|demand_snapshot/i.test(`${trace.step || ''} ${trace.reason || ''}`))
+      .map(trace => reportRow('observe_event', {
+        time: formatBeijingDateTime(trace.time),
+        status: trace.step || '',
+        reason: trace.reason || '',
+        trigger: trace.trigger || '',
+        url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`
+      }));
+    const dataRows = [
+      ...demandSnapshots.map(item => jsonLine('market_sample', item)),
+      ...['m15', 'h1', 'd1'].flatMap(frame => (state.marketData?.candles?.[frame] || []).map(candle => jsonLine(`candle_${frame}`, candle))),
+      ...logs.map(log => jsonLine('assist_event', log)),
+      ...traces.map(trace => jsonLine('trace', trace)),
+      ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
+    ];
+    const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
+    const journalAccessJson = JSON.stringify(reportValueForJson({
+      updatedAt: new Date().toISOString(),
+      note: '本文件用于本地排查和手动维护参考。真正生效的手动名单在设置页“期刊访问名单”中。',
+      manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
+      stats: journalAccessStats
+    }), null, 2) + '\n';
     const csvRows = [
       csvHeader,
       reportRow('summary', {
@@ -2224,6 +2262,7 @@
         trigger: lastAttempt.trigger || '',
         url: lastAttempt.pickedListUrl || ''
       }),
+      ...observeEvents,
       ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
         time: formatBeijingDateTime(new Date()),
         publisher: item.source || '',
@@ -2232,27 +2271,6 @@
         demandPressure: item.demandPressure || '',
         sourceTrend: item.sourceTrend || ''
       })),
-      ...demandSnapshots.map(item => reportRow('demand_sample', {
-        time: formatBeijingDateTime(item.timestamp),
-        status: item.regime || '',
-        reason: item.demandAnomaly ? item.anomalyType || 'anomaly' : '',
-        totalSeeking: item.totalSeeking || '',
-        supplementCount: item.supplementCount || '',
-        publisher: Object.entries(item.publisherCounts || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0)).slice(0, 8).map(([name, count]) => `${name}:${count}`).join(';')
-      })),
-      ...['m15', 'h1', 'd1'].flatMap(frame => (state.marketData?.candles?.[frame] || []).slice(0, frame === 'm15' ? 96 : 24).map(candle => reportRow(`candle_${frame}`, {
-        time: formatBeijingDateTime(candle.start),
-        status: frame,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        delta: candle.delta,
-        range: candle.range,
-        absMove: candle.absMove,
-        sampleCount: candle.sampleCount,
-        validSampleCount: candle.validSampleCount
-      }))),
       ...logs.map(log => reportRow('log', {
         time: formatBeijingDateTime(log.time),
         sessionId: log.sessionId || '',
@@ -2263,17 +2281,6 @@
         detailUrl: reportDetailValue(log),
         status: log.status || '',
         reason: log.reason || ''
-      })),
-      ...traces.map(trace => reportRow('trace', {
-        time: formatBeijingDateTime(trace.time),
-        sessionId: trace.sessionId || '',
-        status: trace.step || '',
-        reason: trace.reason || '',
-        step: trace.step || '',
-        trigger: trace.trigger || '',
-        tabId: trace.tabId || '',
-        url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`,
-        details: reportJson(trace.details || {})
       }))
     ];
     const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
@@ -2345,6 +2352,8 @@
       `- Recent 1h demand delta: ${Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)}`,
       `- Today target: ${Number(state.todayTarget || 0)}`,
       `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
+      `- Detailed data file: watcher-data-${date}.jsonl`,
+      `- Journal access file: journal-access.json`,
       `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
       `- Session ID: ${state.lastSession?.id || ''}`,
       `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
@@ -2373,6 +2382,22 @@
         formatBeijingDateOnly(row.time)
       ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
       '',
+      '## Observe Events',
+      '',
+      '| Time | Trigger | Step | Reason | URL |',
+      '| --- | --- | --- | --- | --- |',
+      ...observeEvents.slice(0, 20).map(row => {
+        const record = {};
+        csvHeader.forEach((key, index) => { record[key] = row[index]; });
+        return [
+          record.time,
+          record.trigger,
+          record.status,
+          record.reason,
+          record.url
+        ].map(v => String(v || '').replace(/\|/g, '\\|')).join(' | ');
+      }).map(row => `| ${row} |`),
+      '',
       '## Recent Events',
       '',
       '| Time | Trigger | Status | Reason | Journal | DOI | Detail |',
@@ -2392,6 +2417,8 @@
 
     await writeReportFile(`${date}.csv`, csv, 'text/csv', opts);
     await writeReportFile(`${date}.md`, md, 'text/markdown', opts);
+    await writeReportFile(`watcher-data-${date}.jsonl`, detailJsonl, 'application/x-ndjson', opts);
+    await writeReportFile('journal-access.json', journalAccessJson, 'application/json', opts);
   }
 
   function getProcessedKey(candidate, payload) {
@@ -2418,6 +2445,58 @@
     return '';
   }
 
+  function normalizeJournalKey(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function journalRuleNames(entry) {
+    if (typeof entry === 'string') return [entry];
+    if (!entry || typeof entry !== 'object') return [];
+    const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
+    return [entry.short, entry.full, entry.journal, entry.name, ...aliases].filter(Boolean);
+  }
+
+  function parseJournalAccessRules(raw) {
+    try {
+      const parsed = JSON.parse(String(raw || '{}'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
+      return {
+        blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
+        allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
+        partial: Array.isArray(parsed.partial) ? parsed.partial : []
+      };
+    } catch (_) {
+      return { blocked: [], allowed: [], partial: [] };
+    }
+  }
+
+  function candidateJournalNames(candidate, payload = null) {
+    return [
+      payload?.journalShortName,
+      payload?.journalName,
+      candidate?.journalShortName,
+      candidate?.title
+    ].filter(Boolean);
+  }
+
+  function journalAccessRuleFor(candidate, opts = {}, payload = null) {
+    const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
+    if (!names.length) return { state: '', entry: null };
+    const rules = parseJournalAccessRules(opts.watcherJournalAccessRules || '');
+    for (const [state, list] of [['blocked', rules.blocked], ['allowed', rules.allowed], ['partial', rules.partial]]) {
+      for (const entry of list) {
+        const entryNames = journalRuleNames(entry).map(normalizeJournalKey).filter(Boolean);
+        if (entryNames.some(name => names.includes(name))) return { state, entry };
+      }
+    }
+    return { state: '', entry: null };
+  }
+
   function describeWatcherReason(reason) {
     const code = normalizeText(reason);
     const labels = {
@@ -2440,7 +2519,8 @@
       detail_reported_warning: '详情页存在举报/违规提示，已跳过',
       detail_system_risk: '详情页存在系统风险提示，已跳过',
       detail_remark: '详情页存在备注，已按设置跳过',
-      detail_risk_text: '详情页命中风险文本，已跳过'
+      detail_risk_text: '详情页命中风险文本，已跳过',
+      journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过'
     };
     return labels[code] ? `${code} - ${labels[code]}` : code;
   }
@@ -2452,7 +2532,9 @@
     const doiBonus = candidate?.hasDoi ? 0.25 : 0;
     const demandWeight = Number(item.weight || 0.4);
     const successRate = Number(item.successRate || 0.5);
-    return demandWeight * successRate + doiBonus;
+    const accessRule = journalAccessRuleFor(candidate, state?.optionsSnapshot || {});
+    const accessBonus = accessRule.state === 'allowed' ? 0.55 : (accessRule.state === 'partial' ? 0.25 : 0);
+    return demandWeight * successRate + doiBonus + accessBonus;
   }
 
   function orderCandidatesForRun(candidates, state, opts = {}, count = 1) {
@@ -2557,6 +2639,7 @@
     if (opts.watcherSkipSupplement && candidate.supplement) return { ok: false, reason: 'supplement' };
     if (opts.watcherSkipBookChapter && candidate.documentType === 'book_chapter') return { ok: false, reason: 'book_chapter' };
     if (opts.watcherSkipPatentReport && candidate.documentType === 'patent_report') return { ok: false, reason: 'patent_report' };
+    if (journalAccessRuleFor(candidate, opts).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
     if (opts.watcherSkipRiskText && /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue)) {
       return { ok: false, reason: 'risk_text' };
     }
@@ -2581,6 +2664,7 @@
     if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
     if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
     if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
+    if (journalAccessRuleFor({}, opts, payload).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
     if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
       return { ok: false, reason: 'detail_risk_text' };
     }
@@ -2919,6 +3003,7 @@
   }
 
   async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger = '') {
+    stateForTargets.optionsSnapshot = opts;
     const session = {
       id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
       trigger,
@@ -3050,6 +3135,7 @@
           await appendWatcherLog({ ...candidate, sessionId: session.id, trigger, status: 'failed', reason: detail.reason });
       } else {
         const payload = detail.payload;
+        payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
         const detailAllowed = isDetailAllowedForWatcher(payload, opts);
         const key = getProcessedKey(candidate, payload);
         if (!detailAllowed.ok) {
@@ -3192,6 +3278,7 @@
       }
 
       const stateForTargets = await getWatcherState();
+      stateForTargets.optionsSnapshot = opts;
       if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
         await appendWatcherTrace('run_skip_assist_not_due', {
           reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
@@ -3415,6 +3502,7 @@
           }
 
           const payload = detail.payload;
+          payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
           const detailAllowed = isDetailAllowedForWatcher(payload, opts);
           const key = getProcessedKey(candidate, payload);
           if (!detailAllowed.ok) {
