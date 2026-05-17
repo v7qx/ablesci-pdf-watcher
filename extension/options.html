@@ -266,7 +266,7 @@
 
     .metric-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(76px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 10px;
       width: 100%;
     }
@@ -281,7 +281,7 @@
       color: var(--muted);
       font-size: 12px;
       line-height: 1.2;
-      white-space: nowrap;
+      white-space: normal;
     }
 
     .metric-field input {
@@ -804,6 +804,7 @@
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
             <div class="metric-field"><label>Market</label><span id="advancedMarketRegime" class="pill">-</span></div>
+            <div class="metric-field"><label>时段</label><span id="watcherWorkStatus" class="pill">-</span></div>
             <div class="metric-field"><label>窗口进度</label><span id="advancedWorkProgress" class="pill">-</span></div>
             <div class="metric-field"><label>有效进度</label><span id="advancedActiveProgress" class="pill">-</span></div>
             <div class="metric-field"><label>可用率</label><span id="advancedAvailability" class="pill">-</span></div>
@@ -949,16 +950,16 @@
             <span class="toggle-text">启用</span>
           </label>
           <input id="watcherTelegramConfigPath" type="text" placeholder="D:\AblesciConfig\telegram.local.json">
-          <div class="setting-hint">配置文件只放本地，不提交仓库；留空时 Helper 会尝试读取自身目录下的 telegram.local.json。</div>
+          <div class="setting-hint">配置文件只放本地，不提交仓库；留空时 Helper 会尝试读取自身目录下的 telegram.local.json。仓库已附带一个默认样例，可按需填写后放到 helper 可执行文件同目录。</div>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>失败期刊、提醒与日报</strong>
-          <span>跳过近期多次失败的期刊；提醒优先走 Native Helper；日报由 Helper 直接写入本地。</span>
+          <span>仅当某期刊连续失败 10 次且暂无成功记录时才按无权限跳过；提醒优先走 Native Helper；日报由 Helper 直接写入本地。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle" title="跳过近期多次失败的期刊">
+          <label class="toggle" title="跳过连续失败 10 次且暂无成功记录的期刊">
             <input id="watcherSkipHighRiskJournal" type="checkbox">
             <span></span>
           </label>

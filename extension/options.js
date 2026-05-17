@@ -280,6 +280,72 @@ function countdownText(value) {
   return `${hours}时${String(minutes % 60).padStart(2, '0')}分`;
 }
 
+function parseMinuteOfDay(value) {
+  const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return NaN;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return NaN;
+  return hour * 60 + minute;
+}
+
+function normalizeWorkdays(value) {
+  const items = String(value || DEFAULT_OPTIONS.watcherWorkdays)
+    .split(/[,\s]+/)
+    .map(item => Number(item.trim()))
+    .filter(day => Number.isInteger(day) && day >= 1 && day <= 7);
+  return new Set(items);
+}
+
+function normalizeWorkWindows(value) {
+  return String(value || DEFAULT_OPTIONS.watcherWorkWindows)
+    .split(/\r?\n|,/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [startRaw, endRaw] = line.split('-').map(part => part.trim());
+      const start = parseMinuteOfDay(startRaw);
+      const end = parseMinuteOfDay(endRaw);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      return { start, end };
+    })
+    .filter(Boolean);
+}
+
+function weekdayNumber(date = new Date()) {
+  const utc = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })).getDay();
+  return utc === 0 ? 7 : utc;
+}
+
+function beijingMinutesNow(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date).reduce((acc, item) => {
+    acc[item.type] = item.value;
+    return acc;
+  }, {});
+  return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+function isInWorkSchedule(workdays, workWindows, date = new Date()) {
+  if (!workdays.has(weekdayNumber(date))) return false;
+  const minute = beijingMinutesNow(date);
+  return workWindows.some(win => minute >= win.start && minute < win.end);
+}
+
+function nextDisplaySchedule(state = {}) {
+  const schedulerMode = state.currentSchedulerMode || '';
+  const assistAt = state.nextAssistRunAt || '';
+  const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
+  if (schedulerMode === 'fixed') {
+    return { nextAssistAt: wakeAt, assistCountdownAt: wakeAt };
+  }
+  return { nextAssistAt: assistAt, assistCountdownAt: assistAt };
+}
+
 function todayKeyBeijing() {
   const parts = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -297,11 +363,19 @@ async function renderAdvancedWatcherStatus() {
   const stored = await chrome.storage.local.get([
     AUTO_WATCHER_STATE_KEY,
     'watcherWorkdays',
-    'watcherWorkWindows'
+    'watcherWorkWindows',
+    'watcherEnabled'
   ]);
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
   const daily = state.daily?.[todayKeyBeijing()] || {};
+  const workdays = normalizeWorkdays(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays);
+  const workWindows = normalizeWorkWindows(stored.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows);
+  const workStatus = stored.watcherEnabled !== true
+    ? '已关闭'
+    : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段');
+  const schedule = nextDisplaySchedule(state);
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
+  setText('watcherWorkStatus', workStatus);
   setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
   setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
   setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
@@ -313,8 +387,8 @@ async function renderAdvancedWatcherStatus() {
   setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
   setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
   setText('watcherNextRunAt', formatBeijingDateTime(state.chromeAlarmScheduledAt || state.nextScheduledAt));
-  setText('watcherNextAssistAt', formatBeijingDateTime(state.nextAssistRunAt));
-  setText('watcherAssistCountdown', countdownText(state.nextAssistRunAt));
+  setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
+  setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
   setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
   setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
   setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
@@ -460,18 +534,11 @@ async function copyDiagnostic() {
 
   const text = JSON.stringify(diagnostic, null, 2);
   try {
-    await navigator.clipboard.writeText(text);
+    const ok = await copyTextToClipboard(text);
+    if (!ok) throw new Error('copy_failed');
     showPill('diagnosticStatus', '已复制');
   } catch (_) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    showPill('diagnosticStatus', ok ? '已复制' : '复制失败', !ok);
+    showPill('diagnosticStatus', '复制失败', true);
   }
 }
 
@@ -592,18 +659,11 @@ async function copyAutoWatcherConfig() {
 
   const text = JSON.stringify(payload, null, 2);
   try {
-    await navigator.clipboard.writeText(text);
+    const ok = await copyTextToClipboard(text);
+    if (!ok) throw new Error('copy_failed');
     showPill('watcherConfigStatus', '已复制');
   } catch (_) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    showPill('watcherConfigStatus', ok ? '已复制' : '复制失败', !ok);
+    showPill('watcherConfigStatus', '复制失败', true);
   }
 }
 
@@ -620,6 +680,35 @@ function sendRuntimeMessage(message) {
       resolve(response || { ok: true });
     });
   });
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    const active = document.activeElement;
+    const selection = window.getSelection();
+    const savedRanges = [];
+    if (selection) {
+      for (let i = 0; i < selection.rangeCount; i += 1) savedRanges.push(selection.getRangeAt(i).cloneRange());
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', 'readonly');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (selection) {
+      selection.removeAllRanges();
+      savedRanges.forEach(range => selection.addRange(range));
+    }
+    if (active && typeof active.focus === 'function') active.focus();
+    return ok;
+  }
 }
 
 async function runAutoWatcherNow() {
@@ -659,6 +748,14 @@ async function clearAutoWatcherLogs() {
 document.addEventListener('DOMContentLoaded', () => {
   load();
   setInterval(renderAdvancedWatcherStatus, 1000);
+});
+window.addEventListener('blur', () => {
+  try {
+    window.getSelection()?.removeAllRanges();
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+  } catch (_) {}
 });
 el('save').addEventListener('click', save);
 el('testNative').addEventListener('click', testNative);

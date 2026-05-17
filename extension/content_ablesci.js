@@ -411,10 +411,18 @@
 
     const failCount = Number(item.failCount || 0);
     const successCount = Number(item.successCount || 0);
-    if (failCount >= 2 && failCount > successCount) {
+    const consecutiveFailCount = Number(item.consecutiveFailCount || 0);
+    const accessState = String(item.accessState || '');
+    if (accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= 10) {
       return {
         level: 'warn',
-        text: `本地记录：该期刊近期下载失败 ${failCount} 次，可能无权限，建议先手动确认。`
+        text: `本地记录：该期刊已连续失败 ${consecutiveFailCount} 次且暂无成功记录，当前按无权限处理。`
+      };
+    }
+    if (accessState === 'partial_access' && successCount > 0 && failCount > 0) {
+      return {
+        level: 'info',
+        text: `本地记录：该期刊成功 ${successCount} 次，失败 ${failCount} 次，属于部分有权限。`
       };
     }
     return null;
@@ -434,7 +442,7 @@
     const span = document.createElement('span');
     span.id = 'ablesci-journal-access-hint';
     span.className = 'ablesci-journal-access-hint';
-    span.textContent = '该期刊近期多次失败，可能无权限';
+    span.textContent = hint.level === 'info' ? '该期刊部分有权限' : '该期刊连续失败较多';
     span.title = hint.text;
     anchorEl.insertAdjacentElement('afterend', span);
   }

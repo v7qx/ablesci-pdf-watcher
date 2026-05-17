@@ -333,22 +333,37 @@ async function recordJournalAccessResult(payload, result) {
   const item = stats[journal] || {
     failCount: 0,
     successCount: 0,
+    consecutiveFailCount: 0,
     lastFailAt: '',
     lastSuccessAt: '',
     lastReason: '',
     lastDoi: '',
-    lastTitle: ''
+    lastTitle: '',
+    accessState: 'unknown'
   };
+  item.failCount = Number(item.failCount || 0);
+  item.successCount = Number(item.successCount || 0);
+  item.consecutiveFailCount = Number(item.consecutiveFailCount || 0);
 
   if (result?.ok) {
     item.successCount += 1;
+    item.consecutiveFailCount = 0;
     item.lastSuccessAt = new Date().toISOString();
+    item.accessState = item.failCount > 0 ? 'partial_access' : 'has_access';
   } else {
     item.failCount += 1;
+    item.consecutiveFailCount += 1;
     item.lastFailAt = new Date().toISOString();
     item.lastReason = result?.reason || 'unknown';
     item.lastDoi = payload?.doi || '';
     item.lastTitle = payload?.title || payload?.suggestedFilename || '';
+    if (item.successCount > 0) {
+      item.accessState = 'partial_access';
+    } else if (item.consecutiveFailCount >= 10) {
+      item.accessState = 'no_access';
+    } else {
+      item.accessState = 'unknown';
+    }
   }
 
   stats[journal] = item;

@@ -44,6 +44,7 @@
   let autoWatcherRunning = false;
   let badgeRefreshTimer = null;
   const BADGE_REFRESH_INTERVAL_MS = 30 * 1000;
+  const HIGH_RISK_FAIL_THRESHOLD = 10;
 
   function clampNumber(value, fallback, min, max) {
     const n = Number(value);
@@ -116,11 +117,37 @@
     return `${hours}h${String(minutes % 60).padStart(2, '0')}m`;
   }
 
+  function nextDisplaySchedule(state = {}, opts = null) {
+    const schedulerMode = opts?.watcherSchedulerMode || state.currentSchedulerMode || '';
+    const assistAt = state.nextAssistRunAt || '';
+    const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
+    if (schedulerMode === 'fixed') {
+      return {
+        kind: 'scheduled_check',
+        time: wakeAt,
+        label: '下一次检查'
+      };
+    }
+    if (assistAt) {
+      return {
+        kind: 'assist',
+        time: assistAt,
+        label: '下一次应助尝试'
+      };
+    }
+    return {
+      kind: 'wake',
+      time: wakeAt,
+      label: '下一次唤醒'
+    };
+  }
+
   async function updateActionBadge(state = null) {
     try {
       const current = state || await getWatcherState();
       const opts = deps?.getOptions ? normalizeOptions(await deps.getOptions()) : {};
-      const text = countdownText(current.nextAssistRunAt);
+      const schedule = nextDisplaySchedule(current, opts);
+      const text = countdownText(schedule.time);
       const shortText = text === 'due'
         ? 'due'
         : (text ? text.replace(/(\d+)m\d+s$/, '$1m').replace(/(\d+)h(\d+)m$/, '$1h') : '');
@@ -131,7 +158,7 @@
         await chrome.action.setBadgeText({ text: '' });
       }
       const title = text
-        ? `Ablesci PDF Watcher\n下一次应助尝试：${formatBeijingDateTime(current.nextAssistRunAt)}\n倒计时：${text}`
+        ? `Ablesci PDF Watcher\n${schedule.label}：${formatBeijingDateTime(schedule.time)}\n倒计时：${text}`
         : 'Ablesci PDF Watcher';
       await chrome.action.setTitle({ title });
     } catch (_) {}
@@ -685,7 +712,7 @@
     if (opts.watcherQuantSchedulerEnabled) {
       const outsideDelay = nextWorkDelayMinutes(opts);
       const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
-      if (outsideDelay !== null) return Math.max(1, Math.min(outsideDelay, observeDelay));
+      if (outsideDelay !== null) return Math.max(1, outsideDelay);
       const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
       const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : Number(assistPlan?.minutes || Number.POSITIVE_INFINITY);
       return Math.max(1, Math.min(assistDelay, observeDelay));
@@ -2433,10 +2460,12 @@
     const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
     const item = stats[journal];
     if (!item) return false;
-    const failCount = Number(item.failCount || 0);
+    const consecutiveFailCount = Number(item.consecutiveFailCount || 0);
     const successCount = Number(item.successCount || 0);
-    if (isRscPayload(payload)) return failCount >= 1 && failCount > successCount;
-    return failCount >= 2 && failCount > successCount;
+    const accessState = String(item.accessState || '');
+    if (accessState === 'has_access' || accessState === 'partial_access') return false;
+    if (successCount > 0) return false;
+    return consecutiveFailCount >= HIGH_RISK_FAIL_THRESHOLD;
   }
 
   async function waitForTabComplete(tabId, timeoutMs = 45000) {
@@ -2674,7 +2703,7 @@
       await updateProcessed(key, 'skipped', 'high_risk_journal');
       await incrementDaily('skipped');
       await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: '本地记录近期多次失败，可能无权限' });
+      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: `本地记录连续失败达到 ${HIGH_RISK_FAIL_THRESHOLD} 次，暂按无权限跳过` });
       return false;
     }
 
@@ -2984,6 +3013,13 @@
         return finish({ ok: false, reason: 'active_task' });
       }
 
+      if (opts.watcherQuantSchedulerEnabled && trigger === 'alarm' && !isInWorkSchedule(opts)) {
+        await appendWatcherTrace('run_skip_outside_work_schedule', {
+          reason: 'outside_work_schedule',
+          trigger
+        });
+        return finish({ ok: true, reason: 'outside_work_schedule' });
+      }
       const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
       attempt.observeSnapshot = observeResult?.snapshot ? true : false;
       attempt.observeReason = observeResult?.reason || '';
@@ -2996,13 +3032,6 @@
       }
       if (opts.watcherObserveMode === 'observe_only') {
         return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' });
-      }
-      if (opts.watcherQuantSchedulerEnabled && trigger !== 'manual' && !isInWorkSchedule(opts)) {
-        await appendWatcherTrace('run_skip_outside_work_schedule', {
-          reason: observeResult?.snapshot ? 'observed_then_outside_work_schedule' : 'outside_work_schedule',
-          trigger
-        });
-        return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_outside_work_schedule' : 'outside_work_schedule' });
       }
 
       const stateForTargets = await getWatcherState();
