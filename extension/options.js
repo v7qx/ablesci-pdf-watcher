@@ -264,7 +264,10 @@ async function load() {
 
 function setText(id, value) {
   const node = el(id);
-  if (node) node.textContent = value;
+  if (node) {
+    node.textContent = value;
+    node.title = String(value ?? '');
+  }
 }
 
 function formatBeijingDateTime(value) {

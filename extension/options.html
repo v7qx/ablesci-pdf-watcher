@@ -271,6 +271,14 @@
       width: 100%;
     }
 
+    .metric-grid.journal-access-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric-grid.journal-access-metrics .metric-field:first-child {
+      grid-column: 1 / -1;
+    }
+
     .metric-field {
       min-width: 0;
     }
@@ -311,6 +319,7 @@
       align-items: center;
       min-height: 24px;
       max-width: 220px;
+      box-sizing: border-box;
       border-radius: 999px;
       background: #f3f4f6;
       color: var(--muted);
@@ -319,6 +328,12 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .metric-field .pill {
+      max-width: 100%;
+      min-width: 0;
+      display: flex;
     }
 
     .pill.ok {
@@ -891,7 +906,7 @@
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherJournalAccessRules" spellcheck="false" aria-label="期刊访问名单缓存 JSON" hidden></textarea>
-          <div class="metric-grid">
+          <div class="metric-grid journal-access-metrics">
             <div class="metric-field"><label>配置文件</label><span id="journalAccessConfigSource" class="pill">Native Helper 目录</span></div>
             <div class="metric-field"><label>文件名单</label><span id="journalAccessFileSummary" class="pill">-</span></div>
             <div class="metric-field"><label>缓存名单</label><span id="journalAccessCacheSummary" class="pill">-</span></div>
