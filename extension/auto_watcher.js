@@ -8,6 +8,7 @@
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
   const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
+  const JOURNAL_SHORT_NAME_MAP_KEY = 'journalShortNameMap';
   const MAX_LOGS = 200;
   const MAX_TRACE_LOGS = 1200;
   const MAX_DEMAND_SNAPSHOTS = 500;
@@ -1553,7 +1554,7 @@
   }
 
   function candidateSource(candidate, payload = null) {
-    return publisherAlias(payload?.publisherName || payload?.journalName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
+    return publisherAlias(payload?.publisherName || payload?.journalName || candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
   }
 
   function ensureBanditStats(state) {
@@ -2470,7 +2471,7 @@
   }
 
   function candidatePublisherName(candidate) {
-    return publisherAlias(candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
+    return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
   }
 
   function normalizeDocumentType(text) {
@@ -2516,9 +2517,90 @@
     return [
       payload?.journalShortName,
       payload?.journalName,
+      candidate?.journalFullName,
       candidate?.journalShortName,
+      ...(Array.isArray(candidate?.journalAliases) ? candidate.journalAliases : []),
       candidate?.title
     ].filter(Boolean);
+  }
+
+  function journalShortNameMapFromState(state = {}) {
+    const map = state.journalShortNameMap || state[JOURNAL_SHORT_NAME_MAP_KEY] || {};
+    return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+  }
+
+  function journalShortNameMapEntry(map, shortName) {
+    const key = normalizeJournalKey(shortName);
+    if (!key) return null;
+    const item = map[key] || map[shortName] || null;
+    if (typeof item === 'string') return { short: shortName, full: item, aliases: [] };
+    if (item && typeof item === 'object') return item;
+    return null;
+  }
+
+  function enrichCandidateJournalFromMap(candidate, state = {}) {
+    if (!candidate || !candidate.journalShortName) return candidate;
+    const entry = journalShortNameMapEntry(journalShortNameMapFromState(state), candidate.journalShortName);
+    if (!entry) return candidate;
+    const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
+    return {
+      ...candidate,
+      journalFullName: entry.full || entry.journal || entry.name || candidate.journalFullName || '',
+      journalAliases: [entry.short, entry.full, entry.journal, entry.name, ...aliases].filter(Boolean)
+    };
+  }
+
+  async function rememberJournalShortNameMapping(candidate, payload) {
+    const shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+    const fullName = normalizeText(payload?.journalName || '');
+    if (!shortName || !fullName) return;
+    if (normalizeJournalKey(shortName) === normalizeJournalKey(fullName)) return;
+    const state = await getWatcherState();
+    const map = journalShortNameMapFromState(state);
+    const key = normalizeJournalKey(shortName);
+    const existing = journalShortNameMapEntry(map, shortName) || {};
+    const aliases = Array.from(new Set([
+      ...(Array.isArray(existing.aliases) ? existing.aliases : []),
+      shortName,
+      fullName
+    ].filter(Boolean)));
+    map[key] = {
+      short: shortName,
+      full: fullName,
+      aliases,
+      source: 'assist_detail',
+      updatedAt: new Date().toISOString()
+    };
+    state.journalShortNameMap = map;
+    await saveWatcherState(state);
+    await appendWatcherTrace('journal_short_name_mapped', {
+      reason: 'detail_journal_mapping',
+      assistId: payload?.assistId || candidate?.assistId || '',
+      detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+      shortName,
+      fullName
+    });
+  }
+
+  async function journalAccessStatsStateFor(candidate, payload = null) {
+    const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
+    if (!names.length) return { accessState: '', item: null, journalName: '' };
+    const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
+    const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
+    for (const [journalName, item] of Object.entries(stats)) {
+      if (!item) continue;
+      const statNames = [journalName, ...(Array.isArray(item.aliases) ? item.aliases : [])].map(normalizeJournalKey).filter(Boolean);
+      if (!statNames.some(name => names.includes(name))) continue;
+      return { accessState: String(item.accessState || ''), item, journalName };
+    }
+    return { accessState: '', item: null, journalName: '' };
+  }
+
+  async function isListCandidateHighRiskByStats(candidate) {
+    const stat = await journalAccessStatsStateFor(candidate);
+    const consecutiveFailCount = Number(stat.item?.consecutiveFailCount || 0);
+    const successCount = Number(stat.item?.successCount || 0);
+    return stat.accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= HIGH_RISK_FAIL_THRESHOLD;
   }
 
   function journalAccessRuleFor(candidate, opts = {}, payload = null) {
@@ -2557,7 +2639,8 @@
       detail_system_risk: '详情页存在系统风险提示，已跳过',
       detail_remark: '详情页存在备注，已按设置跳过',
       detail_risk_text: '详情页命中风险文本，已跳过',
-      journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过'
+      journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过',
+      list_high_risk_journal: '列表页期刊短名映射到连续失败期刊，已直接跳过'
     };
     return labels[code] ? `${code} - ${labels[code]}` : code;
   }
@@ -2650,8 +2733,11 @@
       const assistId = row.querySelector('.assist-id-val')?.value || new URLSearchParams(detailUrl.split('?')[1] || '').get('id') || '';
       const classText = [detailAnchor?.className || '', row.className || ''].join(' ');
       const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
-      const journalShortName = detailAnchor?.querySelector('span[title]')?.getAttribute('title') ||
-        row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
+      const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
+      const journalShortName = Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
+        .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
+        .map(span => span.getAttribute('title') || text(span))
+        .find(Boolean) || '';
       const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
       const documentType = normalizeDocumentTypeLocal(typeText);
       const doi = doiFrom(rowText);
@@ -2662,6 +2748,7 @@
         rowText,
         doi,
         hasDoi: !!doi,
+        publisherName,
         journalShortName,
         reported: /举报|被举报|涉嫌违规/.test(rowText),
         rejected: /驳回|已驳回/.test(rowText),
@@ -2937,8 +3024,10 @@
         tabId: tab.id,
         assistId: response.payload?.assistId || candidate.assistId || '',
         doi: response.payload?.doi || candidate.doi || '',
+        journalShortName: candidate.journalShortName || '',
         journalName: response.payload?.journalName || ''
       });
+      await rememberJournalShortNameMapping(candidate, response.payload);
       return { ok: true, payload: response.payload, tabId: tab.id };
     } catch (err) {
       await appendWatcherTrace('detail_extract_error', {
@@ -3190,7 +3279,8 @@
       }
       await resetCfChallengeStreak();
       const allowed = [];
-      for (const candidate of parsed.candidates || []) {
+      for (const rawCandidate of parsed.candidates || []) {
+        const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
         const listAllowed = isListCandidateAllowed(candidate, opts);
         if (!listAllowed.ok) {
           await appendWatcherTrace('candidate_skip_list_filter', {
@@ -3200,6 +3290,18 @@
             detailUrl: candidate.detailUrl,
             assistId: candidate.assistId || '',
             title: candidate.title || ''
+          });
+          continue;
+        }
+        if (opts.watcherSkipHighRiskJournal && await isListCandidateHighRiskByStats(candidate)) {
+          await appendWatcherTrace('candidate_skip_journal_stats', {
+            reason: 'list_high_risk_journal',
+            reasonText: describeWatcherReason('list_high_risk_journal'),
+            sessionId: session.id,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            journalShortName: candidate.journalShortName || '',
+            journalFullName: candidate.journalFullName || ''
           });
           continue;
         }
@@ -3596,7 +3698,8 @@
           parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
           orderedCount: candidates.length
         });
-        for (const candidate of candidates) {
+        for (const rawCandidate of candidates) {
+          const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
           if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
           const listAllowed = isListCandidateAllowed(candidate, opts);
           if (!listAllowed.ok) {
@@ -3607,6 +3710,18 @@
               detailUrl: candidate.detailUrl,
               assistId: candidate.assistId || '',
               title: candidate.title || ''
+            });
+            continue;
+          }
+          if (opts.watcherSkipHighRiskJournal && await isListCandidateHighRiskByStats(candidate)) {
+            await appendWatcherTrace('candidate_skip_journal_stats', {
+              reason: 'list_high_risk_journal',
+              reasonText: describeWatcherReason('list_high_risk_journal'),
+              trigger,
+              detailUrl: candidate.detailUrl,
+              assistId: candidate.assistId || '',
+              journalShortName: candidate.journalShortName || '',
+              journalFullName: candidate.journalFullName || ''
             });
             continue;
           }

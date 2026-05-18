@@ -452,6 +452,7 @@ async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
 async function recordJournalAccessResult(payload, result) {
   const journal = String(payload?.journalName || '').trim();
   if (!journal) return;
+  const shortName = String(payload?.journalShortName || '').trim();
 
   const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
   const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
@@ -469,6 +470,11 @@ async function recordJournalAccessResult(payload, result) {
   item.failCount = Number(item.failCount || 0);
   item.successCount = Number(item.successCount || 0);
   item.consecutiveFailCount = Number(item.consecutiveFailCount || 0);
+  item.aliases = Array.from(new Set([
+    ...(Array.isArray(item.aliases) ? item.aliases : []),
+    shortName,
+    journal
+  ].filter(Boolean)));
 
   if (result?.ok) {
     item.successCount += 1;

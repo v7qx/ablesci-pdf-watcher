@@ -764,7 +764,13 @@ async function copyAutoWatcherConfig() {
       riskLimit: state.riskLimit || 0,
       recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
       currentSession: state.currentSession || null,
-      banditTopPublishers: state.banditTopPublishers || []
+      banditTopPublishers: state.banditTopPublishers || [],
+      journalShortNameMapCount: Object.keys(state.journalShortNameMap || {}).length,
+      journalShortNameMapPreview: Object.entries(state.journalShortNameMap || {}).slice(0, 10).map(([key, value]) => ({
+        key,
+        short: typeof value === 'object' ? value.short || '' : '',
+        full: typeof value === 'object' ? value.full || '' : String(value || '')
+      }))
     },
     latestWatcherLog: logs[0] || null,
     latestTraceLogs: traceLogs.slice(0, 80),
