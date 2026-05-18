@@ -2662,7 +2662,74 @@
       };
     }).filter(item => item.detailUrl);
 
-    return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot };
+    const debug = {
+      readyState: document.readyState || '',
+      title: document.title || '',
+      rowCount: rows.length,
+      detailLinkCount: document.querySelectorAll('a[href*="/assist/detail"]').length,
+      publisherItemCount: document.querySelectorAll('.waiting-publisher-item').length,
+      flyFilterCount: document.querySelectorAll('.fly-filter a').length,
+      bodyLength: bodyText.length,
+      loginLike: /登录|请先登录|login/i.test(bodyText)
+    };
+
+    return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot, debug };
+  }
+
+  function waitForAssistListDom(timeoutMs = 9000) {
+    function text(el) {
+      return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+    function snapshot(ready) {
+      const bodyText = text(document.body);
+      const detailLinkCount = document.querySelectorAll('a[href*="/assist/detail"]').length;
+      const rowCount = document.querySelectorAll('ul.assist-list > li, .assist-list li').length;
+      const publisherItemCount = document.querySelectorAll('.waiting-publisher-item').length;
+      const flyFilterCount = document.querySelectorAll('.fly-filter a').length;
+      const cfChallenge = /Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText);
+      return {
+        ready,
+        readyState: document.readyState || '',
+        title: document.title || '',
+        detailLinkCount,
+        rowCount,
+        publisherItemCount,
+        flyFilterCount,
+        cfChallenge,
+        loginLike: /登录|请先登录|login/i.test(bodyText),
+        bodyLength: bodyText.length
+      };
+    }
+    function isReady() {
+      const snap = snapshot(false);
+      return snap.cfChallenge || snap.detailLinkCount > 0 || snap.rowCount > 0;
+    }
+    if (isReady()) return Promise.resolve(snapshot(true));
+    return new Promise(resolve => {
+      let done = false;
+      let observer = null;
+      const startedAt = Date.now();
+      const finish = ready => {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        clearTimeout(timeout);
+        try { observer?.disconnect(); } catch (_) {}
+        const snap = snapshot(ready);
+        snap.elapsedMs = Date.now() - startedAt;
+        resolve(snap);
+      };
+      const check = () => {
+        if (isReady()) finish(true);
+      };
+      const timer = setInterval(check, 250);
+      const timeout = setTimeout(() => finish(false), timeoutMs);
+      try {
+        observer = new MutationObserver(check);
+        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      } catch (_) {}
+      check();
+    });
   }
 
   function isListCandidateAllowed(candidate, opts) {
@@ -2770,6 +2837,28 @@
   async function parseListUrl(url) {
     const tab = await openHiddenTab(url, 'parse_list');
     try {
+      const readyResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: waitForAssistListDom,
+        args: [9000]
+      });
+      const readiness = readyResult?.[0]?.result || {};
+      await appendWatcherTrace('list_dom_ready', {
+        reason: readiness.ready ? 'assist_list_dom_ready' : 'assist_list_dom_timeout',
+        url,
+        tabId: tab.id,
+        ready: readiness.ready === true,
+        elapsedMs: readiness.elapsedMs ?? '',
+        readyState: readiness.readyState || '',
+        title: readiness.title || '',
+        rowCount: readiness.rowCount ?? '',
+        detailLinkCount: readiness.detailLinkCount ?? '',
+        publisherItemCount: readiness.publisherItemCount ?? '',
+        flyFilterCount: readiness.flyFilterCount ?? '',
+        cfChallenge: readiness.cfChallenge === true,
+        loginLike: readiness.loginLike === true,
+        bodyLength: readiness.bodyLength ?? ''
+      });
       const result = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: parseAssistListPage
@@ -2782,7 +2871,13 @@
         cfChallenge: parsed.cfChallenge === true,
         candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
         totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
-        publisherCount: Object.keys(parsed.demandSnapshot?.publisherCounts || {}).length
+        publisherCount: Object.keys(parsed.demandSnapshot?.publisherCounts || {}).length,
+        rowCount: parsed.debug?.rowCount ?? '',
+        detailLinkCount: parsed.debug?.detailLinkCount ?? '',
+        publisherItemCount: parsed.debug?.publisherItemCount ?? '',
+        flyFilterCount: parsed.debug?.flyFilterCount ?? '',
+        loginLike: parsed.debug?.loginLike === true,
+        pageTitle: parsed.debug?.title || ''
       });
       return parsed;
     } finally {
