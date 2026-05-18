@@ -476,7 +476,6 @@
       throw new Error('当前页面看起来已经有人上传、待确认、已完成或已关闭，已停止。');
     }
     const picked = window.AblesciPdfAdapters.pickPdfUrlFromDocument(document);
-    if (!picked.url) throw new Error('没有识别到 PDF 或出版商文章链接；当前版本只处理可下载的 PDF。');
 
     const { csrfParam, csrfToken } = getCsrf();
     const assistId = getAssistId();

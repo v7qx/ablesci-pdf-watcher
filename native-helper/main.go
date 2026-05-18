@@ -320,6 +320,9 @@ func handleOpenConfigDir(req Request) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+	if err := ensureDefaultConfigFiles(dir); err != nil {
+		return err
+	}
 	if runtime.GOOS == "windows" {
 		if err := exec.Command("explorer.exe", dir).Start(); err != nil {
 			return err
@@ -417,6 +420,7 @@ func configDirCandidates(explicitDir string) []string {
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		candidates = append(candidates,
+			exeDir,
 			filepath.Join(exeDir, "config.local"),
 			filepath.Join(filepath.Dir(exeDir), "config.local"),
 		)
@@ -442,6 +446,23 @@ func configDirCandidates(explicitDir string) []string {
 		out = append(out, path)
 	}
 	return out
+}
+
+func ensureDefaultConfigFiles(dir string) error {
+	files := map[string]string{
+		"journal-access.json": "{\n  \"blocked\": [],\n  \"allowed\": [],\n  \"partial\": []\n}\n",
+		"telegram.json":       "{\n  \"_comment\": \"Telegram 验证提醒参数。扩展设置页开关负责是否发送；不要提交本文件。\",\n  \"bot_token\": \"\",\n  \"chat_id\": \"\",\n  \"message_thread_id\": \"\",\n  \"reply_to_message_id\": \"\",\n  \"parse_mode\": \"\",\n  \"disable_notification\": false\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func cleanConfigPath(path string) string {

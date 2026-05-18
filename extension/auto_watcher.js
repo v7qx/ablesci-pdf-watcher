@@ -365,8 +365,8 @@
     try {
       const res = await deps.sendNativeMessage(opts.nativeHostName, {
         action: 'read_config_file',
-        dir: opts.watcherConfigDir || '',
-        config_path: opts.watcherJournalAccessConfigPath || '',
+        dir: '',
+        config_path: '',
         filename: 'journal-access.json'
       });
       if (!res?.body) return opts;
@@ -2458,7 +2458,14 @@
     const key = getProcessedKey(candidate);
     if (!key) return false;
     const state = await getWatcherState();
-    return !!state.processed?.[key];
+    const item = state.processed?.[key];
+    if (!item) return false;
+    // List-level filter skips can be false positives because the list page is
+    // compact and mixes title/status/type text. Re-check them through detail.
+    if (item.status === 'skipped' && /^(reported|rejected|supplement|book_chapter|patent_report|risk_text)$/.test(String(item.reason || ''))) {
+      return false;
+    }
+    return true;
   }
 
   function candidatePublisherName(candidate) {
@@ -2663,23 +2670,12 @@
     if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
     if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
     if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
-    if (opts.watcherSkipReported && candidate.reported) return { ok: false, reason: 'reported' };
-    if (opts.watcherSkipRejected && candidate.rejected) return { ok: false, reason: 'rejected' };
-    if (opts.watcherSkipSupplement && candidate.supplement) return { ok: false, reason: 'supplement' };
-    if (opts.watcherSkipBookChapter && candidate.documentType === 'book_chapter') return { ok: false, reason: 'book_chapter' };
-    if (opts.watcherSkipPatentReport && candidate.documentType === 'patent_report') return { ok: false, reason: 'patent_report' };
     if (journalAccessRuleFor(candidate, opts).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
-    if (opts.watcherSkipRiskText && /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue)) {
-      return { ok: false, reason: 'risk_text' };
-    }
     return { ok: true };
   }
 
   function isDetailAllowedForWatcher(payload, opts) {
     if (!payload?.assistId) return { ok: false, reason: 'missing_assist_id' };
-    if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
-    if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
-
     const flags = payload.riskFlags || {};
     const textValue = [
       payload.statusText || '',
@@ -2689,7 +2685,9 @@
 
     if (opts.watcherSkipBookChapter && payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
     if (opts.watcherSkipPatentReport && payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
-    if (opts.watcherSkipSupplement && flags.supplement) return { ok: false, reason: 'detail_supplement' };
+    if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement)) return { ok: false, reason: 'detail_supplement' };
+    if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
+    if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
     if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
     if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
     if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };

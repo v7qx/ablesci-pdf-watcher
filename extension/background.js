@@ -380,8 +380,8 @@ async function readJournalAccessRulesFromConfig(opts) {
   try {
     const res = await sendNativeMessage(opts.nativeHostName, {
       action: 'read_config_file',
-      dir: opts.watcherConfigDir || '',
-      config_path: opts.watcherJournalAccessConfigPath || '',
+      dir: '',
+      config_path: '',
       filename: 'journal-access.json'
     });
     return {
@@ -396,12 +396,11 @@ async function readJournalAccessRulesFromConfig(opts) {
 
 async function writeJournalAccessRulesToConfig(opts, rules, existingPath = '') {
   const content = JSON.stringify(rules, null, 2) + '\n';
-  if (!existingPath && !opts.watcherConfigDir && !opts.watcherJournalAccessConfigPath) return false;
   try {
     await sendNativeMessage(opts.nativeHostName, {
       action: 'write_config_file',
-      dir: opts.watcherConfigDir || '',
-      config_path: existingPath || opts.watcherJournalAccessConfigPath || '',
+      dir: '',
+      config_path: existingPath || '',
       filename: 'journal-access.json',
       content
     });

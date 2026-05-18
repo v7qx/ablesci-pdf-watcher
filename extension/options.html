@@ -887,21 +887,19 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>期刊访问名单</strong>
-          <span>优先读取本地配置文件，不在设置页展示完整大名单。列表页命中 blocked 会跳过，allowed / partial 会提高候选优先级；上传成功会把同名 blocked 记录转入 partial。</span>
+          <span>固定读取 Native Helper 目录中的 journal-access.json，不在设置页展示完整大名单。列表页命中 blocked 会跳过，allowed / partial 会提高候选优先级。</span>
         </div>
         <div class="setting-control setting-control-wide">
-          <input id="watcherConfigDir" type="text" placeholder="D:\AblesciWatcherConfig 或留空使用 config.local">
-          <input id="watcherJournalAccessConfigPath" type="text" placeholder="可选：D:\AblesciWatcherConfig\journal-access.json">
           <textarea id="watcherJournalAccessRules" spellcheck="false" aria-label="期刊访问名单缓存 JSON" hidden></textarea>
           <div class="metric-grid">
-            <div class="metric-field"><label>配置来源</label><span id="journalAccessConfigSource" class="pill">-</span></div>
+            <div class="metric-field"><label>配置文件</label><span id="journalAccessConfigSource" class="pill">Native Helper 目录</span></div>
             <div class="metric-field"><label>文件名单</label><span id="journalAccessFileSummary" class="pill">-</span></div>
             <div class="metric-field"><label>缓存名单</label><span id="journalAccessCacheSummary" class="pill">-</span></div>
           </div>
           <button id="openWatcherConfigDir" class="secondary" type="button">打开配置目录</button>
           <button id="reloadJournalAccessConfig" class="secondary" type="button">重载名单</button>
           <span id="journalAccessConfigStatus" class="pill">未读取</span>
-          <div class="setting-hint">推荐把真实名单放在 `config.local/journal-access.json` 或自定义配置目录；GitHub 只提交 `config.example/`。文件不存在时会继续使用扩展本地缓存。</div>
+          <div class="setting-hint">点击“打开配置目录”会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub。</div>
         </div>
       </div>
       <div class="setting-row">
@@ -982,8 +980,8 @@
             <span class="toggle"><input id="watcherTelegramNotifyEnabled" type="checkbox"><span></span></span>
             <span class="toggle-text">启用</span>
           </label>
-          <input id="watcherTelegramConfigPath" type="text" placeholder="D:\AblesciConfig\telegram.local.json">
-          <div class="setting-hint">推荐放到 `config.local/telegram.json` 或上方自定义配置目录；留空时 Helper 会按本地配置目录、环境变量和旧版 helper 同目录配置依次查找。仓库只提交 `config.example/telegram.example.json`。</div>
+          <input id="watcherTelegramConfigPath" type="text" placeholder="可选。留空使用 Native Helper 目录下的 telegram.json">
+          <div class="setting-hint">建议留空，直接维护 Native Helper 目录中的 `telegram.json`；只有需要临时指定其他文件时才填写路径。</div>
         </div>
       </div>
       <div class="setting-row">

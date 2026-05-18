@@ -603,11 +603,10 @@ function nativeConfigMessage(action, extra = {}) {
   });
 }
 
-async function readJournalAccessConfig(opts = null) {
-  const current = opts || await loadOptions();
+async function readJournalAccessConfig() {
   return nativeConfigMessage('read_config_file', {
-    dir: current.watcherConfigDir || '',
-    config_path: current.watcherJournalAccessConfigPath || '',
+    dir: '',
+    config_path: '',
     filename: 'journal-access.json'
   });
 }
@@ -616,15 +615,15 @@ async function renderJournalAccessConfigStatus(opts = null) {
   const current = opts || await loadOptions();
   const cached = String(current.watcherJournalAccessRules || '').trim();
   setText('journalAccessCacheSummary', cached ? journalAccessSummary(cached) : '缓存为空');
-  setText('journalAccessConfigSource', current.watcherJournalAccessConfigPath || current.watcherConfigDir || '默认 config.local/journal-access.json');
-  const res = await readJournalAccessConfig(current);
+  setText('journalAccessConfigSource', 'Native Helper 目录 / journal-access.json');
+  const res = await readJournalAccessConfig();
   if (res.ok) {
     const rules = parseJournalAccessRules(res.body || '');
     const text = JSON.stringify(rules, null, 2);
     const hidden = el('watcherJournalAccessRules');
     if (hidden) hidden.value = text;
     setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已读取`);
-    setText('journalAccessConfigSource', res.path || current.watcherJournalAccessConfigPath || 'config.local/journal-access.json');
+    setText('journalAccessConfigSource', res.path || 'Native Helper 目录 / journal-access.json');
     showPill('journalAccessConfigStatus', '已加载文件');
     return;
   }
@@ -635,7 +634,7 @@ async function renderJournalAccessConfigStatus(opts = null) {
 async function reloadJournalAccessConfig() {
   await save();
   const opts = await loadOptions();
-  const res = await readJournalAccessConfig(opts);
+  const res = await readJournalAccessConfig();
   if (!res.ok) {
     showPill('journalAccessConfigStatus', '读取失败：' + (res.error || '未找到文件'), true);
     return;
@@ -657,10 +656,9 @@ async function reloadJournalAccessConfig() {
 
 async function openConfigDir() {
   const hostNode = el('nativeHostName');
-  const dirNode = el('watcherConfigDir');
   const previousHost = hostNode?.value;
   if (hostNode) hostNode.value = hostNode.value.trim() || DEFAULT_OPTIONS.nativeHostName;
-  const res = await nativeConfigMessage('open_config_dir', { dir: String(dirNode?.value || '').trim() });
+  const res = await nativeConfigMessage('open_config_dir', { dir: '' });
   if (hostNode && previousHost !== undefined) hostNode.value = previousHost;
   showPill('journalAccessConfigStatus', res.ok ? '已打开目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
   if (res.ok && res.path) setText('journalAccessConfigSource', res.path);
