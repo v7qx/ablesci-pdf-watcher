@@ -656,9 +656,12 @@ async function reloadJournalAccessConfig() {
 }
 
 async function openConfigDir() {
-  await save();
-  const opts = await loadOptions();
-  const res = await nativeConfigMessage('open_config_dir', { dir: opts.watcherConfigDir || '' });
+  const hostNode = el('nativeHostName');
+  const dirNode = el('watcherConfigDir');
+  const previousHost = hostNode?.value;
+  if (hostNode) hostNode.value = hostNode.value.trim() || DEFAULT_OPTIONS.nativeHostName;
+  const res = await nativeConfigMessage('open_config_dir', { dir: String(dirNode?.value || '').trim() });
+  if (hostNode && previousHost !== undefined) hostNode.value = previousHost;
   showPill('journalAccessConfigStatus', res.ok ? '已打开目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
   if (res.ok && res.path) setText('journalAccessConfigSource', res.path);
 }

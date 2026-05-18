@@ -2634,7 +2634,7 @@
       const journalShortName = detailAnchor?.querySelector('span[title]')?.getAttribute('title') ||
         row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
       const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
-      const documentType = normalizeDocumentType(typeText || rowText);
+      const documentType = normalizeDocumentType(typeText);
       const doi = doiFrom(rowText);
       return {
         assistId,
