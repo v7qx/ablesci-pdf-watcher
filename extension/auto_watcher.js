@@ -16,6 +16,7 @@
   const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
+  const WATCHER_DAILY_LIMIT_MAX = 500;
   const ASSIST_RANDOM_PAGE_RANGES = {
     elsevier: {
       min: 3,
@@ -319,7 +320,7 @@
       watcherMaxCandidatesPerRun: 1,
       watcherListUrls: normalizeListUrls(opts.watcherListUrls, deps.defaultListUrls),
       watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-      watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+      watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, WATCHER_DAILY_LIMIT_MAX),
       watcherSkipReported: opts.watcherSkipReported !== false,
       watcherSkipRejected: opts.watcherSkipRejected !== false,
       watcherSkipSupplement: opts.watcherSkipSupplement !== false,

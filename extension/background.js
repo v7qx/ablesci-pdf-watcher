@@ -68,10 +68,12 @@ const DEFAULT_OPTIONS = {
   watcherMonthlyTarget: 2000,
   watcherMinDailyTarget: 5,
   watcherMaxDailyTarget: 40,
-  watcherMaxPerSession: 1
+  watcherMaxPerSession: 1,
+  watcherAllowZeroSession: false
 };
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
+const WATCHER_DAILY_LIMIT_MAX = 500;
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
 
@@ -133,7 +135,7 @@ async function getOptions() {
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, WATCHER_DAILY_LIMIT_MAX),
     watcherSkipReported: opts.watcherSkipReported !== false,
     watcherSkipRejected: opts.watcherSkipRejected !== false,
     watcherSkipSupplement: opts.watcherSkipSupplement !== false,
@@ -169,7 +171,8 @@ async function getOptions() {
     watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
     watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
     watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10)
+    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10),
+    watcherAllowZeroSession: opts.watcherAllowZeroSession === true
   };
   };
   const missingLocal = keys.some(k => local[k] === undefined);

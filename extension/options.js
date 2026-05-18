@@ -79,6 +79,7 @@ const DEFAULT_OPTIONS = {
 };
 
 const ids = Object.keys(DEFAULT_OPTIONS);
+const WATCHER_DAILY_LIMIT_MAX = 500;
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
@@ -200,7 +201,7 @@ async function loadOptions() {
     watcherMaxCandidatesPerRun: 1,
     watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
     watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, 100),
+    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, WATCHER_DAILY_LIMIT_MAX),
     watcherSkipReported: opts.watcherSkipReported !== false,
     watcherSkipRejected: opts.watcherSkipRejected !== false,
     watcherSkipSupplement: opts.watcherSkipSupplement !== false,
@@ -486,7 +487,7 @@ async function save() {
   opts.watcherMaxCandidatesPerRun = 1;
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
-  opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, 100);
+  opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX);
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
