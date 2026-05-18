@@ -2588,6 +2588,17 @@
   }
 
   function parseAssistListPage() {
+    function normalizeTextLocal(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+    function normalizeDocumentTypeLocal(value) {
+      const textValue = normalizeTextLocal(value);
+      if (!textValue) return '';
+      if (/补充材料|supporting information|supplement/i.test(textValue)) return 'supplement';
+      if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(textValue)) return 'book_chapter';
+      if (/专利、报告等|专利|patent|report/i.test(textValue)) return 'patent_report';
+      return '';
+    }
     function text(el) {
       return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
     }
@@ -2641,7 +2652,7 @@
       const journalShortName = detailAnchor?.querySelector('span[title]')?.getAttribute('title') ||
         row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
       const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
-      const documentType = normalizeDocumentType(typeText);
+      const documentType = normalizeDocumentTypeLocal(typeText);
       const doi = doiFrom(rowText);
       return {
         assistId,
@@ -2655,7 +2666,7 @@
         rejected: /驳回|已驳回/.test(rowText),
         supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
         documentType,
-        documentTypeText: normalizeText(typeText),
+        documentTypeText: normalizeTextLocal(typeText),
         statusText,
         sticky: /stick-assist|置顶/.test(classText + ' ' + rowText),
         index
