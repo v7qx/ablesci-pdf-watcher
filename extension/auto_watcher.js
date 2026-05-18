@@ -8,6 +8,7 @@
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
   const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
+  const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
   const JOURNAL_SHORT_NAME_MAP_KEY = 'journalShortNameMap';
   const MAX_LOGS = 200;
   const MAX_TRACE_LOGS = 1200;
@@ -18,6 +19,7 @@
   const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
   const WATCHER_DAILY_LIMIT_MAX = 500;
+  const DOI_FAILURE_SKIP_THRESHOLD = 5;
   const ASSIST_RANDOM_PAGE_RANGES = {
     elsevier: {
       min: 3,
@@ -2253,13 +2255,116 @@
       ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
     ];
     const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
+    const journalAccessItems = Object.entries(journalAccessStats || {}).map(([journalName, item]) => ({
+      journalName,
+      accessState: item?.accessState || 'unknown',
+      successCount: Number(item?.successCount || 0),
+      failCount: Number(item?.failCount || 0),
+      consecutiveFailCount: Number(item?.consecutiveFailCount || 0),
+      doiFailureCount: Number(item?.doiFailureCount || 0),
+      consecutiveDoiFailureCount: Number(item?.consecutiveDoiFailureCount || 0),
+      lastReason: item?.lastReason || '',
+      lastDoi: item?.lastDoi || '',
+      lastTitle: item?.lastTitle || '',
+      lastSuccessAt: item?.lastSuccessAt || '',
+      lastFailAt: item?.lastFailAt || '',
+      aliases: Array.isArray(item?.aliases) ? item.aliases : []
+    })).sort((a, b) => (
+      Number(b.consecutiveFailCount || 0) - Number(a.consecutiveFailCount || 0)
+      || Number(b.failCount || 0) - Number(a.failCount || 0)
+      || String(a.journalName || '').localeCompare(String(b.journalName || ''))
+    ));
+    const journalAccessSummary = {
+      total: journalAccessItems.length,
+      noAccess: journalAccessItems.filter(item => item.accessState === 'no_access').length,
+      partialAccess: journalAccessItems.filter(item => item.accessState === 'partial_access').length,
+      hasAccess: journalAccessItems.filter(item => item.accessState === 'has_access').length,
+      unknown: journalAccessItems.filter(item => !item.accessState || item.accessState === 'unknown').length,
+      doiRisk: journalAccessItems.filter(item => item.successCount <= 0 && item.consecutiveDoiFailureCount >= DOI_FAILURE_SKIP_THRESHOLD).length
+    };
     const journalAccessJson = JSON.stringify(reportValueForJson({
       updatedAt: new Date().toISOString(),
       note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 config.local/journal-access.json 或设置页指定路径。',
       source: opts.watcherJournalAccessRulesSource || 'chrome.storage.local cache',
+      summary: journalAccessSummary,
       manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
+      items: journalAccessItems,
       stats: journalAccessStats
     }), null, 2) + '\n';
+    const journalAccessLookupJson = JSON.stringify(reportValueForJson({
+      updatedAt: new Date().toISOString(),
+      note: '轻量查询索引。插件运行时只需要类似结构即可判断列表页候选，不需要读取完整 stats。',
+      count: journalAccessItems.length,
+      index: journalAccessStatsIndexFromStats(journalAccessStats)
+    }), null, 2) + '\n';
+    const journalAccessCsvHeader = [
+      'journalName',
+      'accessState',
+      'successCount',
+      'failCount',
+      'consecutiveFailCount',
+      'doiFailureCount',
+      'consecutiveDoiFailureCount',
+      'lastReason',
+      'lastDoi',
+      'lastSuccessAt',
+      'lastFailAt',
+      'aliases'
+    ];
+    const journalAccessCsv = [
+      journalAccessCsvHeader,
+      ...journalAccessItems.map(item => [
+        item.journalName,
+        item.accessState,
+        item.successCount,
+        item.failCount,
+        item.consecutiveFailCount,
+        item.doiFailureCount,
+        item.consecutiveDoiFailureCount,
+        item.lastReason,
+        item.lastDoi,
+        item.lastSuccessAt ? formatBeijingDateTime(item.lastSuccessAt) : '',
+        item.lastFailAt ? formatBeijingDateTime(item.lastFailAt) : '',
+        item.aliases.join(' | ')
+      ])
+    ].map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
+    const journalAccessMd = [
+      '# Journal Access Stats',
+      '',
+      `Updated: ${formatBeijingDateTime(new Date())}`,
+      '',
+      '## Summary',
+      '',
+      `- Total: ${journalAccessSummary.total}`,
+      `- No access: ${journalAccessSummary.noAccess}`,
+      `- Partial access: ${journalAccessSummary.partialAccess}`,
+      `- Has access: ${journalAccessSummary.hasAccess}`,
+      `- Unknown: ${journalAccessSummary.unknown}`,
+      `- DOI risk: ${journalAccessSummary.doiRisk}`,
+      '',
+      '## Highest Risk',
+      '',
+      '| Journal | State | Success | Fail | Consecutive Fail | DOI Fail | Reason | Aliases |',
+      '| --- | --- | ---: | ---: | ---: | ---: | --- | --- |',
+      ...journalAccessItems.slice(0, 80).map(item => [
+        item.journalName,
+        item.accessState,
+        item.successCount,
+        item.failCount,
+        item.consecutiveFailCount,
+        item.consecutiveDoiFailureCount,
+        item.lastReason,
+        item.aliases.slice(0, 6).join(', ')
+      ].map(value => String(value || '').replace(/\|/g, '\\|')).join(' | ')).map(row => `| ${row} |`),
+      '',
+      '## Files',
+      '',
+      '- `journal-access/stats.json`: full machine-readable stats.',
+      '- `journal-access/stats.csv`: sortable table for manual review.',
+      '- `journal-access/summary.md`: compact human-readable view.',
+      '- `journal-access.json`: compatibility copy at report root.',
+      ''
+    ].join('\n');
     const csvRows = [
       csvHeader,
       reportRow('summary', {
@@ -2336,6 +2441,8 @@
         }))
     ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
 
+    const monthDir = date.slice(0, 7);
+    const reportStem = `${monthDir}/${date}`;
     const md = [
       `# Ablesci Watcher Daily Report ${date}`,
       '',
@@ -2383,8 +2490,8 @@
       `- Recent 1h demand delta: ${Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)}`,
       `- Today target: ${Number(state.todayTarget || 0)}`,
       `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
-      `- Detailed data file: watcher-data-${date}.jsonl`,
-      `- Journal access file: journal-access.json`,
+      `- Detailed data file: ${monthDir}/watcher-data-${date}.jsonl`,
+      `- Journal access files: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
       `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
       `- Session ID: ${state.lastSession?.id || ''}`,
       `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
@@ -2446,9 +2553,13 @@
       ''
     ].join('\n');
 
-    await writeReportFile(`${date}.csv`, csv, 'text/csv', opts);
-    await writeReportFile(`${date}.md`, md, 'text/markdown', opts);
-    await writeReportFile(`watcher-data-${date}.jsonl`, detailJsonl, 'application/x-ndjson', opts);
+    await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
+    await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
+    await writeReportFile(`${monthDir}/watcher-data-${date}.jsonl`, detailJsonl, 'application/x-ndjson', opts);
+    await writeReportFile('journal-access/summary.md', journalAccessMd, 'text/markdown', opts);
+    await writeReportFile('journal-access/stats.csv', journalAccessCsv, 'text/csv', opts);
+    await writeReportFile('journal-access/stats.json', journalAccessJson, 'application/json', opts);
+    await writeReportFile('journal-access/index.json', journalAccessLookupJson, 'application/json', opts);
     await writeReportFile('journal-access.json', journalAccessJson, 'application/json', opts);
   }
 
@@ -2582,25 +2693,89 @@
     });
   }
 
-  async function journalAccessStatsStateFor(candidate, payload = null) {
+  function journalAccessStatsRank(item = {}) {
+    const accessState = String(item.accessState || '');
+    if (accessState === 'no_access') return 4;
+    if (accessState === 'partial_access') return 3;
+    if (accessState === 'has_access') return 2;
+    return 1;
+  }
+
+  function journalAccessStatsIndexFromStats(stats = {}) {
+    const index = {};
+    for (const [journalName, item] of Object.entries(stats || {})) {
+      if (!item) continue;
+      const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+      const names = [journalName, ...aliases].map(normalizeJournalKey).filter(Boolean);
+      for (const name of names) {
+        const existing = index[name];
+        if (!existing || journalAccessStatsRank(item) > journalAccessStatsRank(existing.item)) {
+          index[name] = { accessState: String(item.accessState || ''), item, journalName };
+        }
+      }
+    }
+    return index;
+  }
+
+  async function hydrateJournalAccessStatsIndex(state = {}) {
+    const stored = await chrome.storage.local.get([JOURNAL_ACCESS_LOOKUP_KEY, JOURNAL_ACCESS_STATS_KEY]);
+    const lookup = stored[JOURNAL_ACCESS_LOOKUP_KEY];
+    const hasLookup = lookup && typeof lookup === 'object' && lookup.index && typeof lookup.index === 'object';
+    const stats = hasLookup ? null : (stored[JOURNAL_ACCESS_STATS_KEY] || {});
+    const index = hasLookup ? lookup.index : journalAccessStatsIndexFromStats(stats);
+    Object.defineProperty(state, '__journalAccessStatsIndex', {
+      value: index,
+      enumerable: false,
+      configurable: true
+    });
+    Object.defineProperty(state, '__journalAccessStatsCount', {
+      value: hasLookup ? Number(lookup.count || 0) : Object.keys(stats || {}).length,
+      enumerable: false,
+      configurable: true
+    });
+    Object.defineProperty(state, '__journalAccessStatsIndexSize', {
+      value: Object.keys(index).length,
+      enumerable: false,
+      configurable: true
+    });
+    return state;
+  }
+
+  function journalAccessStatsStateFor(candidate, payload = null, state = {}) {
     const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
     if (!names.length) return { accessState: '', item: null, journalName: '' };
-    const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
-    const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
-    for (const [journalName, item] of Object.entries(stats)) {
-      if (!item) continue;
-      const statNames = [journalName, ...(Array.isArray(item.aliases) ? item.aliases : [])].map(normalizeJournalKey).filter(Boolean);
-      if (!statNames.some(name => names.includes(name))) continue;
-      return { accessState: String(item.accessState || ''), item, journalName };
+    const index = state?.__journalAccessStatsIndex || {};
+    for (const name of names) {
+      if (index[name]) return index[name];
     }
     return { accessState: '', item: null, journalName: '' };
   }
 
-  async function isListCandidateHighRiskByStats(candidate) {
-    const stat = await journalAccessStatsStateFor(candidate);
+  function isListCandidateHighRiskByStats(candidate, state = {}) {
+    const stat = journalAccessStatsStateFor(candidate, null, state);
     const consecutiveFailCount = Number(stat.item?.consecutiveFailCount || 0);
     const successCount = Number(stat.item?.successCount || 0);
     return stat.accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= HIGH_RISK_FAIL_THRESHOLD;
+  }
+
+  function isLikelyRscCandidate(candidate = {}) {
+    const haystack = [
+      candidate.publisherName,
+      candidate.source,
+      candidate.listUrl,
+      candidate.detailUrl,
+      candidate.rowText
+    ].map(value => String(value || '')).join(' ');
+    return /rsc|royal society of chemistry/i.test(haystack);
+  }
+
+  function isListCandidateDoiHighRiskByStats(candidate, state = {}) {
+    if (!isLikelyRscCandidate(candidate)) return false;
+    const stat = journalAccessStatsStateFor(candidate, null, state);
+    const item = stat.item || {};
+    const successCount = Number(item.successCount || 0);
+    const consecutiveDoiFailureCount = Number(item.consecutiveDoiFailureCount || 0);
+    return successCount <= 0 && consecutiveDoiFailureCount >= DOI_FAILURE_SKIP_THRESHOLD;
   }
 
   function journalAccessRuleFor(candidate, opts = {}, payload = null) {
@@ -2640,7 +2815,8 @@
       detail_remark: '详情页存在备注，已按设置跳过',
       detail_risk_text: '详情页命中风险文本，已跳过',
       journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过',
-      list_high_risk_journal: '列表页期刊短名映射到连续失败期刊，已直接跳过'
+      list_high_risk_journal: '列表页期刊短名映射到连续失败期刊，已直接跳过',
+      list_doi_failure_journal: 'RSC 期刊 DOI 连续失败较多，列表页直接跳过'
     };
     return labels[code] ? `${code} - ${labels[code]}` : code;
   }
@@ -3293,10 +3469,22 @@
           });
           continue;
         }
-        if (opts.watcherSkipHighRiskJournal && await isListCandidateHighRiskByStats(candidate)) {
+        if (opts.watcherSkipHighRiskJournal && isListCandidateHighRiskByStats(candidate, stateForTargets)) {
           await appendWatcherTrace('candidate_skip_journal_stats', {
             reason: 'list_high_risk_journal',
             reasonText: describeWatcherReason('list_high_risk_journal'),
+            sessionId: session.id,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            journalShortName: candidate.journalShortName || '',
+            journalFullName: candidate.journalFullName || ''
+          });
+          continue;
+        }
+        if (opts.watcherSkipHighRiskJournal && isListCandidateDoiHighRiskByStats(candidate, stateForTargets)) {
+          await appendWatcherTrace('candidate_skip_journal_stats', {
+            reason: 'list_doi_failure_journal',
+            reasonText: describeWatcherReason('list_doi_failure_journal'),
             sessionId: session.id,
             detailUrl: candidate.detailUrl,
             assistId: candidate.assistId || '',
@@ -3516,6 +3704,7 @@
 
       const stateForTargets = await getWatcherState();
       stateForTargets.optionsSnapshot = opts;
+      await hydrateJournalAccessStatsIndex(stateForTargets);
       if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
         await appendWatcherTrace('run_skip_assist_not_due', {
           reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
@@ -3713,10 +3902,22 @@
             });
             continue;
           }
-          if (opts.watcherSkipHighRiskJournal && await isListCandidateHighRiskByStats(candidate)) {
+          if (opts.watcherSkipHighRiskJournal && isListCandidateHighRiskByStats(candidate, stateForTargets)) {
             await appendWatcherTrace('candidate_skip_journal_stats', {
               reason: 'list_high_risk_journal',
               reasonText: describeWatcherReason('list_high_risk_journal'),
+              trigger,
+              detailUrl: candidate.detailUrl,
+              assistId: candidate.assistId || '',
+              journalShortName: candidate.journalShortName || '',
+              journalFullName: candidate.journalFullName || ''
+            });
+            continue;
+          }
+          if (opts.watcherSkipHighRiskJournal && isListCandidateDoiHighRiskByStats(candidate, stateForTargets)) {
+            await appendWatcherTrace('candidate_skip_journal_stats', {
+              reason: 'list_doi_failure_journal',
+              reasonText: describeWatcherReason('list_doi_failure_journal'),
               trigger,
               detailUrl: candidate.detailUrl,
               assistId: candidate.assistId || '',

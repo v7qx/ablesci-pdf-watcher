@@ -503,10 +503,13 @@ func handleWriteTextFile(req Request) error {
 		return err
 	}
 	path := filepath.Join(dir, filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(path, []byte(req.Content), 0644); err != nil {
 		return err
 	}
-	return writeResponse(Response{OK: true, Action: "write_text_file", Path: path, Filename: filepath.Base(path), Size: int64(len(req.Content))})
+	return writeResponse(Response{OK: true, Action: "write_text_file", Path: path, Filename: filename, Size: int64(len(req.Content))})
 }
 
 func handleUploadOSS(req Request) error {
@@ -768,16 +771,48 @@ func reportDir(dir string) (string, error) {
 }
 
 func sanitizeReportFilename(name string) string {
-	name = strings.TrimSpace(filepath.Base(name))
+	name = strings.TrimSpace(name)
 	name = strings.ReplaceAll(name, "\x00", "")
-	ext := strings.ToLower(filepath.Ext(name))
+	if runtime.GOOS == "windows" {
+		name = strings.ReplaceAll(name, "/", `\`)
+	}
+	name = filepath.Clean(name)
+	if name == "." || filepath.IsAbs(name) {
+		return ""
+	}
+	parts := strings.Split(name, string(os.PathSeparator))
+	if len(parts) > 2 {
+		return ""
+	}
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return ""
+		}
+		if i == 0 && len(parts) == 2 && !safeReportDirName(part) {
+			return ""
+		}
+	}
+	ext := strings.ToLower(filepath.Ext(parts[len(parts)-1]))
 	if ext != ".csv" && ext != ".md" && ext != ".txt" && ext != ".json" && ext != ".jsonl" {
 		return ""
 	}
-	if name == ext {
+	if parts[len(parts)-1] == ext {
 		return ""
 	}
 	return name
+}
+
+func safeReportDirName(name string) bool {
+	if name == "" || len(name) > 32 {
+		return false
+	}
+	for _, r := range name {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func limitText(value string, max int) string {

@@ -75,6 +75,7 @@ const DEFAULT_OPTIONS = {
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const WATCHER_DAILY_LIMIT_MAX = 500;
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
+const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
@@ -470,6 +471,8 @@ async function recordJournalAccessResult(payload, result) {
   item.failCount = Number(item.failCount || 0);
   item.successCount = Number(item.successCount || 0);
   item.consecutiveFailCount = Number(item.consecutiveFailCount || 0);
+  item.doiFailureCount = Number(item.doiFailureCount || 0);
+  item.consecutiveDoiFailureCount = Number(item.consecutiveDoiFailureCount || 0);
   item.aliases = Array.from(new Set([
     ...(Array.isArray(item.aliases) ? item.aliases : []),
     shortName,
@@ -479,15 +482,22 @@ async function recordJournalAccessResult(payload, result) {
   if (result?.ok) {
     item.successCount += 1;
     item.consecutiveFailCount = 0;
+    item.consecutiveDoiFailureCount = 0;
     item.lastSuccessAt = new Date().toISOString();
     item.accessState = item.failCount > 0 ? 'partial_access' : 'has_access';
   } else {
+    const reason = result?.reason || 'unknown';
     item.failCount += 1;
     item.consecutiveFailCount += 1;
     item.lastFailAt = new Date().toISOString();
-    item.lastReason = result?.reason || 'unknown';
+    item.lastReason = reason;
     item.lastDoi = payload?.doi || '';
     item.lastTitle = payload?.title || payload?.suggestedFilename || '';
+    if (/^doi_/i.test(reason)) {
+      item.doiFailureCount += 1;
+      item.consecutiveDoiFailureCount += 1;
+      item.lastDoiFailureAt = item.lastFailAt;
+    }
     if (item.successCount > 0) {
       item.accessState = 'partial_access';
     } else if (item.consecutiveFailCount >= 10) {
@@ -498,7 +508,30 @@ async function recordJournalAccessResult(payload, result) {
   }
 
   stats[journal] = item;
-  await chrome.storage.local.set({ [JOURNAL_ACCESS_STATS_KEY]: stats });
+  const lookup = {};
+  for (const [name, statItem] of Object.entries(stats || {})) {
+    if (!statItem) continue;
+    const aliases = Array.isArray(statItem.aliases) ? statItem.aliases : [];
+    const keys = [name, ...aliases].map(normalizeJournalKey).filter(Boolean);
+    for (const key of keys) {
+      lookup[key] = {
+        journalName: name,
+        accessState: statItem.accessState || 'unknown',
+        successCount: Number(statItem.successCount || 0),
+        consecutiveFailCount: Number(statItem.consecutiveFailCount || 0),
+        consecutiveDoiFailureCount: Number(statItem.consecutiveDoiFailureCount || 0),
+        lastReason: statItem.lastReason || ''
+      };
+    }
+  }
+  await chrome.storage.local.set({
+    [JOURNAL_ACCESS_STATS_KEY]: stats,
+    [JOURNAL_ACCESS_LOOKUP_KEY]: {
+      updatedAt: new Date().toISOString(),
+      count: Object.keys(stats).length,
+      index: lookup
+    }
+  });
   if (result?.ok) {
     const opts = await getOptions();
     await promoteJournalAccessRuleAfterSuccess(journal, opts);
@@ -511,12 +544,25 @@ function classifyJournalAccessFailureReason(err) {
   if (/任务已取消|Ablesci 页面已关闭或刷新|页面已关闭|已停止等待下载/i.test(raw)) return 'user_cancelled';
   if (raw.includes(HTML_DOWNLOAD_MESSAGE)) return 'html_login_or_error_page';
   if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
+  if (/DOI Not Found|doi not found|The DOI you requested|DOI you requested|does not exist|Invalid DOI|DOI 不存在|DOI不存在|找不到\s*DOI|DOI\s*未找到/i.test(raw)) return 'doi_not_found';
+  if (/doi\.org/i.test(raw) && /not found|404|invalid|不存在|未找到/i.test(raw)) return 'doi_resolution_failed';
   if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
   if (/未触发 PDF 下载超时|等待出版商页面触发 PDF 下载超时|后台标签页没有触发 PDF 下载/i.test(raw)) return 'download_not_triggered_timeout';
   if (/下载中超时|下载超时/i.test(raw)) return 'download_timeout';
   if (/任务总超时|单任务最长时间/i.test(raw)) return 'task_timeout';
   if (/下载中断/i.test(raw)) return 'download_interrupted';
   return '';
+}
+
+function isLikelyRscPayload(payload = {}) {
+  const haystack = [
+    payload.publisherName,
+    payload.source,
+    payload.pageUrl,
+    payload.assistDetailUrl,
+    payload.pdfUrl
+  ].map(value => String(value || '')).join(' ');
+  return /rsc|royal society of chemistry|pubs\.rsc\.org/i.test(haystack);
 }
 
 function isExpectedTimeoutFailure(reason) {
@@ -688,6 +734,10 @@ function isRscDirectPdfUrl(url) {
   return /(^|\.)pubs\.rsc\.org$/i.test(hostnameOf(url)) && /\/content\/articlepdf\//i.test(url || '');
 }
 
+function isRscUrl(url) {
+  return /(^|\.)pubs\.rsc\.org$/i.test(hostnameOf(url));
+}
+
 function isScienceDirectPdfUrl(url) {
   return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)/i.test(url || '');
 }
@@ -774,9 +824,9 @@ function isExpectedPublisherPage(pending, pageUrl) {
   const actualHost = hostnameOf(pageUrl);
   if (!expectedHost || !actualHost) return false;
   if (isDoiHost(expectedHost)) {
-    if (isScienceDirectUrl(pageUrl) || isNatureUrl(pageUrl)) {
+    if (isScienceDirectUrl(pageUrl) || isNatureUrl(pageUrl) || isRscUrl(pageUrl)) {
       pending.articleUrl = pageUrl;
-      pending.publisher = isScienceDirectUrl(pageUrl) ? 'sciencedirect' : 'nature';
+      pending.publisher = isScienceDirectUrl(pageUrl) ? 'sciencedirect' : (isNatureUrl(pageUrl) ? 'nature' : 'rsc');
       if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(pageUrl);
       return true;
     }
@@ -1125,15 +1175,16 @@ async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null)
   // 会话参数的 pdfft URL，只有页面原生流程拿到的 URL 才可靠。
   if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {
     const sdMode = opts.scienceDirectTabMode || 'silent_then_visible';
+    const label = isDoiUrl(pdfUrl) ? 'DOI 跳转' : 'ScienceDirect';
     if (mode === 'publisher_tab' || sdMode === 'visible') {
-      post(port, 'progress', 'ScienceDirect 使用可见原生 View PDF 模式。');
+      post(port, 'progress', `${label} 使用可见出版商页面模式。`);
       return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
     }
     if (mode === 'background_tab' || sdMode === 'silent') {
-      post(port, 'progress', 'ScienceDirect 使用后台静默原生 View PDF 模式。');
+      post(port, 'progress', `${label} 使用后台静默出版商页面模式。`);
       return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 0 });
     }
-    post(port, 'progress', 'ScienceDirect 使用后台静默原生 View PDF 模式；如 30 秒内未触发下载，会自动切到前台。');
+    post(port, 'progress', `${label} 使用后台静默出版商页面模式；如 30 秒内未触发下载，会自动切到前台。`);
     return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
   }
 
@@ -1526,7 +1577,10 @@ function processQueue() {
       }, taskTimeoutMs);
       await handleUpload(port, payload, abortController.signal, opts);
     } catch (err) {
-      const failureReason = classifyJournalAccessFailureReason(err);
+      let failureReason = classifyJournalAccessFailureReason(err);
+      if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
+        failureReason = 'doi_resolution_failed';
+      }
       if (failureReason) {
         await recordJournalAccessResult(payload, {
           ok: false,
@@ -1613,9 +1667,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
 
-  if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url))) {
+  if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url))) {
     pending.articleUrl = url;
-    pending.publisher = isScienceDirectUrl(url) ? 'sciencedirect' : 'nature';
+    pending.publisher = isScienceDirectUrl(url) ? 'sciencedirect' : (isNatureUrl(url) ? 'nature' : 'rsc');
     if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
     return;
   }

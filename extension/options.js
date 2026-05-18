@@ -82,6 +82,7 @@ const ids = Object.keys(DEFAULT_OPTIONS);
 const WATCHER_DAILY_LIMIT_MAX = 500;
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
+const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
 const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
 const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
 const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
@@ -700,7 +701,9 @@ async function copyAutoWatcherConfig() {
     AUTO_WATCHER_LOG_KEY,
     AUTO_WATCHER_TRACE_KEY,
     DEMAND_SNAPSHOTS_KEY,
-    LAST_DIAGNOSTIC_KEY
+    LAST_DIAGNOSTIC_KEY,
+    JOURNAL_ACCESS_STATS_KEY,
+    JOURNAL_ACCESS_LOOKUP_KEY
   ]);
   const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
   const traceLogs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
@@ -708,6 +711,8 @@ async function copyAutoWatcherConfig() {
   const state = stored[AUTO_WATCHER_STATE_KEY] || {};
   const processed = state.processed || {};
   const diagnostic = stored[LAST_DIAGNOSTIC_KEY] || null;
+  const journalAccessStats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
+  const journalAccessLookup = stored[JOURNAL_ACCESS_LOOKUP_KEY] || {};
   const manifest = chrome.runtime.getManifest();
 
   const payload = {
@@ -765,6 +770,10 @@ async function copyAutoWatcherConfig() {
       recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
       currentSession: state.currentSession || null,
       banditTopPublishers: state.banditTopPublishers || [],
+      journalAccessStatsCount: Object.keys(journalAccessStats || {}).length,
+      journalAccessLookupIndexSize: Object.keys(journalAccessLookup?.index || {}).length,
+      journalAccessNoAccessCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'no_access').length,
+      journalAccessPartialCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'partial_access').length,
       journalShortNameMapCount: Object.keys(state.journalShortNameMap || {}).length,
       journalShortNameMapPreview: Object.entries(state.journalShortNameMap || {}).slice(0, 10).map(([key, value]) => ({
         key,
