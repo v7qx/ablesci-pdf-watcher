@@ -8,7 +8,8 @@ const {
   clampNumber,
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
-  normalizeWatcherListUrls
+  normalizeWatcherListUrls,
+  normalizeOptions
 } = globalThis.AblesciWatcherConfig;
 
 const ids = Object.keys(DEFAULT_OPTIONS);
@@ -19,6 +20,8 @@ const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
 const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
 const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
 const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
+let advancedStatusCache = null;
+let advancedCountdownTimer = null;
 
 function el(id) { return document.getElementById(id); }
 
@@ -38,73 +41,12 @@ function normalizeButtonPosition(value) {
 
 async function loadOptions() {
   const local = await chrome.storage.local.get(ids);
-  const normalizeOptions = opts => {
-    const schedulerMode = normalizeSchedulerMode(opts);
-    const intervals = normalizeWatcherIntervals(opts);
-    return {
-    ...opts,
-    nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
-    downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
-    moveToDir: String(opts.moveToDir || '').trim(),
-    downloadMode: 'auto',
-    scienceDirectTabMode: 'silent_then_visible',
-    minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
-    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
-    buttonLabel: normalizeButtonLabel(opts.buttonLabel),
-    buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),
-    buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
-    buttonPosition: normalizeButtonPosition(opts.buttonPosition),
-    watcherSchedulerMode: schedulerMode,
-    ...intervals,
-    watcherMaxCandidatesPerRun: 1,
-    watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
-    watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, WATCHER_DAILY_LIMIT_MAX),
-    watcherSkipReported: opts.watcherSkipReported !== false,
-    watcherSkipRejected: opts.watcherSkipRejected !== false,
-    watcherSkipSupplement: opts.watcherSkipSupplement !== false,
-    watcherSkipRemark: opts.watcherSkipRemark !== false,
-    watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
-    watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
-    watcherSkipRiskText: opts.watcherSkipRiskText !== false,
-    watcherJournalAccessRules: String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim(),
-    watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
-    watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
-    watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
-    watcherReportDir: String(opts.watcherReportDir || '').trim(),
-    watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
-    watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
-    watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
-    watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
-    watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
-    watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
-    watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
-    watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
-    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
-    watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
-    watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
-    watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
-    watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
-    watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
-    watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
-    watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
-    watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
-    watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
-    watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
-    watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
-    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
-    watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
-    watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10),
-    watcherAllowZeroSession: opts.watcherAllowZeroSession === true
-  };
-  };
+  const uiNormalizers = { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition };
   const missingLocal = ids.some(id => local[id] === undefined);
-  if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
+  if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local }, uiNormalizers);
 
   const legacy = await chrome.storage.sync.get(DEFAULT_OPTIONS);
-  const migrated = normalizeOptions({ ...DEFAULT_OPTIONS, ...legacy, ...local });
+  const migrated = normalizeOptions({ ...DEFAULT_OPTIONS, ...legacy, ...local }, uiNormalizers);
   await chrome.storage.local.set(migrated);
   return migrated;
 }
@@ -257,6 +199,7 @@ async function renderAdvancedWatcherStatus() {
       ? `风险暂停至 ${formatBeijingDateTime(state.riskPausedUntil)}`
       : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段'));
   const schedule = nextDisplaySchedule(state);
+  advancedStatusCache = { state, schedule };
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
   setText('watcherWorkStatus', workStatus);
   setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
@@ -280,6 +223,25 @@ async function renderAdvancedWatcherStatus() {
     .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
     .join(', ');
   setText('advancedBanditTop', `Bandit top publishers: ${top || '-'}`);
+}
+
+function renderAdvancedWatcherCountdowns() {
+  if (!advancedStatusCache) return;
+  const state = advancedStatusCache.state || {};
+  const schedule = advancedStatusCache.schedule || nextDisplaySchedule(state);
+  setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
+  setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
+}
+
+function startAdvancedCountdownTimer() {
+  if (advancedCountdownTimer || document.hidden) return;
+  advancedCountdownTimer = setInterval(renderAdvancedWatcherCountdowns, 1000);
+}
+
+function stopAdvancedCountdownTimer() {
+  if (!advancedCountdownTimer) return;
+  clearInterval(advancedCountdownTimer);
+  advancedCountdownTimer = null;
 }
 
 function validateOptions(opts) {
@@ -381,6 +343,7 @@ async function save() {
   opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
   opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || '').trim();
+  Object.assign(opts, normalizeOptions(opts, { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition }));
 
   try {
     validateOptions(opts);
@@ -762,8 +725,20 @@ async function clearAutoWatcherLogs() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  load();
-  setInterval(renderAdvancedWatcherStatus, 1000);
+  load().then(startAdvancedCountdownTimer);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAdvancedCountdownTimer();
+  } else {
+    renderAdvancedWatcherStatus().then(startAdvancedCountdownTimer);
+  }
+});
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return;
+  if (changes[AUTO_WATCHER_STATE_KEY] || changes.watcherWorkdays || changes.watcherWorkWindows || changes.watcherEnabled) {
+    renderAdvancedWatcherStatus().catch(() => {});
+  }
 });
 window.addEventListener('blur', () => {
   try {

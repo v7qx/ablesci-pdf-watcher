@@ -149,9 +149,15 @@ func handleStatPDF(req Request) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
+		return err
+	}
 	if req.MoveToDir != "" {
 		path, err = moveFileToDir(path, req.MoveToDir)
 		if err != nil {
+			return err
+		}
+		if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
 			return err
 		}
 	}
@@ -517,6 +523,9 @@ func handleUploadOSS(req Request) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
+		return err
+	}
 	info, _, err := inspectPDF(path)
 	if err != nil {
 		return err
@@ -661,6 +670,73 @@ func cleanExistingPath(p string) (string, error) {
 		return "", errors.New("path is a directory")
 	}
 	return resolved, nil
+}
+
+func ensureAllowedPDFPath(path string, moveToDir string) error {
+	allowed := allowedPDFDirs(moveToDir)
+	for _, dir := range allowed {
+		if isPathInsideDir(path, dir) {
+			return nil
+		}
+	}
+	return errors.New("pdf path is outside allowed download/temp directories")
+}
+
+func allowedPDFDirs(moveToDir string) []string {
+	dirs := []string{}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dirs = append(dirs, filepath.Join(home, "Downloads"))
+	}
+	if temp := os.TempDir(); temp != "" {
+		dirs = append(dirs, temp)
+	}
+	if cleaned := cleanOptionalDir(moveToDir); cleaned != "" {
+		dirs = append(dirs, cleaned)
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, dir := range dirs {
+		cleaned := cleanOptionalDir(dir)
+		if cleaned == "" || seen[strings.ToLower(cleaned)] {
+			continue
+		}
+		seen[strings.ToLower(cleaned)] = true
+		out = append(out, cleaned)
+	}
+	return out
+}
+
+func cleanOptionalDir(dir string) string {
+	dir = strings.Trim(dir, "\" ")
+	if dir == "" {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		dir = strings.ReplaceAll(dir, "/", `\`)
+	}
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	return filepath.Clean(dir)
+}
+
+func isPathInsideDir(path string, dir string) bool {
+	path = filepath.Clean(path)
+	dir = filepath.Clean(dir)
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return !strings.HasPrefix(rel, `..\`)
+	}
+	return true
 }
 
 func resolveExistingPath(p string) (string, error) {

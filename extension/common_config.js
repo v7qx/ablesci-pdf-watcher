@@ -157,6 +157,80 @@
     return next;
   }
 
+  function normalizeOptions(raw = {}, uiNormalizers = {}) {
+    const opts = { ...DEFAULT_OPTIONS, ...(raw || {}) };
+    const schedulerMode = normalizeSchedulerMode(opts);
+    const intervals = normalizeWatcherIntervals(opts);
+    const normalizeButtonLabel = typeof uiNormalizers.normalizeButtonLabel === 'function'
+      ? uiNormalizers.normalizeButtonLabel
+      : value => String(value || '').trim().slice(0, 20) || DEFAULT_OPTIONS.buttonLabel;
+    const normalizeHexColor = typeof uiNormalizers.normalizeHexColor === 'function'
+      ? uiNormalizers.normalizeHexColor
+      : (value, fallback) => (/^#[0-9a-fA-F]{6}$/.test(String(value || '').trim()) ? String(value || '').trim() : fallback);
+    const normalizeButtonPosition = typeof uiNormalizers.normalizeButtonPosition === 'function'
+      ? uiNormalizers.normalizeButtonPosition
+      : value => (value === 'start' ? 'start' : 'end');
+
+    return {
+      ...opts,
+      nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
+      downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
+      moveToDir: String(opts.moveToDir || '').trim(),
+      downloadMode: 'auto',
+      scienceDirectTabMode: 'silent_then_visible',
+      minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
+      maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
+      buttonLabel: normalizeButtonLabel(opts.buttonLabel),
+      buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),
+      buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
+      buttonPosition: normalizeButtonPosition(opts.buttonPosition),
+      watcherSchedulerMode: schedulerMode,
+      ...intervals,
+      watcherMaxCandidatesPerRun: 1,
+      watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
+      watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120),
+      watcherDailyLimit: clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX),
+      watcherSkipReported: opts.watcherSkipReported !== false,
+      watcherSkipRejected: opts.watcherSkipRejected !== false,
+      watcherSkipSupplement: opts.watcherSkipSupplement !== false,
+      watcherSkipRemark: opts.watcherSkipRemark !== false,
+      watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
+      watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
+      watcherSkipRiskText: opts.watcherSkipRiskText !== false,
+      watcherJournalAccessRules: String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim(),
+      watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
+      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+      watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
+      watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
+      watcherReportDir: String(opts.watcherReportDir || '').trim(),
+      watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
+      watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60),
+      watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120),
+      watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180),
+      watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
+      watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
+      watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
+      watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
+      watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),
+      watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
+      watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
+      watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100),
+      watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
+      watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
+      watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
+      watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
+      watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, DEFAULT_OPTIONS.watcherObserveIntervalMinutes, 1, 60),
+      watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, DEFAULT_OPTIONS.watcherObserveFallbackMinutes, 30, 720),
+      watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
+      watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
+      watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000),
+      watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500),
+      watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500),
+      watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10),
+      watcherAllowZeroSession: opts.watcherAllowZeroSession === true
+    };
+  }
+
   globalThis.AblesciWatcherConfig = {
     DEFAULT_OPTIONS,
     WATCHER_DAILY_LIMIT_MAX,
@@ -165,6 +239,7 @@
     clampNumber,
     normalizeSchedulerMode,
     normalizeWatcherIntervals,
-    normalizeWatcherListUrls
+    normalizeWatcherListUrls,
+    normalizeOptions
   };
 })();

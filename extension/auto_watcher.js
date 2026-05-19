@@ -63,10 +63,15 @@
   let traceBuffer = [];
   let traceFlushTimer = null;
   let traceFlushPromise = Promise.resolve();
+  let watcherLogBuffer = [];
+  let watcherLogFlushTimer = null;
+  let watcherLogFlushPromise = Promise.resolve();
   let cachedTraceLevel = 'normal';
   let traceLevelLoadedAt = 0;
   const BADGE_REFRESH_INTERVAL_MS = 30 * 1000;
   const HIGH_RISK_FAIL_THRESHOLD = 10;
+  const WATCHER_LOG_FLUSH_INTERVAL_MS = 5 * 1000;
+  const WATCHER_LOG_FLUSH_BATCH_SIZE = 20;
 
   function clampNumber(value, fallback, min, max) {
     const n = Number(value);
@@ -1028,11 +1033,58 @@
 
   async function getWatcherState() {
     const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
-    return stored[AUTO_WATCHER_STATE_KEY] || { processed: {}, daily: {} };
+    const state = stored[AUTO_WATCHER_STATE_KEY] || { processed: {}, daily: {} };
+    if (!state || typeof state !== 'object') return { processed: {}, daily: {}, _version: 0 };
+    if (!Number.isFinite(Number(state._version))) state._version = 0;
+    return state;
   }
 
   async function saveWatcherState(state) {
-    await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+    const incoming = state && typeof state === 'object' ? state : { processed: {}, daily: {} };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await getWatcherState();
+      const currentVersion = Number(current._version || 0);
+      const base = { ...current, ...incoming };
+      const next = {
+        ...base,
+        processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
+        daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
+        _version: currentVersion + 1
+      };
+      await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: next });
+      const verify = await getWatcherState();
+      if (Number(verify._version || 0) === currentVersion + 1) {
+        Object.assign(incoming, next);
+        return next;
+      }
+    }
+    const current = await getWatcherState();
+    const next = {
+      ...current,
+      ...incoming,
+      processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
+      daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
+      _version: Number(current._version || 0) + 1
+    };
+    await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: next });
+    Object.assign(incoming, next);
+    return next;
+  }
+
+  async function updateWatcherState(mutator) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const state = await getWatcherState();
+      const baseVersion = Number(state._version || 0);
+      const next = { ...state };
+      await mutator(next);
+      next._version = baseVersion;
+      await saveWatcherState(next);
+      const latest = await getWatcherState();
+      if (Number(latest._version || 0) > baseVersion) return latest;
+    }
+    const state = await getWatcherState();
+    await mutator(state);
+    return await saveWatcherState(state);
   }
 
   async function resetCfChallengeStreak() {
@@ -1078,23 +1130,23 @@
 
   async function updateProcessed(key, status, reason) {
     if (!key) return;
-    const state = await getWatcherState();
-    state.processed = state.processed || {};
-    state.processed[key] = {
-      lastAt: new Date().toISOString(),
-      status,
-      reason: normalizeText(reason).slice(0, 160)
-    };
-    await saveWatcherState(state);
+    await updateWatcherState(state => {
+      state.processed = state.processed || {};
+      state.processed[key] = {
+        lastAt: new Date().toISOString(),
+        status,
+        reason: normalizeText(reason).slice(0, 160)
+      };
+    });
   }
 
   async function incrementDaily(field) {
-    const state = await getWatcherState();
-    const key = todayKey();
-    state.daily = state.daily || {};
-    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
-    state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
-    await saveWatcherState(state);
+    await updateWatcherState(state => {
+      const key = todayKey();
+      state.daily = state.daily || {};
+      state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+      state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
+    });
   }
 
   function triggerMetricKey(trigger) {
@@ -1104,30 +1156,29 @@
   }
 
   async function recordRunStart(trigger, opts) {
-    const state = await getWatcherState();
-    const key = todayKey();
-    const now = new Date().toISOString();
-    state.daily = state.daily || {};
-    state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
-    const daily = state.daily[key];
-    daily.totalRuns = Number(daily.totalRuns || 0) + 1;
-    daily[triggerMetricKey(trigger)] = Number(daily[triggerMetricKey(trigger)] || 0) + 1;
-    state.runStats = state.runStats || {};
-    state.runStats.totalRuns = Number(state.runStats.totalRuns || 0) + 1;
-    state.runStats[triggerMetricKey(trigger)] = Number(state.runStats[triggerMetricKey(trigger)] || 0) + 1;
-    state.lastRunStartedAt = now;
-    state.lastRunTrigger = trigger;
-    state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
-    state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
-    state.activeRunDays = state.activeRunDays || {};
-    state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
-    const keepAfter = Date.now() - ACTIVE_RUN_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    for (const dayKey of Object.keys(state.activeRunDays)) {
-      const t = new Date(`${dayKey}T00:00:00+08:00`).getTime();
-      if (!Number.isFinite(t) || t < keepAfter) delete state.activeRunDays[dayKey];
-    }
-    await saveWatcherState(state);
-    return state;
+    return await updateWatcherState(state => {
+      const key = todayKey();
+      const now = new Date().toISOString();
+      state.daily = state.daily || {};
+      state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+      const daily = state.daily[key];
+      daily.totalRuns = Number(daily.totalRuns || 0) + 1;
+      daily[triggerMetricKey(trigger)] = Number(daily[triggerMetricKey(trigger)] || 0) + 1;
+      state.runStats = state.runStats || {};
+      state.runStats.totalRuns = Number(state.runStats.totalRuns || 0) + 1;
+      state.runStats[triggerMetricKey(trigger)] = Number(state.runStats[triggerMetricKey(trigger)] || 0) + 1;
+      state.lastRunStartedAt = now;
+      state.lastRunTrigger = trigger;
+      state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
+      state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+      state.activeRunDays = state.activeRunDays || {};
+      state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
+      const keepAfter = Date.now() - ACTIVE_RUN_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+      for (const dayKey of Object.keys(state.activeRunDays)) {
+        const t = new Date(`${dayKey}T00:00:00+08:00`).getTime();
+        if (!Number.isFinite(t) || t < keepAfter) delete state.activeRunDays[dayKey];
+      }
+    });
   }
 
   async function recordRunFinish(trigger, result) {
@@ -2028,9 +2079,7 @@
   }
 
   async function appendWatcherLog(entry) {
-    const stored = await chrome.storage.local.get(AUTO_WATCHER_LOG_KEY);
-    const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
-    logs.unshift({
+    watcherLogBuffer.push({
       time: new Date().toISOString(),
       sessionId: normalizeText(entry.sessionId).slice(0, 80),
       trigger: normalizeText(entry.trigger).slice(0, 80),
@@ -2044,7 +2093,36 @@
       status: normalizeText(entry.status).slice(0, 80),
       reason: describeWatcherReason(normalizeText(entry.reason)).slice(0, 220)
     });
-    await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: logs.slice(0, MAX_LOGS) });
+    if (watcherLogBuffer.length >= WATCHER_LOG_FLUSH_BATCH_SIZE) {
+      await flushWatcherLogs();
+    } else if (!watcherLogFlushTimer) {
+      watcherLogFlushTimer = setTimeout(() => {
+        watcherLogFlushTimer = null;
+        flushWatcherLogs().catch(() => {});
+      }, WATCHER_LOG_FLUSH_INTERVAL_MS);
+    }
+  }
+
+  async function flushWatcherLogs() {
+    const batch = watcherLogBuffer.splice(0, watcherLogBuffer.length);
+    if (!batch.length) return;
+    watcherLogFlushPromise = watcherLogFlushPromise
+      .catch(() => {})
+      .then(async () => {
+        const stored = await chrome.storage.local.get(AUTO_WATCHER_LOG_KEY);
+        const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
+        const next = batch.slice().reverse().concat(logs).slice(0, MAX_LOGS);
+        await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: next });
+      });
+    await watcherLogFlushPromise;
+  }
+
+  async function clearBufferedWatcherLogs() {
+    watcherLogBuffer = [];
+    if (watcherLogFlushTimer) {
+      clearTimeout(watcherLogFlushTimer);
+      watcherLogFlushTimer = null;
+    }
   }
 
   function normalizeTraceLevel(value) {
@@ -2244,6 +2322,8 @@
     if (!opts.watcherDailyReportEnabled) return;
 
     const date = todayKey();
+    await flushWatcherLogs().catch(() => {});
+    await flushWatcherTrace().catch(() => {});
     const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY, JOURNAL_ACCESS_STATS_KEY]);
     const state = stored[AUTO_WATCHER_STATE_KEY] || {};
     const daily = state.daily?.[date] || {};
@@ -4087,6 +4167,7 @@
       if (currentRunOpts) await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
       await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
+      await flushWatcherLogs().catch(() => {});
       await flushWatcherTrace().catch(() => {});
       autoWatcherRunning = false;
     }
@@ -4152,6 +4233,7 @@
     });
 
     chrome.runtime.onSuspend.addListener(() => {
+      flushWatcherLogs().catch(() => {});
       flushWatcherTrace().catch(() => {});
     });
 
@@ -4218,7 +4300,7 @@
         return true;
       }
       if (msg?.type === 'ablesciClearAutoWatcherLogs') {
-        clearBufferedWatcherTrace()
+        Promise.all([clearBufferedWatcherLogs(), clearBufferedWatcherTrace()])
           .then(() => chrome.storage.local.remove([AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY]))
           .then(() => sendResponse({ ok: true }));
         return true;

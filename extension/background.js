@@ -10,13 +10,15 @@ const {
   clampNumber,
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
-  normalizeWatcherListUrls
+  normalizeWatcherListUrls,
+  normalizeOptions
 } = globalThis.AblesciWatcherConfig;
 
 const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
 const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
+const UPLOAD_TASK_SNAPSHOT_KEY = 'uploadTaskSnapshot';
 const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
 const NATIVE_MESSAGE_LONG_TIMEOUT_MS = 5 * 60 * 1000;
 const ORPHAN_PUBLISHER_TAB_MAX_AGE_MS = 5 * 60 * 1000;
@@ -34,6 +36,58 @@ let journalAccessUpdateChain = Promise.resolve();
 let taskQueue = [];
 let activeTask = null;
 let nextTaskId = 1;
+
+function compactTaskSnapshot(task, status = 'running') {
+  const payload = task?.payload || {};
+  return {
+    taskId: task?.id || '',
+    assistId: String(payload.assistId || '').slice(0, 80),
+    detailUrl: urlHostPath(payload.detailUrl || payload.pageUrl || ''),
+    journalName: String(payload.journalName || payload.journalShortName || '').slice(0, 160),
+    startedAt: task?.startedAt || new Date().toISOString(),
+    status
+  };
+}
+
+async function saveUploadTaskSnapshot(task, status = 'running') {
+  if (!task) return;
+  await chrome.storage.local.set({ [UPLOAD_TASK_SNAPSHOT_KEY]: compactTaskSnapshot(task, status) });
+}
+
+async function clearUploadTaskSnapshot(task = null) {
+  try {
+    if (task) {
+      const stored = await chrome.storage.local.get(UPLOAD_TASK_SNAPSHOT_KEY);
+      const current = stored[UPLOAD_TASK_SNAPSHOT_KEY] || {};
+      if (current.taskId && Number(current.taskId) !== Number(task.id)) return;
+    }
+    await chrome.storage.local.remove(UPLOAD_TASK_SNAPSHOT_KEY);
+  } catch (_) {}
+}
+
+async function recoverUploadTaskSnapshot(reason = 'service_worker_init') {
+  const stored = await chrome.storage.local.get(UPLOAD_TASK_SNAPSHOT_KEY);
+  const snapshot = stored[UPLOAD_TASK_SNAPSHOT_KEY];
+  if (!snapshot || typeof snapshot !== 'object') return;
+  if (snapshot.status === 'recovered_cancelled') return;
+  await chrome.storage.local.set({
+    [UPLOAD_TASK_SNAPSHOT_KEY]: {
+      ...snapshot,
+      status: 'recovered_cancelled',
+      recoveredAt: new Date().toISOString(),
+      recoveryReason: reason
+    }
+  });
+  await saveDiagnostic({
+    time: new Date().toISOString(),
+    stage: 'recovered-cancelled',
+    assistId: snapshot.assistId ? maskId(snapshot.assistId) : '',
+    detailUrlHostPath: snapshot.detailUrl || null,
+    journalName: snapshot.journalName || '',
+    error: 'service worker restarted; stale upload task was cancelled'
+  }).catch(() => {});
+  console.warn('[Ablesci PDF Uploader] recovered stale upload task snapshot', { taskId: snapshot.taskId, reason });
+}
 
 function post(port, type, message, extra = {}) {
   try {
@@ -122,64 +176,6 @@ async function cleanupOrphanPublisherTabs(reason = 'orphan_cleanup') {
 async function getOptions() {
   const keys = Object.keys(DEFAULT_OPTIONS);
   const local = await chrome.storage.local.get(keys);
-  const normalizeOptions = opts => {
-    const schedulerMode = normalizeSchedulerMode(opts);
-    const intervals = normalizeWatcherIntervals(opts);
-    return {
-    ...opts,
-    nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
-    downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
-    moveToDir: String(opts.moveToDir || '').trim(),
-    downloadMode: 'auto',
-    scienceDirectTabMode: 'silent_then_visible',
-    minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
-    maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
-    watcherSchedulerMode: schedulerMode,
-    ...intervals,
-    watcherMaxCandidatesPerRun: 1,
-    watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
-    watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, 10, 0, 120),
-    watcherDailyLimit: clampNumber(opts.watcherDailyLimit, 10, 0, WATCHER_DAILY_LIMIT_MAX),
-    watcherSkipReported: opts.watcherSkipReported !== false,
-    watcherSkipRejected: opts.watcherSkipRejected !== false,
-    watcherSkipSupplement: opts.watcherSkipSupplement !== false,
-    watcherSkipRemark: opts.watcherSkipRemark !== false,
-    watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
-    watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
-    watcherSkipRiskText: opts.watcherSkipRiskText !== false,
-    watcherJournalAccessRules: String(opts.watcherJournalAccessRules || DEFAULT_OPTIONS.watcherJournalAccessRules).trim(),
-    watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
-    watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
-    watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
-    watcherReportDir: String(opts.watcherReportDir || '').trim(),
-    watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
-    watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
-    watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
-    watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, 10, 1, 180),
-    watcherNotifyMode: opts.watcherNotifyMode === 'browser' ? 'browser' : 'native',
-    watcherTelegramNotifyEnabled: opts.watcherTelegramNotifyEnabled === true,
-    watcherTelegramConfigPath: String(opts.watcherTelegramConfigPath || '').trim(),
-    watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
-    watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10),
-    watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
-    watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
-    watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, 10, 1, 100),
-    watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
-    watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
-    watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
-    watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
-    watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, 5, 1, 60),
-    watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, 180, 30, 720),
-    watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
-    watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
-    watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, 2000, 0, 5000),
-    watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, 5, 0, 500),
-    watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, 40, 1, 500),
-    watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, 1, 1, 10),
-    watcherAllowZeroSession: opts.watcherAllowZeroSession === true
-  };
-  };
   const missingLocal = keys.some(k => local[k] === undefined);
   if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
 
@@ -1447,6 +1443,7 @@ async function handleUpload(port, payload, signal = null, optsOverride = null) {
   const ossRes = await sendNativeMessage(opts.nativeHostName, {
     action: 'upload_oss',
     path: stat.path,
+    move_to_dir: opts.moveToDir || '',
     csrf_param: payload.csrfParam || '_csrf',
     csrf_token: payload.csrfToken,
     assist_id: payload.assistId,
@@ -1499,6 +1496,7 @@ function cancelTask(task, reason, options = {}) {
   task.cancelReason = reason || '任务已取消';
   task.silentCancel = options.silent === true;
   removeQueuedTask(task);
+  clearUploadTaskSnapshot(task).catch(() => {});
 
   if (activeTask === task && task.abortController) {
     try { task.abortController.abort(task.cancelReason); } catch (_) {}
@@ -1518,6 +1516,8 @@ function processQueue() {
 
   (async () => {
     post(port, 'progress', `开始处理任务：${label}`);
+    task.startedAt = task.startedAt || new Date().toISOString();
+    await saveUploadTaskSnapshot(task, 'running').catch(() => {});
     let opts = null;
     let taskTimer = null;
     try {
@@ -1567,6 +1567,7 @@ function processQueue() {
       }
     } finally {
       if (taskTimer) clearTimeout(taskTimer);
+      await clearUploadTaskSnapshot(task);
       if (activeTask === task) activeTask = null;
       cleanupOrphanPublisherTabs('task_finished').catch(() => {});
       processQueue();
@@ -1581,6 +1582,7 @@ function enqueueUpload(port, payload) {
     port,
     payload,
     label,
+    startedAt: new Date().toISOString(),
     cancelled: false,
     cancelReason: '',
     abortController: new AbortController()
@@ -1722,11 +1724,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   sendResponse({ ok: false, ignored: true, reason: 'unsupported publisher' });
 });
 
+recoverUploadTaskSnapshot('service_worker_init').catch(() => {});
 cleanupOrphanPublisherTabs('service_worker_init').catch(() => {});
 chrome.runtime.onStartup.addListener(() => {
+  recoverUploadTaskSnapshot('runtime_startup').catch(() => {});
   cleanupOrphanPublisherTabs('runtime_startup').catch(() => {});
 });
 chrome.runtime.onInstalled.addListener(() => {
+  recoverUploadTaskSnapshot('runtime_installed').catch(() => {});
   cleanupOrphanPublisherTabs('runtime_installed').catch(() => {});
 });
 
