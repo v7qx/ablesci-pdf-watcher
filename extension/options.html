@@ -415,6 +415,19 @@
       transform: translateY(-35%) rotate(225deg);
     }
 
+    details.setting-details.nested-setting-details {
+      margin: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    details.setting-details.nested-setting-details summary {
+      padding: 12px 42px 12px 16px;
+      background: #f9fafb;
+    }
+
     .footer {
       display: flex;
       align-items: center;
@@ -664,6 +677,8 @@
 
     <section class="card">
       <h2 class="card-title">实验：低频值守</h2>
+      <details class="setting-details nested-setting-details" open>
+        <summary>基础设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>启用低频值守</strong>
@@ -723,8 +738,11 @@
           </select>
         </div>
       </div>
+      </details>
       <details class="setting-details">
         <summary>低频值守更多设置</summary>
+      <details class="setting-details nested-setting-details" open>
+        <summary>调度规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>采样 URL</strong>
@@ -811,6 +829,9 @@
           <div class="setting-hint">不会增加并发；仍然使用全局串行队列，遇到 CF / challenge 会暂停。</div>
         </div>
       </div>
+      </details>
+      <details class="setting-details nested-setting-details">
+        <summary>高级排查</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>高级状态</strong>
@@ -840,6 +861,9 @@
           <div class="setting-hint" id="advancedBanditTop">Bandit top publishers: -</div>
         </div>
       </div>
+      </details>
+      <details class="setting-details nested-setting-details" open>
+        <summary>候选筛选</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
@@ -972,6 +996,9 @@
           </div>
         </div>
       </div>
+      </details>
+      <details class="setting-details nested-setting-details">
+        <summary>报告与通知</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>验证页处理</strong>
@@ -1036,6 +1063,19 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>Trace 级别</strong>
+          <span>默认标准。详细模式会保留更多调试字段；关闭后只保留普通 watcher 日志。</span>
+        </div>
+        <div class="setting-control">
+          <select id="watcherTraceLevel" aria-label="Trace 级别">
+            <option value="normal">标准</option>
+            <option value="verbose">详细</option>
+            <option value="off">关闭</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>本地记录维护</strong>
           <span>仅清理本机保存的已处理记录、watcher 日志和 trace。</span>
         </div>
@@ -1044,6 +1084,7 @@
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
         </div>
       </div>
+      </details>
       </details>
       <div class="setting-row">
         <div class="setting-copy">

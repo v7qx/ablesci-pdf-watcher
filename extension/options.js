@@ -250,9 +250,12 @@ async function renderAdvancedWatcherStatus() {
   const daily = state.daily?.[todayKeyBeijing()] || {};
   const workdays = normalizeWorkdays(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays);
   const workWindows = normalizeWorkWindows(stored.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows);
+  const pausedUntilMs = state.riskPausedUntil ? new Date(state.riskPausedUntil).getTime() : 0;
   const workStatus = stored.watcherEnabled !== true
     ? '已关闭'
-    : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段');
+    : (Number.isFinite(pausedUntilMs) && pausedUntilMs > Date.now()
+      ? `风险暂停至 ${formatBeijingDateTime(state.riskPausedUntil)}`
+      : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段'));
   const schedule = nextDisplaySchedule(state);
   setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
   setText('watcherWorkStatus', workStatus);
