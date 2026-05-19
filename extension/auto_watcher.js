@@ -3994,6 +3994,41 @@
     }
   }
 
+  async function recoverStaleWatcherState(reason = 'startup_recovery') {
+    try {
+      const state = await getWatcherState();
+      const session = state.currentSession || null;
+      const activeStatuses = new Set(['planning', 'running']);
+      let changed = false;
+      if (session && activeStatuses.has(String(session.status || ''))) {
+        const recovered = {
+          ...session,
+          status: 'recovered_cancelled',
+          finishedAt: new Date().toISOString(),
+          recoveryReason: reason
+        };
+        state.lastSession = recovered;
+        state.currentSession = recovered;
+        changed = true;
+      }
+      if (state.lastRunStartedAt && !state.lastRunFinishedAt) {
+        state.lastRunFinishedAt = new Date().toISOString();
+        state.lastRunResult = { ok: false, reason: 'recovered_cancelled' };
+        changed = true;
+      }
+      if (!changed) return;
+      await saveWatcherState(state);
+      await appendWatcherTrace('watcher_state_recovered', {
+        reason,
+        sessionId: state.currentSession?.id || '',
+        status: state.currentSession?.status || ''
+      });
+      updateActionBadge(state).catch(() => {});
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] recovery failed', err);
+    }
+  }
+
   function initPrivateAutoWatcher(nextDeps) {
     deps = nextDeps;
     updateActionBadge().catch(() => {});
@@ -4009,10 +4044,12 @@
     chrome.alarms.create(BADGE_REFRESH_ALARM_NAME, { periodInMinutes: 1 });
 
     chrome.runtime.onStartup.addListener(() => {
+      recoverStaleWatcherState('runtime_startup').catch(() => {});
       refreshAutoWatcherAlarm(true, 'runtime_startup').catch(() => {});
     });
 
     chrome.runtime.onInstalled.addListener(() => {
+      recoverStaleWatcherState('runtime_installed').catch(() => {});
       refreshAutoWatcherAlarm(true, 'runtime_installed').catch(() => {});
     });
 
@@ -4081,6 +4118,7 @@
       return false;
     });
 
+    recoverStaleWatcherState('init').catch(() => {});
     refreshAutoWatcherAlarm(true, 'init').catch(() => {});
   }
 

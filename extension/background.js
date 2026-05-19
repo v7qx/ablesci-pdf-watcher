@@ -76,10 +76,15 @@ const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
 const WATCHER_DAILY_LIMIT_MAX = 500;
 const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
 const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
+const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
+const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
+const NATIVE_MESSAGE_LONG_TIMEOUT_MS = 5 * 60 * 1000;
+const ORPHAN_PUBLISHER_TAB_MAX_AGE_MS = 5 * 60 * 1000;
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
 const pendingPublisherTabs = new Map();
+let journalAccessUpdateChain = Promise.resolve();
 
 // v0.7: 可取消的全局串行队列。
 // v0.7 已经解决“多个页面同时下载导致 PDF 错配”的问题，但有一个副作用：
@@ -114,6 +119,64 @@ function abortReason(signal, fallback = '任务已取消') {
 
 function throwIfAborted(signal) {
   if (signal && signal.aborted) throw makeAbortError(abortReason(signal));
+}
+
+async function getPublisherTabRegistry() {
+  try {
+    const stored = await chrome.storage.local.get(PUBLISHER_TAB_REGISTRY_KEY);
+    return Array.isArray(stored[PUBLISHER_TAB_REGISTRY_KEY]) ? stored[PUBLISHER_TAB_REGISTRY_KEY] : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function savePublisherTabRegistry(items) {
+  const compact = (Array.isArray(items) ? items : [])
+    .filter(item => item && item.tabId != null)
+    .slice(-50)
+    .map(item => ({
+      tabId: Number(item.tabId),
+      createdAt: Number(item.createdAt || Date.now()),
+      reason: String(item.reason || '')
+    }));
+  await chrome.storage.local.set({ [PUBLISHER_TAB_REGISTRY_KEY]: compact });
+}
+
+async function registerPublisherTab(tabId, meta = {}) {
+  if (tabId == null) return;
+  const items = await getPublisherTabRegistry();
+  const filtered = items.filter(item => Number(item.tabId) !== Number(tabId));
+  filtered.push({ tabId: Number(tabId), createdAt: Date.now(), ...meta });
+  await savePublisherTabRegistry(filtered);
+}
+
+async function unregisterPublisherTab(tabId) {
+  if (tabId == null) return;
+  const items = await getPublisherTabRegistry();
+  await savePublisherTabRegistry(items.filter(item => Number(item.tabId) !== Number(tabId)));
+}
+
+async function cleanupOrphanPublisherTabs(reason = 'orphan_cleanup') {
+  const now = Date.now();
+  const registered = await getPublisherTabRegistry();
+  const keep = [];
+  for (const item of registered) {
+    const tabId = Number(item?.tabId);
+    const createdAt = Number(item?.createdAt || 0);
+    if (!tabId) continue;
+    const inMemoryPending = pendingPublisherTabs.has(tabId);
+    if (inMemoryPending || !createdAt || now - createdAt < ORPHAN_PUBLISHER_TAB_MAX_AGE_MS) {
+      keep.push(item);
+      continue;
+    }
+    try {
+      await chrome.tabs.remove(tabId);
+      console.warn('[Ablesci PDF Uploader] closed orphan publisher tab', { tabId, reason });
+    } catch (_) {
+      // Tab may already be closed.
+    }
+  }
+  await savePublisherTabRegistry(keep);
 }
 
 async function getOptions() {
@@ -451,6 +514,13 @@ async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
 }
 
 async function recordJournalAccessResult(payload, result) {
+  journalAccessUpdateChain = journalAccessUpdateChain
+    .catch(err => console.warn('[Ablesci PDF Uploader] previous journal access update failed', err))
+    .then(() => recordJournalAccessResultNow(payload, result));
+  return journalAccessUpdateChain;
+}
+
+async function recordJournalAccessResultNow(payload, result) {
   const journal = String(payload?.journalName || '').trim();
   if (!journal) return;
   const shortName = String(payload?.journalShortName || '').trim();
@@ -1055,6 +1125,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
       chrome.downloads.onCreated.removeListener(onCreated);
       if (tabId !== null) {
         pendingPublisherTabs.delete(tabId);
+        unregisterPublisherTab(tabId).catch(() => {});
         if (closeTab) chrome.tabs.remove(tabId).catch(() => {});
       }
     }
@@ -1139,6 +1210,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
           expectedHost = hostnameOf(sourceUrlForMatching);
         }
       });
+      registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
 
       if (active) {
         post(port, 'progress', '已打开可见出版商页面。若出现验证页，请在新标签页完成验证；进入文章页后插件会查找原生 View PDF 入口。');
@@ -1227,9 +1299,21 @@ async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null)
   }
 }
 
-function sendNativeMessage(hostName, message) {
+function sendNativeMessage(hostName, message, timeoutMs = NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
+    const action = message?.action || 'native_message';
+    const timeout = Math.max(1000, Number(timeoutMs || NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS));
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Native Helper ${action} 超时（${Math.round(timeout / 1000)} 秒）`));
+    }, timeout);
+
     chrome.runtime.sendNativeMessage(hostName, message, response => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       const lastErr = chrome.runtime.lastError;
       if (lastErr) return reject(new Error(lastErr.message));
       if (!response) return reject(new Error('Native Helper 没有返回内容'));
@@ -1404,7 +1488,7 @@ async function handleUpload(port, payload, signal = null, optsOverride = null) {
       action: 'stat_pdf',
       path: item.filename,
       move_to_dir: opts.moveToDir || ''
-    });
+    }, NATIVE_MESSAGE_LONG_TIMEOUT_MS);
   } catch (err) {
     if (isNonPdfAccessPageError(err)) {
       await stopForNonPdfDownload(port, diag, item, downloadMeta, 'blocked-non-pdf-download', formatTaskError(err), opts);
@@ -1501,7 +1585,7 @@ async function handleUpload(port, payload, signal = null, optsOverride = null) {
     csrf_token: payload.csrfToken,
     assist_id: payload.assistId,
     oss
-  });
+  }, NATIVE_MESSAGE_LONG_TIMEOUT_MS);
 
   let parsed = null;
   try { parsed = JSON.parse(ossRes.body || '{}'); } catch (_) {}
@@ -1553,6 +1637,7 @@ function cancelTask(task, reason, options = {}) {
   if (activeTask === task && task.abortController) {
     try { task.abortController.abort(task.cancelReason); } catch (_) {}
   }
+  cleanupOrphanPublisherTabs('task_cancelled').catch(() => {});
 }
 
 function processQueue() {
@@ -1617,6 +1702,7 @@ function processQueue() {
     } finally {
       if (taskTimer) clearTimeout(taskTimer);
       if (activeTask === task) activeTask = null;
+      cleanupOrphanPublisherTabs('task_finished').catch(() => {});
       processQueue();
     }
   })();
@@ -1768,6 +1854,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   sendResponse({ ok: false, ignored: true, reason: 'unsupported publisher' });
+});
+
+cleanupOrphanPublisherTabs('service_worker_init').catch(() => {});
+chrome.runtime.onStartup.addListener(() => {
+  cleanupOrphanPublisherTabs('runtime_startup').catch(() => {});
+});
+chrome.runtime.onInstalled.addListener(() => {
+  cleanupOrphanPublisherTabs('runtime_installed').catch(() => {});
 });
 
 // PRIVATE_WATCHER_ONLY
