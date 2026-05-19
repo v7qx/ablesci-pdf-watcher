@@ -11,7 +11,9 @@
   const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
   const JOURNAL_SHORT_NAME_MAP_KEY = 'journalShortNameMap';
   const MAX_LOGS = 200;
-  const MAX_TRACE_LOGS = 1200;
+  const MAX_TRACE_LOGS = 300;
+  const TRACE_FLUSH_INTERVAL_MS = 5 * 1000;
+  const TRACE_FLUSH_BATCH_SIZE = 20;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const MAX_SESSION_CANDIDATES = 10;
   const ACTIVE_RUN_RETENTION_DAYS = 62;
@@ -55,6 +57,11 @@
   let deps = null;
   let autoWatcherRunning = false;
   let badgeRefreshTimer = null;
+  let traceBuffer = [];
+  let traceFlushTimer = null;
+  let traceFlushPromise = Promise.resolve();
+  let cachedTraceLevel = 'normal';
+  let traceLevelLoadedAt = 0;
   const BADGE_REFRESH_INTERVAL_MS = 30 * 1000;
   const HIGH_RISK_FAIL_THRESHOLD = 10;
 
@@ -2036,28 +2043,74 @@
     await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: logs.slice(0, MAX_LOGS) });
   }
 
-  function sanitizeTraceValue(value, depth = 0) {
+  function normalizeTraceLevel(value) {
+    return ['off', 'normal', 'verbose'].includes(value) ? value : 'normal';
+  }
+
+  async function getTraceLevel() {
+    const now = Date.now();
+    if (now - traceLevelLoadedAt < 30 * 1000) return cachedTraceLevel;
+    try {
+      const opts = deps?.getOptions ? await deps.getOptions() : {};
+      cachedTraceLevel = normalizeTraceLevel(opts?.watcherTraceLevel);
+      traceLevelLoadedAt = now;
+    } catch (_) {
+      cachedTraceLevel = 'normal';
+      traceLevelLoadedAt = now;
+    }
+    return cachedTraceLevel;
+  }
+
+  function compactTraceCandidate(value) {
+    if (!value || typeof value !== 'object') return null;
+    const hasCandidateShape = value.assistId || value.title || value.doi || value.journalName || value.journalShortName || value.reason;
+    if (!hasCandidateShape) return null;
+    return {
+      assistId: normalizeText(value.assistId || '').slice(0, 80),
+      title: normalizeText(value.title || '').slice(0, 160),
+      doi: normalizeText(value.doi || '').slice(0, 120),
+      journal: normalizeText(value.journalName || value.journalShortName || '').slice(0, 160),
+      reason: normalizeText(value.reason || '').slice(0, 120)
+    };
+  }
+
+  function sanitizeTraceUrl(value, traceLevel) {
+    if (traceLevel === 'verbose') return sanitizeReportUrl(value);
+    try {
+      const parsed = deps?.urlHostPath ? deps.urlHostPath(value || '') : null;
+      if (parsed && (parsed.host || parsed.path)) return parsed;
+    } catch (_) {}
+    return String(value || '').slice(0, 120);
+  }
+
+  function sanitizeTraceValue(value, depth = 0, traceLevel = 'normal') {
     if (value === null || value === undefined) return value;
     if (typeof value === 'string') {
       const text = value.length > 500 ? value.slice(0, 500) + '...' : value;
-      if (/^https?:\/\//i.test(text)) return sanitizeReportUrl(text);
+      if (/^https?:\/\//i.test(text)) return sanitizeTraceUrl(text, traceLevel);
       return text;
     }
     if (typeof value === 'number' || typeof value === 'boolean') return value;
     if (Array.isArray(value)) {
+      if (traceLevel !== 'verbose' && value.length > 5) return `[array:${value.length}]`;
       if (depth >= 2) return `[array:${value.length}]`;
-      return value.slice(0, 20).map(item => sanitizeTraceValue(item, depth + 1));
+      return value.slice(0, traceLevel === 'verbose' ? 20 : 5).map(item => sanitizeTraceValue(item, depth + 1, traceLevel));
     }
     if (typeof value === 'object') {
+      if (traceLevel !== 'verbose') {
+        const compact = compactTraceCandidate(value);
+        if (compact) return compact;
+      }
       if (depth >= 2) return '[object]';
       const output = {};
-      for (const [key, item] of Object.entries(value).slice(0, 30)) {
+      const maxEntries = traceLevel === 'verbose' ? 30 : 18;
+      for (const [key, item] of Object.entries(value).slice(0, maxEntries)) {
         if (/token|cookie|csrf|signature|credential|secret|auth|password/i.test(key)) {
           output[key] = '<redacted>';
         } else if (/url$/i.test(key) || key === 'url' || key === 'detailUrl' || key === 'listUrl') {
-          output[key] = sanitizeReportUrl(item);
+          output[key] = sanitizeTraceUrl(item, traceLevel);
         } else {
-          output[key] = sanitizeTraceValue(item, depth + 1);
+          output[key] = sanitizeTraceValue(item, depth + 1, traceLevel);
         }
       }
       return output;
@@ -2067,23 +2120,52 @@
 
   async function appendWatcherTrace(step, details = {}) {
     try {
-      const stored = await chrome.storage.local.get(AUTO_WATCHER_TRACE_KEY);
-      const logs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
+      const traceLevel = await getTraceLevel();
+      if (traceLevel === 'off') return;
       const url = details.url || details.detailUrl || details.listUrl || '';
-      logs.unshift({
+      traceBuffer.push({
         time: new Date().toISOString(),
         step: normalizeText(step).slice(0, 80),
         reason: normalizeText(details.reason).slice(0, 160),
         trigger: normalizeText(details.trigger).slice(0, 80),
         sessionId: normalizeText(details.sessionId).slice(0, 80),
         tabId: details.tabId ?? '',
-        url: sanitizeReportUrl(url),
+        url: traceLevel === 'verbose' ? sanitizeReportUrl(url) : '',
         urlHostPath: deps?.urlHostPath ? deps.urlHostPath(url || '') : null,
-        details: sanitizeTraceValue(details)
+        details: sanitizeTraceValue(details, 0, traceLevel)
       });
-      await chrome.storage.local.set({ [AUTO_WATCHER_TRACE_KEY]: logs.slice(0, MAX_TRACE_LOGS) });
+      if (traceBuffer.length >= TRACE_FLUSH_BATCH_SIZE) {
+        await flushWatcherTrace();
+      } else if (!traceFlushTimer) {
+        traceFlushTimer = setTimeout(() => {
+          traceFlushTimer = null;
+          flushWatcherTrace().catch(() => {});
+        }, TRACE_FLUSH_INTERVAL_MS);
+      }
     } catch (err) {
       console.warn('[Ablesci Auto Watcher] trace append failed', err);
+    }
+  }
+
+  async function flushWatcherTrace() {
+    const batch = traceBuffer.splice(0, traceBuffer.length);
+    if (!batch.length) return;
+    traceFlushPromise = traceFlushPromise
+      .catch(() => {})
+      .then(async () => {
+        const stored = await chrome.storage.local.get(AUTO_WATCHER_TRACE_KEY);
+        const logs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
+        const next = batch.slice().reverse().concat(logs).slice(0, MAX_TRACE_LOGS);
+        await chrome.storage.local.set({ [AUTO_WATCHER_TRACE_KEY]: next });
+      });
+    await traceFlushPromise;
+  }
+
+  async function clearBufferedWatcherTrace() {
+    traceBuffer = [];
+    if (traceFlushTimer) {
+      clearTimeout(traceFlushTimer);
+      traceFlushTimer = null;
     }
   }
 
@@ -3990,6 +4072,7 @@
       if (currentRunOpts) await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
       await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
       try { await writeDailyReports(); } catch (_) {}
+      await flushWatcherTrace().catch(() => {});
       autoWatcherRunning = false;
     }
   }
@@ -4057,6 +4140,10 @@
       if (areaName !== 'local') return;
       const watcherKeys = Object.keys(changes).filter(key => key.startsWith('watcher'));
       if (watcherKeys.length) {
+        if (changes.watcherTraceLevel) {
+          cachedTraceLevel = normalizeTraceLevel(changes.watcherTraceLevel.newValue);
+          traceLevelLoadedAt = Date.now();
+        }
         const changedKeys = watcherKeys.slice(0, 12).join(',');
         updateActionBadge().catch(() => {});
         if (watcherKeys.some(key => key !== 'watcherBadgeCountdownEnabled')) {
@@ -4112,7 +4199,9 @@
         return true;
       }
       if (msg?.type === 'ablesciClearAutoWatcherLogs') {
-        chrome.storage.local.remove([AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY]).then(() => sendResponse({ ok: true }));
+        clearBufferedWatcherTrace()
+          .then(() => chrome.storage.local.remove([AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY]))
+          .then(() => sendResponse({ ok: true }));
         return true;
       }
       return false;

@@ -50,6 +50,7 @@ const DEFAULT_OPTIONS = {
   watcherSkipHighRiskJournal: true,
   watcherDailyReportEnabled: true,
   watcherBadgeCountdownEnabled: true,
+  watcherTraceLevel: 'normal',
   watcherReportDir: '',
   watcherConfigDir: '',
   watcherNoDownloadTimeoutMinutes: 1,
@@ -214,6 +215,7 @@ async function loadOptions() {
     watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
+    watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
     watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
     watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
@@ -492,6 +494,7 @@ async function save() {
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
+  opts.watcherTraceLevel = ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherConfigDir = String(opts.watcherConfigDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
