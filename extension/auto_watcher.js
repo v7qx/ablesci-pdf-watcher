@@ -14,6 +14,9 @@
   const MAX_TRACE_LOGS = 300;
   const TRACE_FLUSH_INTERVAL_MS = 5 * 1000;
   const TRACE_FLUSH_BATCH_SIZE = 20;
+  const NATIVE_CONFIG_TIMEOUT_MS = 15 * 1000;
+  const NATIVE_NOTIFY_TIMEOUT_MS = 10 * 1000;
+  const NATIVE_REPORT_TIMEOUT_MS = 30 * 1000;
   const MAX_DEMAND_SNAPSHOTS = 500;
   const MAX_SESSION_CANDIDATES = 10;
   const ACTIVE_RUN_RETENTION_DAYS = 62;
@@ -340,9 +343,10 @@
       watcherSkipRiskText: opts.watcherSkipRiskText !== false,
       watcherJournalAccessRules: String(opts.watcherJournalAccessRules || '').trim(),
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
-      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
-      watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
-      watcherReportDir: String(opts.watcherReportDir || '').trim(),
+    watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+    watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
+    watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : 'normal',
+    watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, 1, 0.25, 60),
       watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, 5, 1, 120),
@@ -379,7 +383,7 @@
         dir: '',
         config_path: '',
         filename: 'journal-access.json'
-      });
+      }, NATIVE_CONFIG_TIMEOUT_MS);
       if (!res?.body) return opts;
       const parsed = parseJournalAccessRules(res.body);
       const text = JSON.stringify(parsed, null, 2);
@@ -972,7 +976,7 @@
           action: 'notify_user',
           title: 'Ablesci PDF Watcher',
           message
-        });
+        }, NATIVE_NOTIFY_TIMEOUT_MS);
         if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
         return { ok: true, mode: 'native' };
       } catch (err) {
@@ -1015,7 +1019,7 @@
         config_path: opts.watcherTelegramConfigPath || '',
         title,
         message
-      });
+      }, NATIVE_NOTIFY_TIMEOUT_MS);
     } catch (err) {
       console.warn('[Ablesci Auto Watcher] telegram notify failed', err);
       return { ok: false, reason: err?.message || String(err) };
@@ -2169,6 +2173,17 @@
     }
   }
 
+  async function trimStoredWatcherTraceLogs() {
+    try {
+      const stored = await chrome.storage.local.get(AUTO_WATCHER_TRACE_KEY);
+      const logs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
+      if (logs.length <= MAX_TRACE_LOGS) return;
+      await chrome.storage.local.set({ [AUTO_WATCHER_TRACE_KEY]: logs.slice(0, MAX_TRACE_LOGS) });
+    } catch (err) {
+      console.warn('[Ablesci Auto Watcher] trace trim failed', err);
+    }
+  }
+
   function csvEscape(value) {
     return '"' + String(value ?? '').replace(/"/g, '""') + '"';
   }
@@ -2204,7 +2219,7 @@
           dir: opts.watcherReportDir || '',
           filename,
           content
-        });
+        }, NATIVE_REPORT_TIMEOUT_MS);
         return;
       } catch (err) {
         console.warn('[Ablesci Auto Watcher] native report write failed', err);
@@ -4136,6 +4151,10 @@
       refreshAutoWatcherAlarm(true, 'runtime_installed').catch(() => {});
     });
 
+    chrome.runtime.onSuspend.addListener(() => {
+      flushWatcherTrace().catch(() => {});
+    });
+
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'local') return;
       const watcherKeys = Object.keys(changes).filter(key => key.startsWith('watcher'));
@@ -4208,6 +4227,7 @@
     });
 
     recoverStaleWatcherState('init').catch(() => {});
+    trimStoredWatcherTraceLogs().catch(() => {});
     refreshAutoWatcherAlarm(true, 'init').catch(() => {});
   }
 
