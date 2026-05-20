@@ -206,6 +206,26 @@ func handleDeleteFile(req Request) error {
 	return writeResponse(Response{OK: true, Action: "delete_file", Path: path, Deleted: true})
 }
 
+// findPluginIcon searches for an icon file next to the executable and in
+// standard install locations. Returns an absolute path or empty string.
+func findPluginIcon(filename string) string {
+	// 1. Next to the executable
+	if exePath, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exePath), filename)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate
+		}
+	}
+	// 2. Standard install directory (%LOCALAPPDATA%\AblesciPdfWatcherPrivate\)
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		candidate := filepath.Join(localAppData, "AblesciPdfWatcherPrivate", filename)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func handleNotifyUser(req Request) error {
 	brand := "Ablesci PDF Watcher"
 	title := limitText(firstNonEmpty(req.Title, brand), 80)
@@ -215,15 +235,23 @@ func handleNotifyUser(req Request) error {
 		escapedTitle := strings.ReplaceAll(title, "'", "''")
 		escapedMsg := strings.ReplaceAll(message, "'", "''")
 
-		// Find plugin icon relative to the executable
-		iconPath := ""
-		if exePath, err := os.Executable(); err == nil {
-			candidate := filepath.Join(filepath.Dir(exePath), "icon48.png")
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				iconPath = candidate
-			}
-		}
+		// Find plugin icon relative to the executable, with fallback to install dir
+		iconPath := findPluginIcon("icon48.png")
 		escapedIconPath := strings.ReplaceAll(iconPath, "'", "''")
+
+		// Set AppUserModelID so Windows Notification Center shows "Ablesci PDF Watcher"
+		// instead of "Windows PowerShell". Must be called before any WinForms objects are created.
+		setAppID := `$setAppIDSrc = @"` + "\r\n" +
+			`using System;` + "\r\n" +
+			`using System.Runtime.InteropServices;` + "\r\n" +
+			`public class AblesciNotify {` + "\r\n" +
+			`    [DllImport("shell32.dll", SetLastError=true)]` + "\r\n" +
+			`    public static extern void SetCurrentProcessExplicitAppUserModelID(` + "\r\n" +
+			`        [MarshalAs(UnmanagedType.LPWStr)] string AppID);` + "\r\n" +
+			`}` + "\r\n" +
+			`"@` + "\r\n" +
+			`Add-Type -TypeDefinition $setAppIDSrc;` +
+			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPdfWatcher.Notification")`
 
 		// Build script with diagnostic log header
 		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
@@ -232,16 +260,16 @@ func handleNotifyUser(req Request) error {
 		// Load assemblies once
 		loadAssemblies := `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing`
 
-		// Load custom icon from PNG, fallback to system info icon
-		loadIcon := `try { $bitmap = New-Object System.Drawing.Bitmap($iconPath); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information }`
+		// Load custom icon. If the Go-discovered path is empty, try common install locations in PowerShell.
+		loadIcon := `if ($iconPath -and (Test-Path $iconPath)) { try { $bitmap = New-Object System.Drawing.Bitmap($iconPath); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information } } else { $localIcon = Join-Path $env:LOCALAPPDATA "AblesciPdfWatcherPrivate\icon48.png"; if (Test-Path $localIcon) { try { $bitmap = New-Object System.Drawing.Bitmap($localIcon); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information } } else { $appIcon = [System.Drawing.SystemIcons]::Information } }`
 
-		// System tray balloon notification (default BalloonTipIcon is already Info)
+		// System tray balloon notification
 		trayNotify := `[System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = $appIcon; $n.Text = $brand; $n.Visible = $true; $n.BalloonTipTitle = $brand; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000)`
 
-		// Popup form at bottom-right corner (use double quotes for string literals to avoid encoding issues)
+		// Popup form at bottom-right corner
 		formBody := `$form = New-Object System.Windows.Forms.Form; $form.Icon = $appIcon; $form.Text = $brand; $form.ShowInTaskbar = $false; $form.TopMost = $true; $form.FormBorderStyle = "FixedToolWindow"; $form.StartPosition = "Manual"; $form.Size = New-Object System.Drawing.Size(380,108); $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 16), ($area.Bottom - $form.Height - 16)); $titleLabel = New-Object System.Windows.Forms.Label; $titleLabel.Text = $title; $titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold); $titleLabel.AutoSize = $false; $titleLabel.Location = New-Object System.Drawing.Point(12,10); $titleLabel.Size = New-Object System.Drawing.Size(340,22); $msgLabel = New-Object System.Windows.Forms.Label; $msgLabel.Text = $msg; $msgLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9); $msgLabel.AutoSize = $false; $msgLabel.Location = New-Object System.Drawing.Point(12,36); $msgLabel.Size = New-Object System.Drawing.Size(340,44); $form.Controls.Add($titleLabel); $form.Controls.Add($msgLabel); $form.Show(); $deadline = (Get-Date).AddSeconds(6); while ((Get-Date) -lt $deadline) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }; $form.Close(); $n.Dispose()`
 
-		scriptBody := logStart + "; " + loadAssemblies + "; " + loadIcon + "; " + trayNotify + "; " + formBody + "; " + logEnd
+		scriptBody := logStart + "; " + setAppID + "; " + loadAssemblies + "; " + loadIcon + "; " + trayNotify + "; " + formBody + "; " + logEnd
 		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $iconPath = '" + escapedIconPath + "'; $brand = '" + brand + "';\n" + scriptBody
 
 		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
