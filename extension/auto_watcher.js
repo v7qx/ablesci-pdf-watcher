@@ -1676,6 +1676,22 @@
     return risk;
   }
 
+  function normalizeTraceLevel(value) {
+    return ['off', 'normal', 'verbose'].includes(value) ? value : 'normal';
+  }
+
+  async function getTraceLevel() {
+    if (traceLevelLoadedAt > 0) return cachedTraceLevel;
+    try {
+      const stored = await chrome.storage.local.get('watcherTraceLevel');
+      cachedTraceLevel = normalizeTraceLevel(stored.watcherTraceLevel);
+      traceLevelLoadedAt = Date.now();
+    } catch (_) {
+      // keep default
+    }
+    return cachedTraceLevel;
+  }
+
   async function appendWatcherTrace(step, details = {}) {
     try {
       const traceLevel = await getTraceLevel();

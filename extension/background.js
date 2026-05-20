@@ -894,7 +894,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
 
     async function pollDownloads() {
       if (settled) return;
-      const items = await searchRecentDownloads({ startedAfter, orderBy: ['-startTime'], limit: 20 });
+      const items = await chrome.downloads.search({ startedAfter, orderBy: ['-startTime'], limit: 20 });
       for (const item of items) {
         acceptCandidate(item, 'poll');
         if (downloadId !== null) break;
