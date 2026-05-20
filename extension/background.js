@@ -670,6 +670,13 @@ function isRscUrl(url) {
   return /(^|\.)pubs\.rsc\.org$/i.test(hostnameOf(url));
 }
 
+function publisherForUrl(url) {
+  if (isScienceDirectUrl(url)) return 'sciencedirect';
+  if (isNatureUrl(url)) return 'nature';
+  if (isRscUrl(url)) return 'rsc';
+  return '';
+}
+
 function isScienceDirectPdfUrl(url) {
   return isScienceDirectUrl(url) && /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)/i.test(url || '');
 }
@@ -699,9 +706,21 @@ function natureArticleUrlFromPdfUrl(url) {
   }
 }
 
+function rscArticleUrlFromPdfUrl(url) {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)pubs\.rsc\.org$/i.test(u.hostname)) return url;
+    u.pathname = u.pathname.replace(/\/content\/articlepdf\//i, '/content/articlelanding/');
+    return u.href;
+  } catch (_) {
+    return url;
+  }
+}
+
 function publisherArticleUrlFromPdfUrl(url) {
   if (isScienceDirectUrl(url)) return scienceDirectArticleUrlFromPdfUrl(url);
   if (isNatureUrl(url)) return natureArticleUrlFromPdfUrl(url);
+  if (isRscUrl(url)) return rscArticleUrlFromPdfUrl(url);
   return url;
 }
 
@@ -758,7 +777,7 @@ function isExpectedPublisherPage(pending, pageUrl) {
   if (isDoiHost(expectedHost)) {
     if (isScienceDirectUrl(pageUrl) || isNatureUrl(pageUrl) || isRscUrl(pageUrl)) {
       pending.articleUrl = pageUrl;
-      pending.publisher = isScienceDirectUrl(pageUrl) ? 'sciencedirect' : (isNatureUrl(pageUrl) ? 'nature' : 'rsc');
+      pending.publisher = publisherForUrl(pageUrl);
       if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(pageUrl);
       return true;
     }
@@ -1065,7 +1084,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
         port,
         finishError,
         revealPublisherTab,
-        publisher: isScienceDirectUrl(articleUrl) ? 'sciencedirect' : (isNatureUrl(articleUrl) ? 'nature' : ''),
+        publisher: publisherForUrl(articleUrl),
         lastNativePdfUrl: '',
         setExpectedDownloadUrl(url) {
           sourceUrlForMatching = url || sourceUrlForMatching;
@@ -1078,7 +1097,7 @@ async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
         post(port, 'progress', '已打开可见出版商页面。若出现验证页，请在新标签页完成验证；进入文章页后插件会查找原生 View PDF 入口。');
       } else if (revealAfterMs > 0) {
         post(port, 'progress', `已用后台静默标签页打开出版商页面；${Math.round(revealAfterMs / 1000)} 秒内若未触发下载，会自动切到前台供你验证。`);
-        revealTimer = setTimeout(() => revealPublisherTab('ScienceDirect 后台静默等待较久，已切到出版商标签页；如有验证，请完成后手动点击 View PDF，插件会继续监听下载。'), revealAfterMs);
+        revealTimer = setTimeout(() => revealPublisherTab('出版商页面后台静默等待较久，已切到前台；如有验证，请完成后插件会继续监听下载。'), revealAfterMs);
       } else {
         post(port, 'progress', '已用后台静默标签页打开出版商页面；不会主动切到前台。');
       }
@@ -1134,6 +1153,15 @@ async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null)
   if (isRscDirectPdfUrl(pdfUrl)) {
     post(port, 'progress', 'RSC articlepdf 使用 chrome.downloads 直接下载。');
     return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal, { downloadTimeoutMs });
+  }
+
+  if (isRscUrl(pdfUrl)) {
+    if (mode === 'publisher_tab') {
+      post(port, 'progress', 'RSC 使用可见文章页原生 PDF 下载模式。');
+      return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
+    }
+    post(port, 'progress', 'RSC 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
+    return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
   }
 
   if (mode === 'publisher_tab') {
@@ -1318,7 +1346,18 @@ async function handleUpload(port, payload, signal = null, optsOverride = null) {
   const opts = optsOverride || await getOptions();
   const diag = makeDiagnosticBase(payload, opts);
 
-  if (!payload?.pdfUrl) throw new Error('缺少 pdfUrl');
+  if (!payload?.pdfUrl) {
+    await saveDiagnostic({ ...diag, stage: 'skipped-missing-pdf-url', error: '缺少 pdfUrl，已按信息不全跳过' });
+    post(port, 'done', '当前求助缺少可识别的 PDF 链接，已按信息不全跳过；不会下载或上传。', {
+      html: '当前求助缺少可识别的 PDF 链接，已按信息不全跳过；不会下载或上传。',
+      recomend: false,
+      reload: false,
+      downloadOnly: true,
+      skipped: true,
+      skipReason: 'missing_pdf_url'
+    });
+    return;
+  }
   if (!payload?.assistId) throw new Error('缺少 assistId');
   if (!payload?.csrfToken) throw new Error('缺少 csrfToken');
 
@@ -1717,6 +1756,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     post(pending.port, 'progress', '已从 Nature 文章页取得正文 PDF 下载链接，正在打开该链接。');
     chrome.tabs.update(tabId, { url: msg.pdfUrl })
       .then(() => sendResponse({ ok: true, action: 'navigate_to_nature_pdf', pdfUrl: msg.pdfUrl }))
+      .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+    return true;
+  }
+
+  if (msg.publisher === 'rsc' && msg.pdfUrl) {
+    if (pending.lastNativePdfUrl === msg.pdfUrl) {
+      sendResponse({ ok: true, ignored: true, reason: 'same rsc pdf url already handled' });
+      return;
+    }
+    pending.lastNativePdfUrl = msg.pdfUrl;
+    if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
+    pending.publisher = 'rsc';
+    if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+    post(pending.port, 'progress', '已从 RSC 文章页取得 Download this article PDF 链接，正在打开下载链接。');
+    chrome.tabs.update(tabId, { url: msg.pdfUrl })
+      .then(() => sendResponse({ ok: true, action: 'navigate_to_rsc_pdf', pdfUrl: msg.pdfUrl }))
       .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
     return true;
   }

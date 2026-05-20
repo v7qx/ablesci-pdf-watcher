@@ -61,6 +61,10 @@
       return url;
     }
 
+    if (/^https?:\/\/pubs\.rsc\.org\/[a-z]{2}\/content\/articlelanding\/[^?#]+(?:[?#].*)?$/i.test(url)) {
+      return url;
+    }
+
     if (/^https?:\/\/(?:www\.)?nature\.com\/articles\/[^/?#]+(?:_reference)?(?:\.pdf)?(?:[?#].*)?$/i.test(url)) {
       return url;
     }
@@ -83,6 +87,7 @@
     if (h.includes('frontiersin.org') && /^10\.3389\//i.test(doi)) return `https://www.frontiersin.org/articles/${enc}/pdf`;
     if (h.includes('iopscience.iop.org')) return `https://iopscience.iop.org/article/${enc}/pdf`;
     if (h.includes('nature.com')) return hintUrl;
+    if (h.includes('pubs.rsc.org')) return hintUrl;
     if (h.includes('sciencedirect.com')) return null;
     if (/^10\.1016\//i.test(doi)) return `https://doi.org/${enc}`;
 

@@ -65,7 +65,8 @@
         "https://www.sciencedirect.com/*",
         "https://sciencedirect.com/*",
         "https://www.nature.com/*",
-        "https://nature.com/*"
+        "https://nature.com/*",
+        "https://pubs.rsc.org/*"
       ],
       "js": [
         "content_publishers.js"
