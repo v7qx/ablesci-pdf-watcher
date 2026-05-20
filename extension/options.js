@@ -310,6 +310,7 @@ async function save() {
   opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
+  opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
   opts.watcherTraceLevel = ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherConfigDir = String(opts.watcherConfigDir || '').trim();

@@ -447,6 +447,7 @@
       watcherSkipHighRiskJournal: opts.watcherSkipHighRiskJournal !== false,
     watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
     watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
+    watcherNotificationEnabled: opts.watcherNotificationEnabled !== false,
     watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : 'normal',
     watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
@@ -1072,6 +1073,10 @@
   async function notifyWatcherNeedsAttention(reason, url) {
     const message = normalizeText(reason || '低频值守需要人工处理。').slice(0, 160);
     const opts = normalizeOptions(await deps.getOptions());
+    if (!opts.watcherNotificationEnabled) {
+      if (url) console.warn('[Ablesci Auto Watcher] notification disabled, skip:', message, deps.urlHostPath(url));
+      return { ok: false, mode: 'disabled', reason: 'notification_disabled' };
+    }
     if (opts.watcherNotifyMode === 'native') {
       try {
         await deps.sendNativeMessage(opts.nativeHostName, {
