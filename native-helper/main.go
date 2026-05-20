@@ -235,10 +235,6 @@ func handleNotifyUser(req Request) error {
 		escapedTitle := strings.ReplaceAll(title, "'", "''")
 		escapedMsg := strings.ReplaceAll(message, "'", "''")
 
-		// Find plugin icon relative to the executable, with fallback to install dir
-		iconPath := findPluginIcon("icon48.png")
-		escapedIconPath := strings.ReplaceAll(iconPath, "'", "''")
-
 		// Set AppUserModelID so Windows Notification Center shows the brand name
 		// instead of "Windows PowerShell". Must be called before any WinForms objects are created.
 		setAppID := `$setAppIDSrc = @"` + "\r\n" +
@@ -257,20 +253,12 @@ func handleNotifyUser(req Request) error {
 		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
 		logEnd := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
 
-		// Windows Toast Notification API — supports custom PNG icon natively.
+		// Windows Toast Notification — app source icon is provided by the Start Menu shortcut.
 		toastNotify := `[System.Media.SystemSounds]::Exclamation.Play(); ` +
 			`$escTitle = [System.Security.SecurityElement]::Escape($title); ` +
 			`$escMsg = [System.Security.SecurityElement]::Escape($msg); ` +
 			`$appID = "AblesciPDFUploader"; ` +
-			`$iconUri = ""; ` +
-			`if ($iconPath -and (Test-Path $iconPath)) { $iconUri = "file:///" + ($iconPath -replace '\\', '/') } ` +
-			`else { $localIcon = Join-Path $env:LOCALAPPDATA "AblesciPdfWatcherPrivate\icon48.png"; if (Test-Path $localIcon) { $iconUri = "file:///" + ($localIcon -replace '\\', '/') } }; ` +
-			`if ($iconUri) { ` +
-			`  $escIcon = [System.Security.SecurityElement]::Escape($iconUri); ` +
-			`  $toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><image src="{0}" placement="appLogoOverride" hint-crop="circle"/><text>{1}</text><text>{2}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escIcon, $escTitle, $escMsg) ` +
-			`} else { ` +
-			`  $toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escTitle, $escMsg) ` +
-			`}; ` +
+			`$toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escTitle, $escMsg); ` +
 			`$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; ` +
 			`$null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]; ` +
 			`$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; ` +
@@ -279,7 +267,7 @@ func handleNotifyUser(req Request) error {
 			`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appID).Show($toast)`
 
 		scriptBody := logStart + "; " + setAppID + "; " + toastNotify + "; " + logEnd
-		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $iconPath = '" + escapedIconPath + "'; $brand = '" + brand + "';\n" + scriptBody
+		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $brand = '" + brand + "';\n" + scriptBody
 
 		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
 		if err != nil {
