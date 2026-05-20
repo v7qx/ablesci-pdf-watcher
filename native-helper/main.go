@@ -206,26 +206,6 @@ func handleDeleteFile(req Request) error {
 	return writeResponse(Response{OK: true, Action: "delete_file", Path: path, Deleted: true})
 }
 
-// findPluginIcon searches for an icon file next to the executable and in
-// standard install locations. Returns an absolute path or empty string.
-func findPluginIcon(filename string) string {
-	// 1. Next to the executable
-	if exePath, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exePath), filename)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return candidate
-		}
-	}
-	// 2. Standard install directory (%LOCALAPPDATA%\AblesciPdfWatcherPrivate\)
-	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-		candidate := filepath.Join(localAppData, "AblesciPdfWatcherPrivate", filename)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return candidate
-		}
-	}
-	return ""
-}
-
 func handleNotifyUser(req Request) error {
 	brand := "Ablesci PDF Uploader"
 	title := limitText(firstNonEmpty(req.Title, brand), 80)
@@ -283,11 +263,16 @@ func handleNotifyUser(req Request) error {
 		}
 		tmpFile.Close()
 
-		// Use cmd /c start /min to launch completely detached from Chrome's Job Object.
+		// Launch PowerShell via cmd /c start /min to detach from Chrome's Job Object.
+		// HideWindow prevents the intermediate cmd window from flashing in the taskbar.
+		// PowerShell's own -WindowStyle Hidden keeps its console invisible.
+		// The Toast notification is fire-and-forget: once Show() is called,
+		// Windows Notification Center handles display independently of the process lifetime.
 		cmd := exec.Command("cmd.exe", "/c", "start", "/min", "", "powershell.exe",
 			"-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
 			"-WindowStyle", "Hidden", "-File", tmpPath)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow:    true,
 			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 		}
 		cmd.Stdin = strings.NewReader("")

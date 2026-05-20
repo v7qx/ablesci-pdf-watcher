@@ -105,9 +105,23 @@ Helper 主要做：
 2. 校验 PDF 文件头；
 3. 计算 MD5 和文件大小；
 4. 上传到 Ablesci 返回的 OSS 地址；
-5. 按扩展设置决定是否删除上传成功后的本地 PDF。
+5. 按扩展设置决定是否删除上传成功后的本地 PDF；
+6. Windows 下发送原生 Toast 桌面通知（通过 PowerShell 桥接 WinRT API）；
+7. 管理配置文件（读取/写入 JSON 配置）。
+
+### 通知与图标
+
+Windows 下通知左上角的**应用来源图标**由开始菜单快捷方式提供。`install_host.ps1` 安装时会自动：
+
+1. 将 `icon.ico`（多分辨率）复制到安装目录；
+2. 在开始菜单 `\Programs\Ablesci PDF Uploader\` 创建 `.lnk` 快捷方式；
+3. 快捷方式设置 `AppUserModelID = AblesciPDFUploader` 并关联图标。
+
+通知通过 PowerShell 桥接 WinRT Toast API 实现：Helper 写入临时 `.ps1`，以隐藏窗口启动 PowerShell 完成 `ToastNotificationManager.Show()`。通知是 fire-and-forget，显示后不依赖 PowerShell 进程。
 
 ## 从源码构建 Helper
+
+编译 `ablesci_pdf_helper.exe`，同时生成通知所需的 `icon48.png` 和 `icon.ico`（多分辨率图标）：
 
 Windows：
 
