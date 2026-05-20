@@ -1791,7 +1791,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // PRIVATE_WATCHER_ONLY
-importScripts('auto_watcher.js');
+importScripts('auto_watcher_utils.js', 'auto_watcher.js');
 globalThis.initPrivateAutoWatcher({
   getOptions,
   enqueueUpload,

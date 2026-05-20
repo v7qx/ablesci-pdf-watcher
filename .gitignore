@@ -24,6 +24,7 @@ Downloads/
 Thumbs.db
 .env
 .env.*
+.codebuddy/
 
 # local watcher config
 config.local/
