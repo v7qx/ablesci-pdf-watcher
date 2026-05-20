@@ -69,6 +69,7 @@
     formatBeijingTimeOnly,
     formatBeijingDateOnly,
     reportJson,
+    reportValueForJson,
     countdownText,
     todayKey,
     normalizeText,
@@ -78,6 +79,300 @@
     listUrlsForRun
   } = globalThis.AblesciAutoWatcherUtils;
   const { sanitizeTraceValue } = globalThis.AblesciWatcherLogging;
+  const { createWatcherStateApi } = globalThis.AblesciWatcherStateModule;
+  const { createWatcherReportApi } = globalThis.AblesciWatcherReportModule;
+  const { createWatcherDemandApi } = globalThis.AblesciWatcherDemandModule;
+  const { createWatcherCandidateApi } = globalThis.AblesciWatcherCandidateModule;
+  const { createWatcherRunnerApi } = globalThis.AblesciWatcherRunnerModule;
+  const { createWatcherMarketApi } = globalThis.AblesciWatcherMarketModule;
+  const { createWatcherSessionApi } = globalThis.AblesciWatcherSessionModule;
+  const {
+    getWatcherState,
+    saveWatcherState,
+    updateWatcherState,
+    updateProcessed,
+    incrementDaily,
+    recordRunStart,
+    recordRunFinish,
+    recordAttemptFinish,
+    getDailyCount,
+    dailyCounterSnapshot
+  } = createWatcherStateApi({
+    chromeApi: globalThis.chrome,
+    stateKey: AUTO_WATCHER_STATE_KEY,
+    todayKey,
+    normalizeText,
+    normalizeSchedulerMode,
+    activeRunRetentionDays: ACTIVE_RUN_RETENTION_DAYS,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    updateActionBadge: state => updateActionBadge(state)
+  });
+  const {
+    publisherAlias,
+    aggregatePublisherCounts,
+    buildFallbackPublisherModel,
+    buildAdvancedPublisherModel,
+    demandFactorByRegime,
+    trendFactorFromModel,
+    refreshPublisherModelFromSnapshots
+  } = createWatcherMarketApi({
+    normalizeText,
+    demandSnapshotDays,
+    getDemandSnapshots,
+    buildMarketDataModel,
+    fallbackPublisherWeights: FALLBACK_PUBLISHER_WEIGHTS,
+    advancedModelMinDays: ADVANCED_MODEL_MIN_DAYS
+  });
+  const {
+    candidatePublisherName,
+    normalizeDocumentType,
+    normalizeJournalKey,
+    journalRuleNames,
+    parseJournalAccessRules,
+    candidateJournalNames,
+    journalShortNameMapFromState,
+    journalShortNameMapEntry,
+    enrichCandidateJournalFromMap,
+    rememberJournalShortNameMapping,
+    journalAccessStatsRank,
+    journalAccessStatsIndexFromStats,
+    hydrateJournalAccessStatsIndex,
+    journalAccessStatsStateFor,
+    isListCandidateHighRiskByStats,
+    isLikelyRscCandidate,
+    isListCandidateDoiHighRiskByStats,
+    journalAccessRuleFor,
+    describeWatcherReason,
+    candidateModelScore,
+    orderCandidatesForRun,
+    parseAssistListPage,
+    waitForAssistListDom,
+    isListCandidateAllowed,
+    isDetailAllowedForWatcher,
+    isRscPayload
+  } = createWatcherCandidateApi({
+    chromeApi: globalThis.chrome,
+    saveWatcherState,
+    getWatcherState,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    publisherAlias: value => publisherAlias(value),
+    normalizeText,
+    selectBanditCandidates: (...args) => selectBanditCandidates(...args),
+    medianNumber: (...args) => medianNumber(...args),
+    journalShortNameMapKey: JOURNAL_SHORT_NAME_MAP_KEY,
+    highRiskFailThreshold: HIGH_RISK_FAIL_THRESHOLD,
+    doiFailureSkipThreshold: DOI_FAILURE_SKIP_THRESHOLD
+  });
+  function getProcessedKey(candidate, payload) {
+    return payload?.assistId || candidate?.assistId || candidate?.detailUrl || '';
+  }
+  async function wasRecentlyProcessed(candidate) {
+    const key = getProcessedKey(candidate);
+    if (!key) return false;
+    const state = await getWatcherState();
+    const item = state.processed?.[key];
+    if (!item) return false;
+    if (item.status === 'skipped' && /^(reported|rejected|supplement|book_chapter|patent_report|risk_text)$/.test(String(item.reason || ''))) {
+      return false;
+    }
+    return true;
+  }
+  async function sleepMinutes(minutes) {
+    if (minutes <= 0) return;
+    await new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
+  }
+  function demandSnapshotDays(snapshots) {
+    return new Set((snapshots || [])
+      .map(item => item.dayKey || formatBeijingDateTime(item.timestamp, true))
+      .filter(Boolean));
+  }
+  function demandRegimeFor(snapshot, history) {
+    const stableHistory = history.filter(item => !item.demandAnomaly);
+    const p = percentileRank(stableHistory.map(item => item.totalSeeking), snapshot?.totalSeeking);
+    if (p < 0.20) return 'quiet';
+    if (p < 0.70) return 'normal';
+    if (p < 0.90) return 'busy';
+    return 'very_busy';
+  }
+  function classifyDemandSnapshotAnomaly(snapshot, history) {
+    const value = Number(snapshot?.totalSeeking);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { ok: false, type: 'invalid_total', value };
+    }
+    const recent = (history || [])
+      .filter(item => !item.demandAnomaly && Number.isFinite(Number(item.totalSeeking)) && Number(item.totalSeeking) > 0)
+      .slice(0, 60);
+    if (!recent.length) return { ok: true };
+    const latest = Number(recent[0].totalSeeking);
+    if (recent.length < 3) {
+      const diff = Math.abs(value - latest);
+      if (value >= latest * 4 && diff >= 100) return { ok: false, type: 'sudden_high', value, baseline: latest };
+      if (value <= latest * 0.2 && diff >= 100) return { ok: false, type: 'sudden_low', value, baseline: latest };
+      return { ok: true };
+    }
+    const values = recent.map(item => Number(item.totalSeeking));
+    const median = medianNumber(values);
+    const deviations = values.map(n => Math.abs(n - median));
+    const mad = medianNumber(deviations) || 0;
+    const absoluteBand = Math.max(120, mad * 6);
+    if (value > Math.max(median * 2.8, median + absoluteBand)) {
+      return { ok: false, type: 'sudden_high', value, baseline: median, mad };
+    }
+    if (value < Math.min(median * 0.35, median - absoluteBand)) {
+      return { ok: false, type: 'sudden_low', value, baseline: median, mad };
+    }
+    return { ok: true };
+  }
+
+  const depsRef = {
+    get getOptions() { return deps?.getOptions?.bind(deps); },
+    get sendNativeMessage() { return deps?.sendNativeMessage?.bind(deps); },
+    get hasActiveTask() { return deps?.hasActiveTask?.bind(deps); },
+    get enqueueUpload() { return deps?.enqueueUpload?.bind(deps); },
+    get urlHostPath() { return deps?.urlHostPath?.bind(deps); },
+    get defaultListUrls() { return deps?.defaultListUrls; }
+  };
+
+  const {
+    sanitizeReportUrl,
+    reportDetailValue,
+    writeReportFile,
+    writeDailyReports
+  } = createWatcherReportApi({
+    chromeApi: globalThis.chrome,
+    deps: depsRef,
+    normalizeOptions,
+    hydrateJournalAccessRulesFromConfig,
+    todayKey,
+    flushWatcherLogs: () => flushWatcherLogs(),
+    flushWatcherTrace: () => flushWatcherTrace(),
+    formatBeijingDateTime,
+    formatBeijingTimeOnly,
+    formatBeijingDateOnly,
+    reportJson,
+    reportValueForJson,
+    getWatcherState,
+    journalAccessStatsIndexFromStats,
+    parseJournalAccessRules,
+    reportDir: REPORT_DIR,
+    nativeReportTimeoutMs: NATIVE_REPORT_TIMEOUT_MS,
+    autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
+    autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
+    autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
+    demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
+    journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
+    alarmName: ALARM_NAME,
+    doiFailureSkipThreshold: DOI_FAILURE_SKIP_THRESHOLD
+  });
+  const {
+    isHighRiskJournal,
+    waitForTabComplete,
+    openHiddenTab,
+    closeTabQuietly,
+    parseListUrl,
+    sendDetailMessage,
+    extractDetailPayload,
+    inspectDetail,
+    makeWatcherPort,
+    makeSessionPortContext,
+    handleAllowedPayload
+  } = createWatcherRunnerApi({
+    chromeApi: globalThis.chrome,
+    deps: depsRef,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    appendWatcherLog: entry => appendWatcherLog(entry),
+    writeDailyReports,
+    updateProcessed,
+    incrementDaily,
+    recordRiskEvent,
+    recordBanditOutcome,
+    notifyWatcherNeedsAttention,
+    getProcessedKey,
+    candidateSource,
+    rememberJournalShortNameMapping,
+    parseAssistListPage,
+    waitForAssistListDom,
+    saveWatcherState,
+    describeWatcherReason,
+    highRiskFailThreshold: HIGH_RISK_FAIL_THRESHOLD,
+    journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
+    isDetailAllowedForWatcher,
+    isListCandidateAllowed,
+    isListCandidateHighRiskByStats,
+    isListCandidateDoiHighRiskByStats,
+    enrichCandidateJournalFromMap
+  });
+  const {
+    recordDemandSnapshot,
+    shouldObserveDemand,
+    markObservedSlot,
+    collectDemandIfDue
+  } = createWatcherDemandApi({
+    chromeApi: globalThis.chrome,
+    deps: depsRef,
+    normalizeOptions,
+    todayKey,
+    formatBeijingDateTime,
+    minutesOfDay,
+    beijingMinutesNow,
+    getDemandSnapshots,
+    classifyDemandSnapshotAnomaly,
+    buildMarketDataModel,
+    buildAdvancedPublisherModel,
+    demandRegimeFor,
+    calculateAdvancedTargetState,
+    calculateTargetState,
+    hasPendingAssist,
+    getWatcherState,
+    saveWatcherState,
+    appendWatcherLog: entry => appendWatcherLog(entry),
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    parseListUrl: url => parseListUrl(url),
+    demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
+    marketRawRetentionMs: MARKET_RAW_RETENTION_MS,
+    maxDemandSnapshots: MAX_DEMAND_SNAPSHOTS
+  });
+  const {
+    sessionSize,
+    advancedSessionSize,
+    runAdvancedSchedulerSession
+  } = createWatcherSessionApi({
+    sessionModes: SESSION_MODES,
+    maxSessionCandidates,
+    sessionExecutionCap,
+    riskSnapshot,
+    weightedPickIndexWithDebug,
+    logNormalMinutes,
+    advancedItemGap: ADVANCED_ITEM_GAP,
+    advancedCooldown: ADVANCED_COOLDOWN,
+    saveWatcherState,
+    getWatcherState,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    listUrlsForRun,
+    randomizeAssistListUrlWithMeta,
+    incrementDaily,
+    parseListUrl,
+    recordCfChallenge,
+    resetCfChallengeStreak,
+    enrichCandidateJournalFromMap,
+    isListCandidateAllowed,
+    describeWatcherReason,
+    isListCandidateHighRiskByStats,
+    isListCandidateDoiHighRiskByStats,
+    wasRecentlyProcessed,
+    selectBanditCandidates: (...args) => selectBanditCandidates(...args),
+    inspectDetail,
+    closeTabQuietly,
+    updateProcessed,
+    appendWatcherLog: entry => appendWatcherLog(entry),
+    isDetailAllowedForWatcher,
+    getProcessedKey,
+    candidateSource,
+    handleAllowedPayload,
+    sleepMinutes,
+    recordRiskEvent,
+    recordBanditOutcome
+  });
 
   function nextDisplaySchedule(state = {}, opts = null) {
     const schedulerMode = opts?.watcherSchedulerMode || state.currentSchedulerMode || '';
@@ -833,62 +1128,6 @@
     }
   }
 
-  async function getWatcherState() {
-    const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
-    const state = stored[AUTO_WATCHER_STATE_KEY] || { processed: {}, daily: {} };
-    if (!state || typeof state !== 'object') return { processed: {}, daily: {}, _version: 0 };
-    if (!Number.isFinite(Number(state._version))) state._version = 0;
-    return state;
-  }
-
-  async function saveWatcherState(state) {
-    const incoming = state && typeof state === 'object' ? state : { processed: {}, daily: {} };
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const current = await getWatcherState();
-      const currentVersion = Number(current._version || 0);
-      const base = { ...current, ...incoming };
-      const next = {
-        ...base,
-        processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
-        daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
-        _version: currentVersion + 1
-      };
-      await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: next });
-      const verify = await getWatcherState();
-      if (Number(verify._version || 0) === currentVersion + 1) {
-        Object.assign(incoming, next);
-        return next;
-      }
-    }
-    const current = await getWatcherState();
-    const next = {
-      ...current,
-      ...incoming,
-      processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
-      daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
-      _version: Number(current._version || 0) + 1
-    };
-    await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: next });
-    Object.assign(incoming, next);
-    return next;
-  }
-
-  async function updateWatcherState(mutator) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const state = await getWatcherState();
-      const baseVersion = Number(state._version || 0);
-      const next = { ...state };
-      await mutator(next);
-      next._version = baseVersion;
-      await saveWatcherState(next);
-      const latest = await getWatcherState();
-      if (Number(latest._version || 0) > baseVersion) return latest;
-    }
-    const state = await getWatcherState();
-    await mutator(state);
-    return await saveWatcherState(state);
-  }
-
   async function resetCfChallengeStreak() {
     const state = await getWatcherState();
     if (!state.cfChallengeStreak && !state.pausedByCfChallenge) return;
@@ -928,125 +1167,6 @@
       });
     }
     return reached;
-  }
-
-  async function updateProcessed(key, status, reason) {
-    if (!key) return;
-    await updateWatcherState(state => {
-      state.processed = state.processed || {};
-      state.processed[key] = {
-        lastAt: new Date().toISOString(),
-        status,
-        reason: normalizeText(reason).slice(0, 160)
-      };
-    });
-  }
-
-  async function incrementDaily(field) {
-    await updateWatcherState(state => {
-      const key = todayKey();
-      state.daily = state.daily || {};
-      state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
-      state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
-    });
-  }
-
-  function triggerMetricKey(trigger) {
-    if (trigger === 'alarm') return 'autoRuns';
-    if (trigger === 'manual-observe') return 'manualObserveRuns';
-    return 'manualRuns';
-  }
-
-  async function recordRunStart(trigger, opts) {
-    return await updateWatcherState(state => {
-      const key = todayKey();
-      const now = new Date().toISOString();
-      state.daily = state.daily || {};
-      state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
-      const daily = state.daily[key];
-      daily.totalRuns = Number(daily.totalRuns || 0) + 1;
-      daily[triggerMetricKey(trigger)] = Number(daily[triggerMetricKey(trigger)] || 0) + 1;
-      state.runStats = state.runStats || {};
-      state.runStats.totalRuns = Number(state.runStats.totalRuns || 0) + 1;
-      state.runStats[triggerMetricKey(trigger)] = Number(state.runStats[triggerMetricKey(trigger)] || 0) + 1;
-      state.lastRunStartedAt = now;
-      state.lastRunTrigger = trigger;
-      state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
-      state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
-      state.activeRunDays = state.activeRunDays || {};
-      state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
-      const keepAfter = Date.now() - ACTIVE_RUN_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-      for (const dayKey of Object.keys(state.activeRunDays)) {
-        const t = new Date(`${dayKey}T00:00:00+08:00`).getTime();
-        if (!Number.isFinite(t) || t < keepAfter) delete state.activeRunDays[dayKey];
-      }
-    });
-  }
-
-  async function recordRunFinish(trigger, result) {
-    const state = await getWatcherState();
-    state.lastRunFinishedAt = new Date().toISOString();
-    state.lastRunTrigger = trigger;
-    state.lastRunResult = {
-      ok: result?.ok === true,
-      reason: normalizeText(result?.reason || '').slice(0, 160)
-    };
-    await saveWatcherState(state);
-  }
-
-  async function recordAttemptFinish(attempt, result) {
-    const state = await getWatcherState();
-    const counters = dailyCounterSnapshot(state);
-    const finished = {
-      ...attempt,
-      finishedAt: new Date().toISOString(),
-      resultReason: normalizeText(result?.reason || 'unknown').slice(0, 160),
-      nextAssistAfter: state.nextAssistRunAt || '',
-      nextAlarmAfter: state.nextScheduledAt || '',
-      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
-      checkedAfter: counters.checked,
-      downloadedAfter: counters.downloaded,
-      failedAfter: counters.failed,
-      skippedAfter: counters.skipped
-    };
-    finished.checkedDelta = Number(finished.checkedAfter || 0) - Number(finished.checkedBefore || 0);
-    finished.downloadedDelta = Number(finished.downloadedAfter || 0) - Number(finished.downloadedBefore || 0);
-    finished.failedDelta = Number(finished.failedAfter || 0) - Number(finished.failedBefore || 0);
-    finished.skippedDelta = Number(finished.skippedAfter || 0) - Number(finished.skippedBefore || 0);
-    state.lastAttempt = finished;
-    await saveWatcherState(state);
-    updateActionBadge(state).catch(() => {});
-    await appendWatcherTrace('run_attempt_summary', {
-      reason: finished.resultReason,
-      trigger: finished.trigger,
-      observeSnapshot: finished.observeSnapshot,
-      targetSessionSize: finished.targetSessionSize,
-      checkedDelta: finished.checkedDelta,
-      downloadedDelta: finished.downloadedDelta,
-      listScanStarted: finished.listScanStarted,
-      pickedListUrl: finished.pickedListUrl,
-      pickedPage: finished.pickedPage,
-      pageCurve: finished.pageCurve,
-      nextAssistBefore: finished.nextAssistBefore,
-      nextAssistAfter: finished.nextAssistAfter,
-      nextAlarmAfter: finished.nextAlarmAfter
-    });
-  }
-
-  async function getDailyCount(field) {
-    const state = await getWatcherState();
-    const item = state.daily?.[todayKey()] || {};
-    return Number(item[field] || 0);
-  }
-
-  function dailyCounterSnapshot(state) {
-    const item = state?.daily?.[todayKey()] || {};
-    return {
-      checked: Number(item.checked || 0),
-      downloaded: Number(item.downloaded || 0),
-      failed: Number(item.failed || 0),
-      skipped: Number(item.skipped || 0)
-    };
   }
 
   function monthKey() {
@@ -1556,395 +1676,6 @@
     return risk;
   }
 
-  function nextRiskResumeAt(opts) {
-    const delay = nextWorkDelayMinutes(opts);
-    const minutes = delay === null ? 60 : Math.max(15, delay);
-    return new Date(Date.now() + minutes * 60 * 1000).toISOString();
-  }
-
-  function demandRegimeFor(snapshot, history) {
-    const stableHistory = history.filter(item => !item.demandAnomaly);
-    const p = percentileRank(stableHistory.map(item => item.totalSeeking), snapshot?.totalSeeking);
-    if (p < 0.20) return 'quiet';
-    if (p < 0.70) return 'normal';
-    if (p < 0.90) return 'busy';
-    return 'very_busy';
-  }
-
-  function classifyDemandSnapshotAnomaly(snapshot, history) {
-    const value = Number(snapshot?.totalSeeking);
-    if (!Number.isFinite(value) || value <= 0) {
-      return { ok: false, type: 'invalid_total', value };
-    }
-    const recent = (history || [])
-      .filter(item => !item.demandAnomaly && Number.isFinite(Number(item.totalSeeking)) && Number(item.totalSeeking) > 0)
-      .slice(0, 60);
-    if (!recent.length) return { ok: true };
-    const latest = Number(recent[0].totalSeeking);
-    if (recent.length < 3) {
-      const diff = Math.abs(value - latest);
-      if (value >= latest * 4 && diff >= 100) return { ok: false, type: 'sudden_high', value, baseline: latest };
-      if (value <= latest * 0.2 && diff >= 100) return { ok: false, type: 'sudden_low', value, baseline: latest };
-      return { ok: true };
-    }
-    const values = recent.map(item => Number(item.totalSeeking));
-    const median = medianNumber(values);
-    const deviations = values.map(n => Math.abs(n - median));
-    const mad = medianNumber(deviations) || 0;
-    const absoluteBand = Math.max(120, mad * 6);
-    if (value > Math.max(median * 2.8, median + absoluteBand)) {
-      return { ok: false, type: 'sudden_high', value, baseline: median, mad };
-    }
-    if (value < Math.min(median * 0.35, median - absoluteBand)) {
-      return { ok: false, type: 'sudden_low', value, baseline: median, mad };
-    }
-    return { ok: true };
-  }
-
-  function demandSnapshotDays(snapshots) {
-    return new Set((snapshots || [])
-      .map(item => item.dayKey || formatBeijingDateTime(item.timestamp, true))
-      .filter(Boolean));
-  }
-
-  function publisherAlias(name) {
-    const s = normalizeText(name);
-    if (!s) return 'Unknown';
-    if (/elsevier|science\s*direct/i.test(s)) return 'Elsevier';
-    if (/wiley/i.test(s)) return 'Wiley';
-    if (/springer/i.test(s)) return 'Springer';
-    if (/nature/i.test(s)) return 'Nature';
-    if (/oxford/i.test(s)) return 'Oxford';
-    if (/ieee/i.test(s)) return 'IEEE';
-    if (/\brsc\b|royal\s+society\s+of\s+chemistry|pubs\.rsc\.org/i.test(s)) return 'RSC';
-    return s.split(/[\/|,，;；\s]+/).filter(Boolean)[0] || 'Unknown';
-  }
-
-  function aggregatePublisherCounts(counts) {
-    const out = {};
-    for (const [name, count] of Object.entries(counts || {})) {
-      const alias = publisherAlias(name);
-      out[alias] = (out[alias] || 0) + Math.max(0, Number(count) || 0);
-    }
-    return out;
-  }
-
-  function buildFallbackPublisherModel(snapshot) {
-    const counts = aggregatePublisherCounts(snapshot?.publisherCounts);
-    const entries = Object.entries(counts).filter(([, count]) => count > 0);
-    const total = entries.reduce((sum, [, count]) => sum + count, 0);
-    if (!entries.length || total <= 0) return { ready: false, source: 'empty', days: 0, publishers: {} };
-    const publishers = {};
-    for (const [name, count] of entries) {
-      const base = FALLBACK_PUBLISHER_WEIGHTS[name] || FALLBACK_PUBLISHER_WEIGHTS.Unknown;
-      const share = count / total;
-      publishers[name] = {
-        count,
-        pressure: Number(share.toFixed(4)),
-        weight: Number((base * (0.8 + share * 0.6)).toFixed(3)),
-        successRate: Number(Math.min(0.95, 0.45 + base * 0.08).toFixed(3))
-      };
-    }
-    return { ready: false, source: 'fallback_current_snapshot', days: 1, publishers };
-  }
-
-  function buildAdvancedPublisherModel(snapshots) {
-    const clean = (snapshots || []).filter(item => item && item.publisherCounts && !item.demandAnomaly);
-    const days = demandSnapshotDays(clean);
-    const latest = clean[0] || null;
-    if (days.size < ADVANCED_MODEL_MIN_DAYS) return buildFallbackPublisherModel(latest);
-    const previous = clean.find(item => item.dayKey && item.dayKey !== latest?.dayKey) || clean[1] || null;
-    const latestCounts = aggregatePublisherCounts(latest?.publisherCounts);
-    const previousCounts = aggregatePublisherCounts(previous?.publisherCounts);
-    const latestTotal = Math.max(1, Object.values(latestCounts).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0));
-    const publishers = {};
-    for (const [name, rawCount] of Object.entries(latestCounts)) {
-      const count = Math.max(0, Number(rawCount) || 0);
-      const previousCount = Math.max(0, Number(previousCounts[name] || 0) || 0);
-      const delta = count - previousCount;
-      const pressure = count / latestTotal;
-      const trend = Math.max(-0.4, Math.min(0.6, delta / Math.max(1, previousCount || count)));
-      const base = FALLBACK_PUBLISHER_WEIGHTS[name] || FALLBACK_PUBLISHER_WEIGHTS.Unknown;
-      publishers[name] = {
-        count,
-        previousCount,
-        delta,
-        pressure: Number(pressure.toFixed(4)),
-        trend: Number(trend.toFixed(4)),
-        weight: Number((base * (0.85 + pressure * 0.8 + trend * 0.35)).toFixed(3)),
-        successRate: Number(Math.min(0.97, 0.5 + base * 0.07 + Math.max(0, trend) * 0.12).toFixed(3))
-      };
-    }
-    return { ready: true, source: 'advanced_2day_delta', days: days.size, publishers };
-  }
-
-  function demandFactorByRegime(regime) {
-    if (regime === 'quiet') return 0.65;
-    if (regime === 'busy') return 1.2;
-    if (regime === 'very_busy') return 1.4;
-    return 1;
-  }
-
-  function trendFactorFromModel(model) {
-    const values = Object.values(model?.publishers || {});
-    if (!values.length) return 1;
-    const pressure = values.reduce((sum, item) => sum + Math.max(0, Number(item.pressure) || 0), 0) / values.length;
-    const trend = values.reduce((sum, item) => sum + Number(item.trend || 0), 0) / values.length;
-    return Math.max(0.75, Math.min(1.35, 1 + pressure * 0.4 + trend * 0.2));
-  }
-
-  async function refreshPublisherModelFromSnapshots(state) {
-    const snapshots = await getDemandSnapshots();
-    if (!snapshots.length) return state;
-    const model = buildAdvancedPublisherModel(snapshots);
-    const market = buildMarketDataModel(snapshots);
-    state.publisherModel = model;
-    state.marketData = market;
-    state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
-    return state;
-  }
-
-  async function recordDemandSnapshot(snapshot) {
-    if (!snapshot || !Number.isFinite(Number(snapshot.totalSeeking))) return null;
-    const snapshots = (await getDemandSnapshots())
-      .filter(item => item?.timestamp && Date.now() - new Date(item.timestamp).getTime() <= MARKET_RAW_RETENTION_MS);
-    const normalized = {
-      ...snapshot,
-      timestamp: new Date().toISOString(),
-      dayKey: todayKey(),
-      slot: formatBeijingDateTime(new Date()).slice(11, 16)
-    };
-    const anomaly = classifyDemandSnapshotAnomaly(normalized, snapshots);
-    if (!anomaly.ok) {
-      normalized.demandAnomaly = true;
-      normalized.anomalyType = anomaly.type;
-      normalized.anomalyBaseline = Number.isFinite(Number(anomaly.baseline)) ? Number(anomaly.baseline) : null;
-      normalized.regime = 'anomaly';
-      const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
-      await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
-      const state = await getWatcherState();
-      state.marketData = buildMarketDataModel(nextSnapshots);
-      state.lastDemandAnomalyAt = normalized.timestamp;
-      state.lastDemandAnomaly = normalized;
-      await saveWatcherState(state);
-      await appendWatcherLog({
-        detailUrl: normalized.sourceUrl,
-        status: 'skipped',
-        reason: `demand_snapshot_${anomaly.type}`
-      });
-      return normalized;
-    }
-    const regime = demandRegimeFor(normalized, snapshots);
-    normalized.regime = regime;
-    const nextSnapshots = [normalized, ...snapshots].slice(0, MAX_DEMAND_SNAPSHOTS);
-    await chrome.storage.local.set({ [DEMAND_SNAPSHOTS_KEY]: nextSnapshots });
-    const state = await getWatcherState();
-    const model = buildAdvancedPublisherModel(nextSnapshots);
-    const market = buildMarketDataModel(nextSnapshots);
-    state.lastDemandSnapshotAt = normalized.timestamp;
-    state.lastDemandSnapshot = normalized;
-    state.demandRegime = regime;
-    state.marketData = market;
-    state.publisherModel = model;
-    state.schedulerModelMode = model.ready ? 'advanced' : 'simple';
-    const opts = normalizeOptions(await deps.getOptions());
-    const target = opts.watcherAdvancedSchedulerEnabled ? calculateAdvancedTargetState(state, opts, market) : calculateTargetState(state, opts, regime);
-    const deferForPendingAssist = opts.watcherQuantSchedulerEnabled && opts.watcherObserveMode !== 'observe_only' && hasPendingAssist(state);
-    state.targetPreview = target;
-    state.targetPreviewAt = normalized.timestamp;
-    state.marketDataAffects = deferForPendingAssist ? 'next_after_pending_assist' : 'current_plan';
-    if (!deferForPendingAssist) {
-      Object.assign(state, target);
-    }
-    await saveWatcherState(state);
-    await appendWatcherTrace('market_sample_recorded', {
-      reason: deferForPendingAssist ? 'deferred_until_next_assist_plan' : 'applied_to_current_plan',
-      totalSeeking: normalized.totalSeeking,
-      regime,
-      nextAssistRunAt: state.nextAssistRunAt || '',
-      targetPreviewSpeedMode: target.speedMode || '',
-      targetPreviewRateMultiplier: target.rateMultiplier || ''
-    });
-    return normalized;
-  }
-
-  function shouldObserveDemand(state, opts) {
-    if (!opts.watcherQuantSchedulerEnabled) return false;
-    const today = todayKey();
-    const observedSlots = new Set((state.observedSlots || {})[today] || []);
-    const now = beijingMinutesNow();
-    const dueSlot = opts.watcherObserveTimes.find(slot => {
-      if (observedSlots.has(slot)) return false;
-      const minute = minutesOfDay(slot);
-      return Number.isFinite(minute) && now >= minute && now <= minute + 45;
-    });
-    if (dueSlot) return { due: true, slot: dueSlot, reason: 'slot' };
-    const last = state.lastDemandSnapshotAt ? new Date(state.lastDemandSnapshotAt).getTime() : 0;
-    const intervalMs = opts.watcherObserveIntervalMinutes * 60 * 1000;
-    if (!last || Date.now() - last >= intervalMs) return { due: true, slot: 'interval', reason: 'interval' };
-    const fallbackMs = opts.watcherObserveFallbackMinutes * 60 * 1000;
-    if (!last || Date.now() - last >= fallbackMs) return { due: true, slot: 'fallback', reason: 'fallback' };
-    return { due: false };
-  }
-
-  async function markObservedSlot(slot) {
-    const state = await getWatcherState();
-    const today = todayKey();
-    state.observedSlots = state.observedSlots || {};
-    state.observedSlots[today] = Array.from(new Set([...(state.observedSlots[today] || []), slot]));
-    for (const key of Object.keys(state.observedSlots)) {
-      if (key !== today) delete state.observedSlots[key];
-    }
-    await saveWatcherState(state);
-  }
-
-  async function collectDemandIfDue(opts, force = false) {
-    const state = await getWatcherState();
-    const due = force ? { due: true, slot: 'manual', reason: 'manual' } : shouldObserveDemand(state, opts);
-    await appendWatcherTrace('observe_due_check', {
-      force,
-      due: due.due,
-      slot: due.slot || '',
-      reason: due.reason || '',
-      url: opts.watcherDemandObserveUrl
-    });
-    if (!due.due) return null;
-    const parsed = await parseListUrl(opts.watcherDemandObserveUrl);
-    await appendWatcherTrace('observe_parsed', {
-      reason: due.reason || '',
-      url: opts.watcherDemandObserveUrl,
-      cfChallenge: parsed.cfChallenge === true,
-      totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
-      candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0
-    });
-    if (parsed.cfChallenge) return { ok: false, reason: 'cf_challenge' };
-    const snapshot = await recordDemandSnapshot(parsed.demandSnapshot);
-    if (snapshot) await markObservedSlot(due.slot);
-    return { ok: true, reason: due.reason, snapshot };
-  }
-
-  function sessionSize(opts, state) {
-    const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-    const decision = weightedPickIndexWithDebug(mode.sizeWeights);
-    const picked = decision.index;
-    const cap = sessionExecutionCap(opts, state, opts?.watcherQuantSchedulerEnabled !== false);
-    const finalSize = Math.min(cap, Math.max(0, picked));
-    if (state) {
-      state.lastSessionSizeDecision = {
-        mode: state.speedMode || 'normal',
-        picked,
-        cap,
-        finalSize,
-        random: Number(decision.random.toFixed(6)),
-        total: Number(decision.total.toFixed(6)),
-        weights: decision.weights,
-        allowZero: opts?.watcherAllowZeroSession === true
-      };
-    }
-    return finalSize;
-  }
-
-  function advancedSessionSize(opts, state) {
-    const risk = riskSnapshot(state, opts);
-    if (risk.exhausted) return 0;
-    const cap = Math.min(sessionExecutionCap(opts, state, true), risk.remaining);
-    if (cap <= 0) return 0;
-    const mode = SESSION_MODES[state?.speedMode || 'normal'] || SESSION_MODES.normal;
-    const decision = weightedPickIndexWithDebug(mode.sizeWeights);
-    const modeSize = decision.index;
-    const multiplier = Number(state.rateMultiplier || 1);
-    const intensity = Number(state.sessionIntensity || 0.4);
-    const parentOrderSize = Math.ceil(maxSessionCandidates(opts) * Math.max(0.12, intensity) * 0.75);
-    const boost = multiplier > 2.0 ? 2 : (multiplier > 1.45 ? 1 : 0);
-    const desired = Math.max(modeSize, parentOrderSize) + boost;
-    const finalSize = Math.max(0, Math.min(cap, desired));
-    if (state) {
-      state.lastSessionSizeDecision = {
-        mode: state.speedMode || 'normal',
-        picked: modeSize,
-        cap,
-        finalSize,
-        random: Number(decision.random.toFixed(6)),
-        total: Number(decision.total.toFixed(6)),
-        weights: decision.weights,
-        allowZero: opts?.watcherAllowZeroSession === true,
-        parentOrderSize,
-        boost
-      };
-    }
-    return finalSize;
-  }
-
-  async function sleepMinutes(minutes) {
-    if (minutes <= 0) return;
-    await new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
-  }
-
-  async function appendWatcherLog(entry) {
-    watcherLogBuffer.push({
-      time: new Date().toISOString(),
-      sessionId: normalizeText(entry.sessionId).slice(0, 80),
-      trigger: normalizeText(entry.trigger).slice(0, 80),
-      assistId: entry.assistId || '',
-      title: normalizeText(entry.title).slice(0, 160),
-      doi: normalizeText(entry.doi).slice(0, 160),
-      journalName: normalizeText(entry.journalName).slice(0, 160),
-      journalShortName: normalizeText(entry.journalShortName).slice(0, 160),
-      detailUrl: sanitizeReportUrl(entry.detailUrl || ''),
-      detailUrlHostPath: deps.urlHostPath(entry.detailUrl || ''),
-      status: normalizeText(entry.status).slice(0, 80),
-      reason: describeWatcherReason(normalizeText(entry.reason)).slice(0, 220)
-    });
-    if (watcherLogBuffer.length >= WATCHER_LOG_FLUSH_BATCH_SIZE) {
-      await flushWatcherLogs();
-    } else if (!watcherLogFlushTimer) {
-      watcherLogFlushTimer = setTimeout(() => {
-        watcherLogFlushTimer = null;
-        flushWatcherLogs().catch(() => {});
-      }, WATCHER_LOG_FLUSH_INTERVAL_MS);
-    }
-  }
-
-  async function flushWatcherLogs() {
-    const batch = watcherLogBuffer.splice(0, watcherLogBuffer.length);
-    if (!batch.length) return;
-    watcherLogFlushPromise = watcherLogFlushPromise
-      .catch(() => {})
-      .then(async () => {
-        const stored = await chrome.storage.local.get(AUTO_WATCHER_LOG_KEY);
-        const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
-        const next = batch.slice().reverse().concat(logs).slice(0, MAX_LOGS);
-        await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: next });
-      });
-    await watcherLogFlushPromise;
-  }
-
-  async function clearBufferedWatcherLogs() {
-    watcherLogBuffer = [];
-    if (watcherLogFlushTimer) {
-      clearTimeout(watcherLogFlushTimer);
-      watcherLogFlushTimer = null;
-    }
-  }
-
-  function normalizeTraceLevel(value) {
-    return ['off', 'normal', 'verbose'].includes(value) ? value : 'normal';
-  }
-
-  async function getTraceLevel() {
-    const now = Date.now();
-    if (now - traceLevelLoadedAt < 30 * 1000) return cachedTraceLevel;
-    try {
-      const opts = deps?.getOptions ? await deps.getOptions() : {};
-      cachedTraceLevel = normalizeTraceLevel(opts?.watcherTraceLevel);
-      traceLevelLoadedAt = now;
-    } catch (_) {
-      cachedTraceLevel = 'normal';
-      traceLevelLoadedAt = now;
-    }
-    return cachedTraceLevel;
-  }
-
   async function appendWatcherTrace(step, details = {}) {
     try {
       const traceLevel = await getTraceLevel();
@@ -2011,1537 +1742,53 @@
     }
   }
 
-  function csvEscape(value) {
-    return '"' + String(value ?? '').replace(/"/g, '""') + '"';
-  }
-
-  function dataUrl(content, mime) {
-    return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
-  }
-
-  function sanitizeReportUrl(value) {
+  async function appendWatcherLog(entry) {
     try {
-      const url = new URL(value);
-      for (const key of Array.from(url.searchParams.keys())) {
-        if (/token|cookie|csrf|signature|credential|key|secret|auth/i.test(key)) {
-          url.searchParams.set(key, '<redacted>');
-        }
-      }
-      return url.href;
-    } catch (_) {
-      return String(value || '');
-    }
-  }
-
-  function reportDetailValue(log) {
-    if (log.detailUrl) return log.detailUrl;
-    return `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`;
-  }
-
-  async function writeReportFile(filename, content, mime, opts) {
-    if (opts.watcherDailyReportEnabled && deps.sendNativeMessage) {
-      try {
-        await deps.sendNativeMessage(opts.nativeHostName, {
-          action: 'write_text_file',
-          dir: opts.watcherReportDir || '',
-          filename,
-          content
-        }, NATIVE_REPORT_TIMEOUT_MS);
-        return;
-      } catch (err) {
-        console.warn('[Ablesci Auto Watcher] native report write failed', err);
-        return;
-      }
-    }
-    try {
-      await chrome.downloads.download({
-        url: dataUrl(content, mime),
-        filename: `${REPORT_DIR}/${filename}`,
-        conflictAction: 'overwrite',
-        saveAs: false
+      watcherLogBuffer.push({
+        time: new Date().toISOString(),
+        assistId: String(entry.assistId || entry.id || '').slice(0, 60),
+        title: normalizeText(entry.title || '').slice(0, 160),
+        doi: String(entry.doi || '').slice(0, 120),
+        journalName: normalizeText(entry.journalName || entry.journalShortName || '').slice(0, 120),
+        detailUrl: String(entry.detailUrl || '').slice(0, 500),
+        trigger: normalizeText(entry.trigger || '').slice(0, 60),
+        sessionId: normalizeText(entry.sessionId || '').slice(0, 60),
+        status: String(entry.status || 'unknown').slice(0, 20),
+        reason: normalizeText(entry.reason || '').slice(0, 200)
       });
+      if (watcherLogBuffer.length >= WATCHER_LOG_FLUSH_BATCH_SIZE) {
+        await flushWatcherLogs();
+      } else if (!watcherLogFlushTimer) {
+        watcherLogFlushTimer = setTimeout(() => {
+          watcherLogFlushTimer = null;
+          flushWatcherLogs().catch(() => {});
+        }, WATCHER_LOG_FLUSH_INTERVAL_MS);
+      }
     } catch (err) {
-      console.warn('[Ablesci Auto Watcher] report download failed', err);
+      console.warn('[Ablesci Auto Watcher] log append failed', err);
     }
   }
 
-  async function writeDailyReports() {
-    let opts = normalizeOptions(await deps.getOptions());
-    opts = await hydrateJournalAccessRulesFromConfig(opts);
-    if (!opts.watcherDailyReportEnabled) return;
-
-    const date = todayKey();
-    await flushWatcherLogs().catch(() => {});
-    await flushWatcherTrace().catch(() => {});
-    const stored = await chrome.storage.local.get([AUTO_WATCHER_STATE_KEY, AUTO_WATCHER_LOG_KEY, AUTO_WATCHER_TRACE_KEY, DEMAND_SNAPSHOTS_KEY, JOURNAL_ACCESS_STATS_KEY]);
-    const state = stored[AUTO_WATCHER_STATE_KEY] || {};
-    const daily = state.daily?.[date] || {};
-    const chromeAlarm = await chrome.alarms.get(ALARM_NAME).catch(() => null);
-    const chromeAlarmScheduledAt = chromeAlarm?.scheduledTime ? new Date(chromeAlarm.scheduledTime).toISOString() : (state.chromeAlarmScheduledAt || '');
-    const lastAttempt = state.lastAttempt || {};
-    const demandSnapshots = (Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [])
-      .filter(item => item.dayKey === date);
-    const logs = (Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [])
-      .filter(log => formatBeijingDateTime(log.time, true) === date);
-    const traces = (Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [])
-      .filter(log => formatBeijingDateTime(log.time, true) === date);
-    const journalAccessStats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
-
-    const csvHeader = [
-      'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
-      'marketRegime', 'totalSeeking', 'supplementCount', 'publisher', 'open', 'high', 'low', 'close', 'delta',
-      'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
-      'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
-      'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
-      'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
-      'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
-      'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
-      'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextAssistMarketDataAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
-      'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',
-      'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
-      'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'pickedPage', 'pageCurve', 'pageMin', 'pageMax',
-      'pageFrontHit', 'pageAlpha', 'randomSessionPicked', 'randomSessionFinalSize',
-      'randomValue', 'step', 'trigger', 'tabId', 'url', 'details'
-    ];
-    const baseReportFields = {
-      marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
-      workTimeProgressRatio: state.workTimeProgressRatio || '',
-      expectedDone: state.expectedDone || '',
-      actualDone: state.actualDone || state.monthDone || '',
-      targetError: state.targetError || state.lag || '',
-      activeTimeProgressRatio: state.activeTimeProgressRatio || '',
-      availabilityFactor: state.availabilityFactor || '',
-      availabilityActualWakeCount: state.availabilityActualWakeCount || '',
-      availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || '',
-      rateMultiplier: state.rateMultiplier || '',
-      riskUsed: daily.riskUsed || state.riskUsed || '',
-      riskLimit: state.riskLimit || '',
-      sessionSize: state.lastSession?.targetSessionSize || '',
-      sessionHandledCount: state.lastSession?.handledCount || '',
-      sessionDurationMs: state.lastSession?.sessionDurationMs || '',
-      currentStrategy: state.lastAssistStrategy || state.currentExecutionModel || '',
-      nextAssistRunAt: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
-      nextAssistStrategy: state.nextAssistStrategy || '',
-      nextAssistReason: state.nextAssistReason || '',
-      nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
-      nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
-      nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
-      nextAssistGuardMode: state.nextAssistGuardMode || '',
-      nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
-      nextAssistGuardWeight: state.nextAssistGuardWeight || '',
-      nextAssistPlannedAt: state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : '',
-      nextAssistMarketDataAt: state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : '',
-      nextWakeAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''),
-      chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
-      lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
-      lastAttemptFinishedAt: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
-      lastAttemptResult: lastAttempt.resultReason || '',
-      lastAttemptObserveSnapshot: lastAttempt.observeSnapshot === true ? 'true' : '',
-      lastAttemptTargetSessionSize: lastAttempt.targetSessionSize ?? '',
-      lastAttemptCheckedDelta: lastAttempt.checkedDelta ?? '',
-      lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',
-      lastAttemptListScanStarted: lastAttempt.listScanStarted === true ? 'true' : '',
-      lastAttemptPickedListUrl: lastAttempt.pickedListUrl || '',
-      pickedPage: lastAttempt.pickedPage ?? '',
-      pageCurve: lastAttempt.pageCurve || '',
-      pageMin: lastAttempt.pageMin ?? '',
-      pageMax: lastAttempt.pageMax ?? '',
-      pageFrontHit: lastAttempt.frontHit === true ? 'true' : '',
-      pageAlpha: lastAttempt.alpha ?? '',
-      randomSessionPicked: lastAttempt.randomSessionPicked ?? '',
-      randomSessionFinalSize: lastAttempt.randomSessionFinalSize ?? '',
-      randomValue: lastAttempt.randomValue ?? ''
-    };
-    function reportRow(type, values = {}) {
-      const row = { record_type: type, ...baseReportFields, ...values };
-      return csvHeader.map(key => row[key] ?? '');
-    }
-    function jsonLine(type, value = {}) {
-      return JSON.stringify(reportValueForJson({
-        record_type: type,
-        exportedAt: new Date().toISOString(),
-        dayKey: date,
-        ...value
-      }));
-    }
-    const observeEvents = traces
-      .filter(trace => /observe_|market_sample|demand_snapshot/i.test(`${trace.step || ''} ${trace.reason || ''}`))
-      .map(trace => reportRow('observe_event', {
-        time: formatBeijingDateTime(trace.time),
-        status: trace.step || '',
-        reason: trace.reason || '',
-        trigger: trace.trigger || '',
-        url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`
-      }));
-    const dataRows = [
-      ...demandSnapshots.map(item => jsonLine('market_sample', item)),
-      ...['m15', 'h1', 'd1'].flatMap(frame => (state.marketData?.candles?.[frame] || []).map(candle => jsonLine(`candle_${frame}`, candle))),
-      ...logs.map(log => jsonLine('assist_event', log)),
-      ...traces.map(trace => jsonLine('trace', trace)),
-      ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
-    ];
-    const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
-    const journalAccessItems = Object.entries(journalAccessStats || {}).map(([journalName, item]) => ({
-      journalName,
-      accessState: item?.accessState || 'unknown',
-      successCount: Number(item?.successCount || 0),
-      failCount: Number(item?.failCount || 0),
-      consecutiveFailCount: Number(item?.consecutiveFailCount || 0),
-      doiFailureCount: Number(item?.doiFailureCount || 0),
-      consecutiveDoiFailureCount: Number(item?.consecutiveDoiFailureCount || 0),
-      lastReason: item?.lastReason || '',
-      lastDoi: item?.lastDoi || '',
-      lastTitle: item?.lastTitle || '',
-      lastSuccessAt: item?.lastSuccessAt || '',
-      lastFailAt: item?.lastFailAt || '',
-      aliases: Array.isArray(item?.aliases) ? item.aliases : []
-    })).sort((a, b) => (
-      Number(b.consecutiveFailCount || 0) - Number(a.consecutiveFailCount || 0)
-      || Number(b.failCount || 0) - Number(a.failCount || 0)
-      || String(a.journalName || '').localeCompare(String(b.journalName || ''))
-    ));
-    const journalAccessSummary = {
-      total: journalAccessItems.length,
-      noAccess: journalAccessItems.filter(item => item.accessState === 'no_access').length,
-      partialAccess: journalAccessItems.filter(item => item.accessState === 'partial_access').length,
-      hasAccess: journalAccessItems.filter(item => item.accessState === 'has_access').length,
-      unknown: journalAccessItems.filter(item => !item.accessState || item.accessState === 'unknown').length,
-      doiRisk: journalAccessItems.filter(item => item.successCount <= 0 && item.consecutiveDoiFailureCount >= DOI_FAILURE_SKIP_THRESHOLD).length
-    };
-    const journalAccessJson = JSON.stringify(reportValueForJson({
-      updatedAt: new Date().toISOString(),
-      note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 config.local/journal-access.json 或设置页指定路径。',
-      source: opts.watcherJournalAccessRulesSource || 'chrome.storage.local cache',
-      summary: journalAccessSummary,
-      manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
-      items: journalAccessItems,
-      stats: journalAccessStats
-    }), null, 2) + '\n';
-    const journalAccessLookupJson = JSON.stringify(reportValueForJson({
-      updatedAt: new Date().toISOString(),
-      note: '轻量查询索引。插件运行时只需要类似结构即可判断列表页候选，不需要读取完整 stats。',
-      count: journalAccessItems.length,
-      index: journalAccessStatsIndexFromStats(journalAccessStats)
-    }), null, 2) + '\n';
-    const journalAccessCsvHeader = [
-      'journalName',
-      'accessState',
-      'successCount',
-      'failCount',
-      'consecutiveFailCount',
-      'doiFailureCount',
-      'consecutiveDoiFailureCount',
-      'lastReason',
-      'lastDoi',
-      'lastSuccessAt',
-      'lastFailAt',
-      'aliases'
-    ];
-    const journalAccessCsv = [
-      journalAccessCsvHeader,
-      ...journalAccessItems.map(item => [
-        item.journalName,
-        item.accessState,
-        item.successCount,
-        item.failCount,
-        item.consecutiveFailCount,
-        item.doiFailureCount,
-        item.consecutiveDoiFailureCount,
-        item.lastReason,
-        item.lastDoi,
-        item.lastSuccessAt ? formatBeijingDateTime(item.lastSuccessAt) : '',
-        item.lastFailAt ? formatBeijingDateTime(item.lastFailAt) : '',
-        item.aliases.join(' | ')
-      ])
-    ].map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
-    const journalAccessMd = [
-      '# Journal Access Stats',
-      '',
-      `Updated: ${formatBeijingDateTime(new Date())}`,
-      '',
-      '## Summary',
-      '',
-      `- Total: ${journalAccessSummary.total}`,
-      `- No access: ${journalAccessSummary.noAccess}`,
-      `- Partial access: ${journalAccessSummary.partialAccess}`,
-      `- Has access: ${journalAccessSummary.hasAccess}`,
-      `- Unknown: ${journalAccessSummary.unknown}`,
-      `- DOI risk: ${journalAccessSummary.doiRisk}`,
-      '',
-      '## Highest Risk',
-      '',
-      '| Journal | State | Success | Fail | Consecutive Fail | DOI Fail | Reason | Aliases |',
-      '| --- | --- | ---: | ---: | ---: | ---: | --- | --- |',
-      ...journalAccessItems.slice(0, 80).map(item => [
-        item.journalName,
-        item.accessState,
-        item.successCount,
-        item.failCount,
-        item.consecutiveFailCount,
-        item.consecutiveDoiFailureCount,
-        item.lastReason,
-        item.aliases.slice(0, 6).join(', ')
-      ].map(value => String(value || '').replace(/\|/g, '\\|')).join(' | ')).map(row => `| ${row} |`),
-      '',
-      '## Files',
-      '',
-      '- `journal-access/stats.json`: full machine-readable stats.',
-      '- `journal-access/stats.csv`: sortable table for manual review.',
-      '- `journal-access/summary.md`: compact human-readable view.',
-      '- `journal-access.json`: compatibility copy at report root.',
-      ''
-    ].join('\n');
-    const csvRows = [
-      csvHeader,
-      reportRow('summary', {
-        time: formatBeijingDateTime(new Date()),
-        status: state.currentExecutionModel || state.schedulerModelMode || 'simple',
-        reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} observe=${Number(daily.manualObserveRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`,
-        totalSeeking: state.lastDemandSnapshot?.totalSeeking || '',
-        supplementCount: state.lastDemandSnapshot?.supplementCount || '',
-        delta: state.recentH1DemandDelta || state.marketData?.h1Delta || ''
-      }),
-      reportRow('session', {
-        time: formatBeijingDateTime(state.lastSession?.finishedAt || state.lastSession?.startedAt || new Date()),
-        sessionId: state.lastSession?.id || '',
-        status: state.lastSession?.status || '',
-        reason: state.lastSession?.cooldownMinutes ? `cooldown=${state.lastSession.cooldownMinutes}m` : ''
-      }),
-      reportRow('assist_strategy', {
-        time: state.lastAssistDecisionAt ? formatBeijingDateTime(state.lastAssistDecisionAt) : formatBeijingDateTime(new Date()),
-        status: state.lastAssistStrategy || '',
-        reason: reportJson(state.lastAssistDecision || {})
-      }),
-      reportRow('next_assist', {
-        time: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
-        status: state.nextAssistStrategy || '',
-        reason: reportJson(state.nextAssistPlan || {})
-      }),
-      reportRow('last_attempt', {
-        time: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
-        status: lastAttempt.resultReason || '',
-        reason: reportJson(lastAttempt || {}),
-        trigger: lastAttempt.trigger || '',
-        url: lastAttempt.pickedListUrl || ''
-      }),
-      ...observeEvents,
-      ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
-        time: formatBeijingDateTime(new Date()),
-        publisher: item.source || '',
-        score: item.score || '',
-        estimatedSuccessRate: item.estimatedSuccessRate || '',
-        demandPressure: item.demandPressure || '',
-        sourceTrend: item.sourceTrend || ''
-      })),
-      ...logs.map(log => reportRow('log', {
-        time: formatBeijingDateTime(log.time),
-        sessionId: log.sessionId || '',
-        trigger: log.trigger || '',
-        assistId: log.assistId || '',
-        doi: log.doi || '',
-        journalName: log.journalName || '',
-        detailUrl: reportDetailValue(log),
-        status: log.status || '',
-        reason: log.reason || ''
-      }))
-    ];
-    const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
-    const skipDecisionRows = [
-      ...logs
-        .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
-        .map(log => ({
-          time: log.time,
-          trigger: log.trigger || '',
-          step: log.status || '',
-          reason: log.reason || '',
-          detail: reportDetailValue(log) || log.journalName || log.doi || ''
-        })),
-      ...traces
-        .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
-        .map(trace => ({
-          time: trace.time,
-          trigger: trace.trigger || '',
-          step: trace.step || '',
-          reason: trace.reason || '',
-          detail: reportJson(trace.details || {}).slice(0, 220)
-        }))
-    ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
-
-    const monthDir = date.slice(0, 7);
-    const reportStem = `${monthDir}/${date}`;
-    const md = [
-      `# Ablesci Watcher Daily Report ${date}`,
-      '',
-      '## Summary',
-      '',
-      `- Checked: ${Number(daily.checked || 0)}`,
-      `- Downloaded or queued: ${Number(daily.downloaded || 0)}`,
-      `- Uploaded: ${Number(daily.uploaded || 0)}`,
-      `- Skipped: ${Number(daily.skipped || 0)}`,
-      `- Failed: ${Number(daily.failed || 0)}`,
-      `- Notified: ${Number(daily.notified || 0)}`,
-      `- Speed mode: ${state.speedMode || 'normal'}`,
-      `- Demand regime: ${state.demandRegime || 'normal'}`,
-      `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
-      `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
-      `- Current assist strategy: ${state.lastAssistStrategy || ''}`,
-      `- Next wake: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
-      `- Next assist attempt: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
-      `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
-      `- Next assist plan data: planned=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}, market=${state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : ''}`,
-      `- Latest sample affects: ${state.marketDataAffects || ''}`,
-      `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
-      `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
-      `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
-      `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
-      `- Last attempt time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
-      `- Last attempt trigger: ${lastAttempt.trigger || ''}`,
-      `- Last attempt result: ${lastAttempt.resultReason || ''}`,
-      `- Last attempt observe: ${lastAttempt.observeSnapshot === true ? 'yes' : 'no'} ${lastAttempt.observeReason || ''}`,
-      `- Last attempt target session size: ${lastAttempt.targetSessionSize ?? ''}`,
-      `- Last attempt checked delta: ${lastAttempt.checkedDelta ?? ''}`,
-      `- Last attempt downloaded delta: ${lastAttempt.downloadedDelta ?? ''}`,
-      `- Last attempt list scan started: ${lastAttempt.listScanStarted === true ? 'yes' : 'no'}`,
-      `- Last attempt picked list URL: ${lastAttempt.pickedListUrl || ''}`,
-      `- Last attempt random session: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, random=${lastAttempt.randomValue ?? ''}`,
-      `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
-      `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
-      `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
-      `- Active progress / availability: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
-      `- Active wake count expected / actual: ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
-      `- Expected / actual / error: ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-      `- Rate multiplier: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
-      `- Hour target: ${Number(state.hourTarget || 0)}`,
-      `- Risk used / limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
-      `- Recent 1h demand delta: ${Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)}`,
-      `- Today target: ${Number(state.todayTarget || 0)}`,
-      `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
-      `- Detailed data file: ${monthDir}/watcher-data-${date}.jsonl`,
-      `- Journal access files: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
-      `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
-      `- Session ID: ${state.lastSession?.id || ''}`,
-      `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
-      `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
-      `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
-      `- Trace events: ${traces.length}`,
-      '',
-      '## Bandit',
-      '',
-      '| Publisher | Score | Estimated Success | Demand Pressure |',
-      '| --- | --- | --- | --- |',
-      ...(state.banditTopPublishers || []).slice(0, 8).map(item =>
-        `| ${String(item.source || '').replace(/\|/g, '\\|')} | ${Number(item.score || 0).toFixed(4)} | ${Number(item.estimatedSuccessRate || 0).toFixed(4)} | ${Number(item.demandPressure || 0).toFixed(4)} |`
-      ),
-      '',
-      '## Skips And Decisions',
-      '',
-      '| Time | Trigger | Step | Reason | Detail | Date |',
-      '| --- | --- | --- | --- | --- | --- |',
-      ...skipDecisionRows.map(row => [
-        formatBeijingTimeOnly(row.time),
-        row.trigger,
-        row.step,
-        row.reason,
-        row.detail,
-        formatBeijingDateOnly(row.time)
-      ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
-      '',
-      '## Observe Events',
-      '',
-      '| Time | Trigger | Step | Reason | URL |',
-      '| --- | --- | --- | --- | --- |',
-      ...observeEvents.slice(0, 20).map(row => {
-        const record = {};
-        csvHeader.forEach((key, index) => { record[key] = row[index]; });
-        return [
-          record.time,
-          record.trigger,
-          record.status,
-          record.reason,
-          record.url
-        ].map(v => String(v || '').replace(/\|/g, '\\|')).join(' | ');
-      }).map(row => `| ${row} |`),
-      '',
-      '## Recent Events',
-      '',
-      '| Time | Trigger | Status | Reason | Journal | DOI | Detail |',
-      '| --- | --- | --- | --- | --- | --- | --- |',
-      ...logs.slice(0, 12).map(log => [
-        formatBeijingDateTime(log.time),
-        log.trigger || '',
-        log.status || '',
-        log.reason || '',
-        log.journalName || '',
-        log.doi || '',
-        reportDetailValue(log)
-      ].map(v => String(v).replace(/\|/g, '\\|')).join(' | '))
-        .map(row => `| ${row} |`),
-      ''
-    ].join('\n');
-
-    await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
-    await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
-    await writeReportFile(`${monthDir}/watcher-data-${date}.jsonl`, detailJsonl, 'application/x-ndjson', opts);
-    await writeReportFile('journal-access/summary.md', journalAccessMd, 'text/markdown', opts);
-    await writeReportFile('journal-access/stats.csv', journalAccessCsv, 'text/csv', opts);
-    await writeReportFile('journal-access/stats.json', journalAccessJson, 'application/json', opts);
-    await writeReportFile('journal-access/index.json', journalAccessLookupJson, 'application/json', opts);
-    await writeReportFile('journal-access.json', journalAccessJson, 'application/json', opts);
-  }
-
-  function getProcessedKey(candidate, payload) {
-    return payload?.assistId || candidate?.assistId || candidate?.detailUrl || '';
-  }
-
-  async function wasRecentlyProcessed(candidate) {
-    const key = getProcessedKey(candidate);
-    if (!key) return false;
-    const state = await getWatcherState();
-    const item = state.processed?.[key];
-    if (!item) return false;
-    // List-level filter skips can be false positives because the list page is
-    // compact and mixes title/status/type text. Re-check them through detail.
-    if (item.status === 'skipped' && /^(reported|rejected|supplement|book_chapter|patent_report|risk_text)$/.test(String(item.reason || ''))) {
-      return false;
-    }
-    return true;
-  }
-
-  function candidatePublisherName(candidate) {
-    return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
-  }
-
-  function normalizeDocumentType(text) {
-    const value = normalizeText(text);
-    if (!value) return '';
-    if (/补充材料|supporting information|supplement/i.test(value)) return 'supplement';
-    if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(value)) return 'book_chapter';
-    if (/专利、报告等|专利|patent|report/i.test(value)) return 'patent_report';
-    return '';
-  }
-
-  function normalizeJournalKey(value) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/&/g, ' and ')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function journalRuleNames(entry) {
-    if (typeof entry === 'string') return [entry];
-    if (!entry || typeof entry !== 'object') return [];
-    const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
-    return [entry.short, entry.full, entry.journal, entry.name, ...aliases].filter(Boolean);
-  }
-
-  function parseJournalAccessRules(raw) {
-    try {
-      const parsed = JSON.parse(String(raw || '{}'));
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
-      return {
-        blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
-        allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
-        partial: Array.isArray(parsed.partial) ? parsed.partial : []
-      };
-    } catch (_) {
-      return { blocked: [], allowed: [], partial: [] };
-    }
-  }
-
-  function candidateJournalNames(candidate, payload = null) {
-    return [
-      payload?.journalShortName,
-      payload?.journalName,
-      candidate?.journalFullName,
-      candidate?.journalShortName,
-      ...(Array.isArray(candidate?.journalAliases) ? candidate.journalAliases : []),
-      candidate?.title
-    ].filter(Boolean);
-  }
-
-  function journalShortNameMapFromState(state = {}) {
-    const map = state.journalShortNameMap || state[JOURNAL_SHORT_NAME_MAP_KEY] || {};
-    return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
-  }
-
-  function journalShortNameMapEntry(map, shortName) {
-    const key = normalizeJournalKey(shortName);
-    if (!key) return null;
-    const item = map[key] || map[shortName] || null;
-    if (typeof item === 'string') return { short: shortName, full: item, aliases: [] };
-    if (item && typeof item === 'object') return item;
-    return null;
-  }
-
-  function enrichCandidateJournalFromMap(candidate, state = {}) {
-    if (!candidate || !candidate.journalShortName) return candidate;
-    const entry = journalShortNameMapEntry(journalShortNameMapFromState(state), candidate.journalShortName);
-    if (!entry) return candidate;
-    const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
-    return {
-      ...candidate,
-      journalFullName: entry.full || entry.journal || entry.name || candidate.journalFullName || '',
-      journalAliases: [entry.short, entry.full, entry.journal, entry.name, ...aliases].filter(Boolean)
-    };
-  }
-
-  async function rememberJournalShortNameMapping(candidate, payload) {
-    const shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
-    const fullName = normalizeText(payload?.journalName || '');
-    if (!shortName || !fullName) return;
-    if (normalizeJournalKey(shortName) === normalizeJournalKey(fullName)) return;
-    const state = await getWatcherState();
-    const map = journalShortNameMapFromState(state);
-    const key = normalizeJournalKey(shortName);
-    const existing = journalShortNameMapEntry(map, shortName) || {};
-    const aliases = Array.from(new Set([
-      ...(Array.isArray(existing.aliases) ? existing.aliases : []),
-      shortName,
-      fullName
-    ].filter(Boolean)));
-    map[key] = {
-      short: shortName,
-      full: fullName,
-      aliases,
-      source: 'assist_detail',
-      updatedAt: new Date().toISOString()
-    };
-    state.journalShortNameMap = map;
-    await saveWatcherState(state);
-    await appendWatcherTrace('journal_short_name_mapped', {
-      reason: 'detail_journal_mapping',
-      assistId: payload?.assistId || candidate?.assistId || '',
-      detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
-      shortName,
-      fullName
-    });
-  }
-
-  function journalAccessStatsRank(item = {}) {
-    const accessState = String(item.accessState || '');
-    if (accessState === 'no_access') return 4;
-    if (accessState === 'partial_access') return 3;
-    if (accessState === 'has_access') return 2;
-    return 1;
-  }
-
-  function journalAccessStatsIndexFromStats(stats = {}) {
-    const index = {};
-    for (const [journalName, item] of Object.entries(stats || {})) {
-      if (!item) continue;
-      const aliases = Array.isArray(item.aliases) ? item.aliases : [];
-      const names = [journalName, ...aliases].map(normalizeJournalKey).filter(Boolean);
-      for (const name of names) {
-        const existing = index[name];
-        if (!existing || journalAccessStatsRank(item) > journalAccessStatsRank(existing.item)) {
-          index[name] = { accessState: String(item.accessState || ''), item, journalName };
-        }
-      }
-    }
-    return index;
-  }
-
-  async function hydrateJournalAccessStatsIndex(state = {}) {
-    const stored = await chrome.storage.local.get([JOURNAL_ACCESS_LOOKUP_KEY, JOURNAL_ACCESS_STATS_KEY]);
-    const lookup = stored[JOURNAL_ACCESS_LOOKUP_KEY];
-    const hasLookup = lookup && typeof lookup === 'object' && lookup.index && typeof lookup.index === 'object';
-    const stats = hasLookup ? null : (stored[JOURNAL_ACCESS_STATS_KEY] || {});
-    const index = hasLookup ? lookup.index : journalAccessStatsIndexFromStats(stats);
-    Object.defineProperty(state, '__journalAccessStatsIndex', {
-      value: index,
-      enumerable: false,
-      configurable: true
-    });
-    Object.defineProperty(state, '__journalAccessStatsCount', {
-      value: hasLookup ? Number(lookup.count || 0) : Object.keys(stats || {}).length,
-      enumerable: false,
-      configurable: true
-    });
-    Object.defineProperty(state, '__journalAccessStatsIndexSize', {
-      value: Object.keys(index).length,
-      enumerable: false,
-      configurable: true
-    });
-    return state;
-  }
-
-  function journalAccessStatsStateFor(candidate, payload = null, state = {}) {
-    const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
-    if (!names.length) return { accessState: '', item: null, journalName: '' };
-    const index = state?.__journalAccessStatsIndex || {};
-    for (const name of names) {
-      if (index[name]) return index[name];
-    }
-    return { accessState: '', item: null, journalName: '' };
-  }
-
-  function isListCandidateHighRiskByStats(candidate, state = {}) {
-    const stat = journalAccessStatsStateFor(candidate, null, state);
-    const consecutiveFailCount = Number(stat.item?.consecutiveFailCount || 0);
-    const successCount = Number(stat.item?.successCount || 0);
-    return stat.accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= HIGH_RISK_FAIL_THRESHOLD;
-  }
-
-  function isLikelyRscCandidate(candidate = {}) {
-    const haystack = [
-      candidate.publisherName,
-      candidate.source,
-      candidate.listUrl,
-      candidate.detailUrl,
-      candidate.rowText
-    ].map(value => String(value || '')).join(' ');
-    return /rsc|royal society of chemistry/i.test(haystack);
-  }
-
-  function isListCandidateDoiHighRiskByStats(candidate, state = {}) {
-    if (!isLikelyRscCandidate(candidate)) return false;
-    const stat = journalAccessStatsStateFor(candidate, null, state);
-    const item = stat.item || {};
-    const successCount = Number(item.successCount || 0);
-    const consecutiveDoiFailureCount = Number(item.consecutiveDoiFailureCount || 0);
-    return successCount <= 0 && consecutiveDoiFailureCount >= DOI_FAILURE_SKIP_THRESHOLD;
-  }
-
-  function journalAccessRuleFor(candidate, opts = {}, payload = null) {
-    const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
-    if (!names.length) return { state: '', entry: null };
-    const rules = parseJournalAccessRules(opts.watcherJournalAccessRules || '');
-    for (const [state, list] of [['blocked', rules.blocked], ['allowed', rules.allowed], ['partial', rules.partial]]) {
-      for (const entry of list) {
-        const entryNames = journalRuleNames(entry).map(normalizeJournalKey).filter(Boolean);
-        if (entryNames.some(name => names.includes(name))) return { state, entry };
-      }
-    }
-    return { state: '', entry: null };
-  }
-
-  function describeWatcherReason(reason) {
-    const code = normalizeText(reason);
-    const labels = {
-      missing_detail_url: '列表项没有求助详情链接',
-      sticky_assist: '置顶求助默认跳过',
-      not_waiting: '当前不是可应助状态',
-      reported: '已按设置跳过举报/违规提示求助',
-      rejected: '已按设置跳过驳回应助记录求助',
-      supplement: '已按设置跳过补充材料求助',
-      book_chapter: '已按设置跳过书籍章节求助',
-      patent_report: '已按设置跳过专利/报告类求助',
-      risk_text: '已按设置跳过含异常文本的求助',
-      missing_assist_id: '详情页缺少求助 ID',
-      missing_doi: '已按设置跳过没有 DOI 的求助',
-      missing_pdf_url: '详情页没有识别到可下载 PDF',
-      detail_book_chapter: '详情页识别为书籍章节，已跳过',
-      detail_patent_report: '详情页识别为专利/报告类，已跳过',
-      detail_supplement: '详情页识别为补充材料，已跳过',
-      detail_rejected_history: '详情页存在驳回应助历史，已跳过',
-      detail_reported_warning: '详情页存在举报/违规提示，已跳过',
-      detail_system_risk: '详情页存在系统风险提示，已跳过',
-      detail_remark: '详情页存在备注，已按设置跳过',
-      detail_risk_text: '详情页命中风险文本，已跳过',
-      journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过',
-      list_high_risk_journal: '列表页期刊短名映射到连续失败期刊，已直接跳过',
-      list_doi_failure_journal: 'RSC 期刊 DOI 连续失败较多，列表页直接跳过'
-    };
-    return labels[code] ? `${code} - ${labels[code]}` : code;
-  }
-
-  function candidateModelScore(candidate, state) {
-    const model = state?.publisherModel || {};
-    const publisher = candidatePublisherName(candidate);
-    const item = model.publishers?.[publisher] || model.publishers?.Unknown || {};
-    const doiBonus = candidate?.hasDoi ? 0.25 : 0;
-    const demandWeight = Number(item.weight || 0.4);
-    const successRate = Number(item.successRate || 0.5);
-    const accessRule = journalAccessRuleFor(candidate, state?.optionsSnapshot || {});
-    const accessBonus = accessRule.state === 'allowed' ? 0.55 : (accessRule.state === 'partial' ? 0.25 : 0);
-    return demandWeight * successRate + doiBonus + accessBonus;
-  }
-
-  function orderCandidatesForRun(candidates, state, opts = {}, count = 1) {
-    const list = Array.isArray(candidates) ? candidates.slice() : [];
-    if (opts.watcherAdvancedSchedulerEnabled) return selectBanditCandidates(list, state, state.marketData, Math.max(1, count));
-    if (state?.schedulerModelMode !== 'advanced') return list;
-    const scored = list.map(candidate => candidateModelScore(candidate, state));
-    const median = medianNumber(scored) ?? 0;
-    const preferred = [];
-    const fallback = [];
-    list.forEach((candidate, index) => {
-      (scored[index] >= median ? preferred : fallback).push(candidate);
-    });
-    return preferred.concat(fallback);
-  }
-
-  function parseAssistListPage() {
-    function normalizeTextLocal(value) {
-      return String(value || '').replace(/\s+/g, ' ').trim();
-    }
-    function normalizeDocumentTypeLocal(value) {
-      const textValue = normalizeTextLocal(value);
-      if (!textValue) return '';
-      if (/补充材料|supporting information|supplement/i.test(textValue)) return 'supplement';
-      if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(textValue)) return 'book_chapter';
-      if (/专利、报告等|专利|patent|report/i.test(textValue)) return 'patent_report';
-      return '';
-    }
-    function text(el) {
-      return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
-    }
-    function numberFromText(value) {
-      const m = String(value || '').replace(/,/g, '').match(/\d+/);
-      return m ? Number(m[0]) : null;
-    }
-    function absUrl(href) {
-      try { return new URL(href, location.href).href; } catch (_) { return ''; }
-    }
-    function doiFrom(textValue) {
-      const match = String(textValue || '').match(/10\.\d{4,9}\/[\S"'<>]+/i);
-      if (!match) return '';
-      return match[0].split('#')[0].split('?')[0].replace(/[)\].,;，。]+$/, '');
-    }
-    const bodyText = text(document.body);
-    if (/Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText)) {
-      return { cfChallenge: true, candidates: [] };
-    }
-
-    const totalSeeking = numberFromText(text(Array.from(document.querySelectorAll('.fly-filter a'))
-      .find(a => /求助中/.test(text(a)))));
-    const supplementCount = numberFromText(text(Array.from(document.querySelectorAll('.fly-filter a'))
-      .find(a => /补充材料/.test(text(a)))));
-    const publisherCounts = {};
-    Array.from(document.querySelectorAll('.waiting-publisher-item')).forEach(item => {
-      const imgTitle = item.querySelector('img[title]')?.getAttribute('title') || '';
-      const title = imgTitle || String(item.getAttribute('title') || '').replace(/^查看\s+|\s+的所有求助$/g, '');
-      const count = numberFromText(text(item.querySelector('.waiting-publisher-item-num')));
-      if (title && Number.isFinite(count)) publisherCounts[title] = count;
-    });
-    const demandSnapshot = {
-      sourceUrl: location.href,
-      totalSeeking: Number.isFinite(totalSeeking) ? totalSeeking : null,
-      supplementCount: Number.isFinite(supplementCount) ? supplementCount : null,
-      publisherCounts
-    };
-
-    const rows = Array.from(document.querySelectorAll('ul.assist-list > li, .assist-list li'));
-    const candidates = rows.map((row, index) => {
-      const detailAnchor = row.querySelector('a[href*="/assist/detail"][title*="查看详情"]') ||
-        row.querySelector('.assist-list-title a[href*="/assist/detail"]') ||
-        row.querySelector('a[href*="/assist/detail"]');
-      const handleAnchor = row.querySelector('.assist-status-badge');
-      const title = text(detailAnchor).replace(/^\[高分\]\s*/, '');
-      const rowText = text(row);
-      const detailUrl = absUrl(detailAnchor?.getAttribute('href') || detailAnchor?.href || '');
-      const assistId = row.querySelector('.assist-id-val')?.value || new URLSearchParams(detailUrl.split('?')[1] || '').get('id') || '';
-      const classText = [detailAnchor?.className || '', row.className || ''].join(' ');
-      const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
-      const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
-      const journalShortName = Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
-        .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
-        .map(span => span.getAttribute('title') || text(span))
-        .find(Boolean) || '';
-      const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
-      const documentType = normalizeDocumentTypeLocal(typeText);
-      const doi = doiFrom(rowText);
-      return {
-        assistId,
-        detailUrl,
-        title,
-        rowText,
-        doi,
-        hasDoi: !!doi,
-        publisherName,
-        journalShortName,
-        reported: /举报|被举报|涉嫌违规/.test(rowText),
-        rejected: /驳回|已驳回/.test(rowText),
-        supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
-        documentType,
-        documentTypeText: normalizeTextLocal(typeText),
-        statusText,
-        sticky: /stick-assist|置顶/.test(classText + ' ' + rowText),
-        index
-      };
-    }).filter(item => item.detailUrl);
-
-    const debug = {
-      readyState: document.readyState || '',
-      title: document.title || '',
-      rowCount: rows.length,
-      detailLinkCount: document.querySelectorAll('a[href*="/assist/detail"]').length,
-      publisherItemCount: document.querySelectorAll('.waiting-publisher-item').length,
-      flyFilterCount: document.querySelectorAll('.fly-filter a').length,
-      bodyLength: bodyText.length,
-      loginLike: /登录|请先登录|login/i.test(bodyText)
-    };
-
-    return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot, debug };
-  }
-
-  function waitForAssistListDom(timeoutMs = 9000) {
-    function text(el) {
-      return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
-    }
-    function snapshot(ready) {
-      const bodyText = text(document.body);
-      const detailLinkCount = document.querySelectorAll('a[href*="/assist/detail"]').length;
-      const rowCount = document.querySelectorAll('ul.assist-list > li, .assist-list li').length;
-      const publisherItemCount = document.querySelectorAll('.waiting-publisher-item').length;
-      const flyFilterCount = document.querySelectorAll('.fly-filter a').length;
-      const cfChallenge = /Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText);
-      return {
-        ready,
-        readyState: document.readyState || '',
-        title: document.title || '',
-        detailLinkCount,
-        rowCount,
-        publisherItemCount,
-        flyFilterCount,
-        cfChallenge,
-        loginLike: /登录|请先登录|login/i.test(bodyText),
-        bodyLength: bodyText.length
-      };
-    }
-    function isReady() {
-      const snap = snapshot(false);
-      return snap.cfChallenge || snap.detailLinkCount > 0 || snap.rowCount > 0;
-    }
-    if (isReady()) return Promise.resolve(snapshot(true));
-    return new Promise(resolve => {
-      let done = false;
-      let observer = null;
-      const startedAt = Date.now();
-      const finish = ready => {
-        if (done) return;
-        done = true;
-        clearInterval(timer);
-        clearTimeout(timeout);
-        try { observer?.disconnect(); } catch (_) {}
-        const snap = snapshot(ready);
-        snap.elapsedMs = Date.now() - startedAt;
-        resolve(snap);
-      };
-      const check = () => {
-        if (isReady()) finish(true);
-      };
-      const timer = setInterval(check, 250);
-      const timeout = setTimeout(() => finish(false), timeoutMs);
-      try {
-        observer = new MutationObserver(check);
-        observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
-      } catch (_) {}
-      check();
-    });
-  }
-
-  function isListCandidateAllowed(candidate, opts) {
-    const textValue = [candidate.rowText, candidate.title, candidate.statusText].join(' ');
-    if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
-    if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
-    if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
-    if (journalAccessRuleFor(candidate, opts).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
-    return { ok: true };
-  }
-
-  function isDetailAllowedForWatcher(payload, opts) {
-    if (!payload?.assistId) return { ok: false, reason: 'missing_assist_id' };
-    const flags = payload.riskFlags || {};
-    const textValue = [
-      payload.statusText || '',
-      payload.riskText || '',
-      payload.documentTypeLabel || ''
-    ].join(' ');
-
-    if (opts.watcherSkipBookChapter && payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
-    if (opts.watcherSkipPatentReport && payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
-    if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement)) return { ok: false, reason: 'detail_supplement' };
-    if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
-    if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
-    if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
-    if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
-    if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
-    if (journalAccessRuleFor({}, opts, payload).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
-    if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
-      return { ok: false, reason: 'detail_risk_text' };
-    }
-    return { ok: true };
-  }
-
-  function isRscPayload(payload) {
-    let host = '';
-    try { host = new URL(payload?.pdfUrl || 'https://invalid.local').hostname; } catch (_) {}
-    return /(^|\.)pubs\.rsc\.org$/i.test(host) ||
-      /\brsc\b|royal\s+society\s+of\s+chemistry/i.test([payload?.journalName, payload?.publisherName, payload?.pdfUrl].join(' '));
-  }
-
-  async function isHighRiskJournal(journalName, payload = null) {
-    const journal = normalizeText(journalName);
-    if (!journal) return false;
-    const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
-    const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
-    const item = stats[journal];
-    if (!item) return false;
-    const consecutiveFailCount = Number(item.consecutiveFailCount || 0);
-    const successCount = Number(item.successCount || 0);
-    const accessState = String(item.accessState || '');
-    if (accessState === 'has_access' || accessState === 'partial_access') return false;
-    if (successCount > 0) return false;
-    return consecutiveFailCount >= HIGH_RISK_FAIL_THRESHOLD;
-  }
-
-  async function waitForTabComplete(tabId, timeoutMs = 45000) {
-    return await new Promise((resolve, reject) => {
-      let done = false;
-      const timer = setTimeout(() => finish(false, new Error('tab_load_timeout')), timeoutMs);
-      function finish(ok, value) {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        chrome.tabs.onUpdated.removeListener(listener);
-        ok ? resolve(value) : reject(value);
-      }
-      function listener(updatedTabId, changeInfo, tab) {
-        if (updatedTabId !== tabId) return;
-        if (changeInfo.status === 'complete') finish(true, tab);
-      }
-      chrome.tabs.onUpdated.addListener(listener);
-      chrome.tabs.get(tabId).then(tab => {
-        if (tab.status === 'complete') finish(true, tab);
-      }).catch(err => finish(false, err));
-    });
-  }
-
-  async function openHiddenTab(url, purpose = 'hidden') {
-    await appendWatcherTrace('tab_open_request', { reason: purpose, url });
-    try {
-      const tab = await chrome.tabs.create({ url, active: false });
-      await appendWatcherTrace('tab_opened', { reason: purpose, url: tab.url || url, tabId: tab.id, active: tab.active === true });
-      const completedTab = await waitForTabComplete(tab.id);
-      await appendWatcherTrace('tab_complete', { reason: purpose, url: completedTab?.url || tab.url || url, tabId: tab.id });
-      return tab;
-    } catch (err) {
-      await appendWatcherTrace('tab_open_failed', { reason: purpose, url, error: err?.message || String(err) });
-      throw err;
-    }
-  }
-
-  async function closeTabQuietly(tabId, reason = 'cleanup') {
-    if (!tabId) return;
-    await appendWatcherTrace('tab_close_request', { reason, tabId });
-    try {
-      await chrome.tabs.remove(tabId);
-      await appendWatcherTrace('tab_closed', { reason, tabId });
-    } catch (err) {
-      await appendWatcherTrace('tab_close_failed', { reason, tabId, error: err?.message || String(err) });
-    }
-  }
-
-  async function parseListUrl(url) {
-    const tab = await openHiddenTab(url, 'parse_list');
-    try {
-      const readyResult = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: waitForAssistListDom,
-        args: [9000]
+  async function flushWatcherLogs() {
+    const batch = watcherLogBuffer.splice(0, watcherLogBuffer.length);
+    if (!batch.length) return;
+    watcherLogFlushPromise = watcherLogFlushPromise
+      .catch(() => {})
+      .then(async () => {
+        const stored = await chrome.storage.local.get(AUTO_WATCHER_LOG_KEY);
+        const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
+        const next = batch.slice().reverse().concat(logs).slice(0, MAX_LOGS);
+        await chrome.storage.local.set({ [AUTO_WATCHER_LOG_KEY]: next });
       });
-      const readiness = readyResult?.[0]?.result || {};
-      await appendWatcherTrace('list_dom_ready', {
-        reason: readiness.ready ? 'assist_list_dom_ready' : 'assist_list_dom_timeout',
-        url,
-        tabId: tab.id,
-        ready: readiness.ready === true,
-        elapsedMs: readiness.elapsedMs ?? '',
-        readyState: readiness.readyState || '',
-        title: readiness.title || '',
-        rowCount: readiness.rowCount ?? '',
-        detailLinkCount: readiness.detailLinkCount ?? '',
-        publisherItemCount: readiness.publisherItemCount ?? '',
-        flyFilterCount: readiness.flyFilterCount ?? '',
-        cfChallenge: readiness.cfChallenge === true,
-        loginLike: readiness.loginLike === true,
-        bodyLength: readiness.bodyLength ?? ''
-      });
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: parseAssistListPage
-      });
-      const parsed = result?.[0]?.result || { cfChallenge: false, candidates: [] };
-      await appendWatcherTrace('list_parse_result', {
-        reason: 'parse_list',
-        url,
-        tabId: tab.id,
-        cfChallenge: parsed.cfChallenge === true,
-        candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-        totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
-        publisherCount: Object.keys(parsed.demandSnapshot?.publisherCounts || {}).length,
-        rowCount: parsed.debug?.rowCount ?? '',
-        detailLinkCount: parsed.debug?.detailLinkCount ?? '',
-        publisherItemCount: parsed.debug?.publisherItemCount ?? '',
-        flyFilterCount: parsed.debug?.flyFilterCount ?? '',
-        loginLike: parsed.debug?.loginLike === true,
-        pageTitle: parsed.debug?.title || ''
-      });
-      return parsed;
-    } finally {
-      await closeTabQuietly(tab.id, 'list_parse_finished');
-    }
+    await watcherLogFlushPromise;
   }
 
-  async function sendDetailMessage(tabId) {
-    return await chrome.tabs.sendMessage(tabId, { type: 'ablesciExtractDetailPayload' });
-  }
-
-  async function extractDetailPayload(tabId) {
-    for (let i = 0; i < 5; i += 1) {
-      try {
-        const response = await sendDetailMessage(tabId);
-        if (response) return response;
-      } catch (_) {}
-      await new Promise(resolve => setTimeout(resolve, 500));
+  async function clearBufferedWatcherLogs() {
+    watcherLogBuffer = [];
+    if (watcherLogFlushTimer) {
+      clearTimeout(watcherLogFlushTimer);
+      watcherLogFlushTimer = null;
     }
-
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['adapters.js', 'content_ablesci.js']
-    });
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return await sendDetailMessage(tabId);
-  }
-
-  async function inspectDetail(candidate) {
-    const tab = await openHiddenTab(candidate.detailUrl, 'inspect_detail');
-    try {
-      const response = await extractDetailPayload(tab.id);
-      if (!response?.ok) {
-        await appendWatcherTrace('detail_extract_failed', {
-          reason: response?.error || 'extract_detail_failed',
-          detailUrl: candidate.detailUrl,
-          tabId: tab.id,
-          assistId: candidate.assistId || ''
-        });
-        return { ok: false, reason: response?.error || 'extract_detail_failed', tabId: tab.id };
-      }
-      await appendWatcherTrace('detail_extract_result', {
-        reason: 'detail_payload_ok',
-        detailUrl: candidate.detailUrl,
-        tabId: tab.id,
-        assistId: response.payload?.assistId || candidate.assistId || '',
-        doi: response.payload?.doi || candidate.doi || '',
-        journalShortName: candidate.journalShortName || '',
-        journalName: response.payload?.journalName || ''
-      });
-      await rememberJournalShortNameMapping(candidate, response.payload);
-      return { ok: true, payload: response.payload, tabId: tab.id };
-    } catch (err) {
-      await appendWatcherTrace('detail_extract_error', {
-        reason: err?.message || String(err),
-        detailUrl: candidate.detailUrl,
-        tabId: tab.id,
-        assistId: candidate.assistId || ''
-      });
-      return { ok: false, reason: err?.message || String(err), tabId: tab.id };
-    }
-  }
-
-  function makeWatcherPort(context) {
-    function settle(result) {
-      if (!context || context.settled) return;
-      context.settled = true;
-      if (context.resolve) context.resolve(result);
-    }
-    return {
-      name: 'ablesci-auto-watcher',
-      postMessage(msg) {
-        if (!msg || !context) return;
-        if (msg.type === 'error') {
-          const durationMs = Date.now() - Number(context.startedAt || Date.now());
-          appendWatcherTrace('queue_message_error', {
-            reason: msg.message || 'upload_failed',
-            detailUrl: context.detailUrl,
-            sessionId: context.sessionId || '',
-            assistId: context.key,
-            durationMs
-          }).catch(() => {});
-          updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
-          incrementDaily('failed').catch(() => {});
-          recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed').catch(() => {});
-          recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed').catch(() => {});
-          appendWatcherLog({
-            ...context.payload,
-            detailUrl: context.detailUrl,
-            sessionId: context.sessionId || '',
-            trigger: context.trigger || '',
-            status: 'failed',
-            reason: msg.message || 'upload_failed'
-          }).then(writeDailyReports).catch(() => {});
-          settle({ ok: false, reason: msg.message || 'upload_failed', durationMs });
-        }
-        if (msg.type === 'done' && msg.blocked) {
-          const durationMs = Date.now() - Number(context.startedAt || Date.now());
-          appendWatcherTrace('queue_message_blocked', {
-            reason: msg.message || 'blocked',
-            detailUrl: context.detailUrl,
-            sessionId: context.sessionId || '',
-            assistId: context.key,
-            durationMs
-          }).catch(() => {});
-          updateProcessed(context.key, 'failed', msg.message || 'blocked').catch(() => {});
-          incrementDaily('failed').catch(() => {});
-          recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked').catch(() => {});
-          recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked').catch(() => {});
-          appendWatcherLog({
-            ...context.payload,
-            detailUrl: context.detailUrl,
-            sessionId: context.sessionId || '',
-            trigger: context.trigger || '',
-            status: 'failed',
-            reason: msg.message || 'blocked'
-          }).then(writeDailyReports).catch(() => {});
-          settle({ ok: false, reason: msg.message || 'blocked', durationMs });
-        } else if (msg.type === 'done') {
-          const durationMs = Date.now() - Number(context.startedAt || Date.now());
-          appendWatcherTrace('queue_message_done', {
-            reason: msg.message || 'done',
-            detailUrl: context.detailUrl,
-            sessionId: context.sessionId || '',
-            assistId: context.key,
-            durationMs
-          }).catch(() => {});
-          recordRiskEvent(context.opts || {}, msg.message || 'success', 'success').catch(() => {});
-          recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success').catch(() => {});
-          settle({ ok: true, reason: msg.message || 'done', durationMs });
-        }
-      },
-      onDisconnect: {
-        addListener() {}
-      }
-    };
-  }
-
-  function makeSessionPortContext(context) {
-    let timer = null;
-    const result = new Promise(resolve => {
-      context.resolve = value => {
-        if (timer) clearTimeout(timer);
-        resolve(value);
-      };
-      const timeoutMs = Math.max(60 * 1000, (Number(context.opts?.watcherTaskTimeoutMinutes || 10) + 1) * 60 * 1000);
-      timer = setTimeout(() => resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs }), timeoutMs);
-    });
-    return { port: makeWatcherPort(context), result };
-  }
-
-  async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null, trigger = '') {
-    payload.triggeredBy = 'auto_watcher';
-    const key = getProcessedKey(candidate, payload);
-    const source = candidateSource(candidate, payload);
-    await appendWatcherTrace('candidate_payload_allowed', {
-      reason: 'ready_to_handle',
-      detailUrl: candidate.detailUrl,
-      tabId: detailTabId,
-      sessionId: session?.id || '',
-      trigger: trigger || session?.trigger || '',
-      assistId: key,
-      source,
-      autoDownload: opts.watcherAutoDownload,
-      autoUpload: opts.watcherAutoUpload,
-      uploadConfirmRequired: opts.watcherUploadConfirmRequired
-    });
-
-    if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
-      await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-      await closeTabQuietly(detailTabId, 'high_risk_journal');
-      await updateProcessed(key, 'skipped', 'high_risk_journal');
-      await incrementDaily('skipped');
-      await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: `本地记录连续失败达到 ${HIGH_RISK_FAIL_THRESHOLD} 次，暂按无权限跳过` });
-      return false;
-    }
-
-    if (!opts.watcherAutoDownload) {
-      await appendWatcherTrace('candidate_manual_detail_kept', { reason: 'auto_download_disabled', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-      await notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
-      await incrementDaily('notified');
-      await updateProcessed(key, 'skipped', 'manual_detail_opened');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'manual_detail_opened' });
-      return true;
-    }
-
-    if (!opts.watcherAutoUpload || opts.watcherUploadConfirmRequired) {
-      payload.downloadOnly = true;
-      payload.riskReasons = [
-        ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : []),
-        '低频值守默认仅下载并校验 PDF，上传需要人工确认。'
-      ];
-    }
-
-    if (deps.hasActiveTask()) {
-      await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-      await updateProcessed(key, 'skipped', 'active_task');
-      await incrementDaily('skipped');
-      await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'active_task' });
-      return false;
-    }
-
-    const portContext = {
-      key,
-      payload,
-      detailUrl: candidate.detailUrl,
-      opts,
-      source,
-      sessionId: session?.id || '',
-      trigger: trigger || session?.trigger || '',
-      startedAt: Date.now()
-    };
-    const sessionPort = makeSessionPortContext(portContext);
-    await appendWatcherTrace('candidate_enqueue', {
-      reason: payload.downloadOnly ? 'download_only' : 'auto_upload',
-      detailUrl: candidate.detailUrl,
-      tabId: detailTabId,
-      sessionId: session?.id || '',
-      trigger: trigger || session?.trigger || '',
-      assistId: key,
-      source,
-      downloadOnly: payload.downloadOnly === true
-    });
-    deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
-    await incrementDaily('downloaded');
-    if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
-    await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
-    await appendWatcherLog({
-      ...payload,
-      detailUrl: candidate.detailUrl,
-      sessionId: session?.id || '',
-      trigger: trigger || session?.trigger || '',
-      status: payload.downloadOnly ? 'download_only' : 'queued_upload',
-      reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
-    });
-    await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
-    await incrementDaily('notified');
-    if (sessionPort) {
-      const result = await sessionPort.result;
-      if (!payload.downloadOnly) {
-        await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
-      }
-      return result.ok;
-    }
-    return true;
-  }
-
-  async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger = '') {
-    stateForTargets.optionsSnapshot = opts;
-    const session = {
-      id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      trigger,
-      startedAt: new Date().toISOString(),
-      status: 'planning',
-      plannedSize: 0,
-      handledCount: 0
-    };
-    stateForTargets.currentSession = session;
-    await saveWatcherState(stateForTargets);
-    const runListUrls = listUrlsForRun(opts);
-    await appendWatcherTrace('session_start', {
-      reason: 'advanced_planning',
-      sessionId: session.id,
-      sessionSize: targetSessionSize,
-      listUrlCount: runListUrls.length
-    });
-    await appendWatcherTrace('session_source_order', {
-      reason: 'randomized_publisher_order',
-      sessionId: session.id,
-      listUrls: runListUrls
-    });
-
-    const plan = [];
-    for (const listUrl of runListUrls) {
-      if (plan.length >= targetSessionSize) break;
-      const pagePick = randomizeAssistListUrlWithMeta(listUrl);
-      const pickedListUrl = pagePick.pickedListUrl;
-      await appendWatcherTrace('session_plan_url', {
-        reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
-        sessionId: session.id,
-        listUrl: pickedListUrl,
-        configuredUrl: listUrl,
-        publisher: pagePick.publisher,
-        pageCurve: pagePick.pageCurve,
-        pickedPage: pagePick.pickedPage,
-        pageMin: pagePick.pageMin,
-        pageMax: pagePick.pageMax,
-        frontHit: pagePick.frontHit,
-        alpha: pagePick.alpha,
-        pickedListUrl: pagePick.pickedListUrl
-      });
-      stateForTargets.lastPickedListUrl = pickedListUrl;
-      await saveWatcherState(stateForTargets);
-      await incrementDaily('checked');
-      const parsed = await parseListUrl(pickedListUrl);
-      if (parsed.cfChallenge) {
-        if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
-        return { ok: false, reason: 'cf_challenge' };
-      }
-      await resetCfChallengeStreak();
-      const allowed = [];
-      for (const rawCandidate of parsed.candidates || []) {
-        const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
-        const listAllowed = isListCandidateAllowed(candidate, opts);
-        if (!listAllowed.ok) {
-          await appendWatcherTrace('candidate_skip_list_filter', {
-            reason: listAllowed.reason,
-            reasonText: describeWatcherReason(listAllowed.reason),
-            sessionId: session.id,
-            detailUrl: candidate.detailUrl,
-            assistId: candidate.assistId || '',
-            title: candidate.title || ''
-          });
-          continue;
-        }
-        if (opts.watcherSkipHighRiskJournal && isListCandidateHighRiskByStats(candidate, stateForTargets)) {
-          await appendWatcherTrace('candidate_skip_journal_stats', {
-            reason: 'list_high_risk_journal',
-            reasonText: describeWatcherReason('list_high_risk_journal'),
-            sessionId: session.id,
-            detailUrl: candidate.detailUrl,
-            assistId: candidate.assistId || '',
-            journalShortName: candidate.journalShortName || '',
-            journalFullName: candidate.journalFullName || ''
-          });
-          continue;
-        }
-        if (opts.watcherSkipHighRiskJournal && isListCandidateDoiHighRiskByStats(candidate, stateForTargets)) {
-          await appendWatcherTrace('candidate_skip_journal_stats', {
-            reason: 'list_doi_failure_journal',
-            reasonText: describeWatcherReason('list_doi_failure_journal'),
-            sessionId: session.id,
-            detailUrl: candidate.detailUrl,
-            assistId: candidate.assistId || '',
-            journalShortName: candidate.journalShortName || '',
-            journalFullName: candidate.journalFullName || ''
-          });
-          continue;
-        }
-        if (await wasRecentlyProcessed(candidate)) {
-          await appendWatcherTrace('candidate_skip_processed', {
-            reason: 'processed_before',
-            sessionId: session.id,
-            detailUrl: candidate.detailUrl,
-            assistId: candidate.assistId || ''
-          });
-          continue;
-        }
-        allowed.push(candidate);
-      }
-      const selected = selectBanditCandidates(allowed, stateForTargets, stateForTargets.marketData, targetSessionSize);
-      await appendWatcherTrace('session_plan_result', {
-        reason: 'list_candidates_scored',
-        sessionId: session.id,
-        listUrl: pickedListUrl,
-        parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-        allowedCount: allowed.length,
-        selectedCount: selected.length,
-        planSizeBefore: plan.length
-      });
-      plan.push(...selected);
-    }
-
-    const stateWithPlan = await getWatcherState();
-    stateWithPlan.currentSession = {
-      ...session,
-      status: 'running',
-      plannedSize: plan.length,
-      targetSessionSize
-    };
-    await saveWatcherState(stateWithPlan);
-    await appendWatcherTrace('session_plan_done', {
-      reason: 'advanced_plan_ready',
-      sessionId: session.id,
-      plannedSize: plan.length,
-      targetSessionSize
-    });
-
-    let handledCount = 0;
-    const startedMs = Date.now();
-    for (const candidate of plan) {
-      if (handledCount >= targetSessionSize) break;
-      const risk = riskSnapshot(await getWatcherState(), opts);
-      if (risk.exhausted) {
-        await appendWatcherTrace('session_stop_risk_budget', { reason: 'risk_budget_exhausted', sessionId: session.id, riskUsed: risk.used, riskLimit: risk.limit });
-        break;
-      }
-
-      await appendWatcherTrace('session_candidate_start', {
-        reason: 'inspect_planned_candidate',
-        sessionId: session.id,
-        detailUrl: candidate.detailUrl,
-        assistId: candidate.assistId || '',
-        title: candidate.title || ''
-      });
-      const detail = await inspectDetail(candidate);
-      if (!detail.ok) {
-        await closeTabQuietly(detail.tabId, 'detail_extract_failed');
-        await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
-        await incrementDaily('failed');
-        await recordRiskEvent(opts, detail.reason, 'failed');
-        await recordBanditOutcome(candidateSource(candidate), 'failure', 0, detail.reason);
-          await appendWatcherLog({ ...candidate, sessionId: session.id, trigger, status: 'failed', reason: detail.reason });
-      } else {
-        const payload = detail.payload;
-        payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
-        const detailAllowed = isDetailAllowedForWatcher(payload, opts);
-        const key = getProcessedKey(candidate, payload);
-        if (!detailAllowed.ok) {
-          await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), sessionId: session.id, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
-          await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
-          await updateProcessed(key, 'skipped', detailAllowed.reason);
-          await incrementDaily('skipped');
-          await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
-          await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, trigger, status: 'skipped', reason: detailAllowed.reason });
-        } else {
-          const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session, trigger);
-          if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
-          if (handled) handledCount += 1;
-        }
-      }
-
-      const afterState = await getWatcherState();
-      afterState.currentSession = {
-        ...afterState.currentSession,
-        status: 'running',
-        handledCount,
-        sessionDurationMs: Date.now() - startedMs
-      };
-      await saveWatcherState(afterState);
-
-      if (handledCount < targetSessionSize && plan.indexOf(candidate) < plan.length - 1) {
-        const gap = logNormalMinutes(ADVANCED_ITEM_GAP.median, ADVANCED_ITEM_GAP.min, ADVANCED_ITEM_GAP.max);
-        await appendWatcherTrace('session_item_gap', { reason: 'between_candidates', sessionId: session.id, gapMinutes: Number(gap.toFixed(2)), handledCount, targetSessionSize });
-        await sleepMinutes(gap);
-      }
-    }
-
-    const finalState = await getWatcherState();
-    const durationMs = Date.now() - startedMs;
-    const cooldownMinutes = Number((logNormalMinutes(ADVANCED_COOLDOWN.median, ADVANCED_COOLDOWN.min, ADVANCED_COOLDOWN.max) / Math.max(0.25, Number(finalState.rateMultiplier || 1))).toFixed(2));
-    finalState.lastSession = {
-      ...finalState.currentSession,
-      status: 'done',
-      finishedAt: new Date().toISOString(),
-      handledCount,
-      sessionDurationMs: durationMs,
-      cooldownMinutes,
-      cooldownUntil: new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString()
-    };
-    finalState.currentSession = { ...finalState.lastSession };
-    await saveWatcherState(finalState);
-    await appendWatcherTrace('session_done', {
-      reason: handledCount ? 'advanced_session_done' : 'advanced_no_candidate',
-      sessionId: session.id,
-      handledCount,
-      targetSessionSize,
-      sessionDurationMs: durationMs,
-      cooldownMinutes: finalState.lastSession.cooldownMinutes,
-      cooldownUntil: finalState.lastSession.cooldownUntil
-    });
-    return { ok: true, reason: handledCount ? 'advanced_session_done' : 'advanced_no_candidate', observeSnapshot: observeResult?.snapshot ? true : false };
   }
 
   async function runAutoWatcherOnce(trigger = 'alarm') {
