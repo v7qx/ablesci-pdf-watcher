@@ -1,6 +1,6 @@
 'use strict';
 
-importScripts('common_config.js', 'common_storage.js');
+importScripts('common_config.js', 'common_storage.js', 'common_logging.js');
 
 const {
   DEFAULT_OPTIONS,
@@ -19,6 +19,12 @@ const {
   JOURNAL_ACCESS_LOOKUP_KEY,
   loadOptionsFromStorage
 } = globalThis.AblesciWatcherStorage;
+const {
+  hostnameOf,
+  urlHostPath,
+  maskId,
+  redactLocalPaths
+} = globalThis.AblesciWatcherLogging;
 
 const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
 const UPLOAD_TASK_SNAPSHOT_KEY = 'uploadTaskSnapshot';
@@ -213,19 +219,6 @@ function makeDownloadFilename(subdir, filename) {
   return cleanDir.replace(/\/+$/g, '') + '/' + cleanFile;
 }
 
-function hostnameOf(url) {
-  try { return new URL(url).hostname.toLowerCase(); } catch (_) { return ''; }
-}
-
-function urlHostPath(url) {
-  try {
-    const u = new URL(url || '');
-    return { host: u.hostname.toLowerCase(), path: u.pathname || '/' };
-  } catch (_) {
-    return { host: '', path: '' };
-  }
-}
-
 function basenameOf(path) {
   const s = String(path || '').replace(/\\/g, '/');
   return s.split('/').filter(Boolean).pop() || '';
@@ -235,19 +228,6 @@ function extensionOf(path) {
   const base = basenameOf(path).toLowerCase();
   const m = base.match(/\.([a-z0-9]{1,8})$/i);
   return m ? '.' + m[1] : '';
-}
-
-function maskId(value) {
-  const s = String(value || '');
-  if (!s) return '';
-  if (s.length <= 4) return '***';
-  return '***' + s.slice(-4);
-}
-
-function redactLocalPaths(text) {
-  return String(text || '')
-    .replace(/[a-zA-Z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*([^\\/:*?"<>|\r\n]+)/g, '<local>\\$1')
-    .replace(/\/(?:Users|home)\/[^/\s"']+(?:\/[^/\s"']+)*\/([^/\s"']+)/g, '<local>/$1');
 }
 
 function makeDiagnosticBase(payload, opts) {

@@ -77,6 +77,7 @@
     randomizeAssistListUrl,
     listUrlsForRun
   } = globalThis.AblesciAutoWatcherUtils;
+  const { sanitizeTraceValue } = globalThis.AblesciWatcherLogging;
 
   function nextDisplaySchedule(state = {}, opts = null) {
     const schedulerMode = opts?.watcherSchedulerMode || state.currentSchedulerMode || '';
@@ -1944,63 +1945,6 @@
     return cachedTraceLevel;
   }
 
-  function compactTraceCandidate(value) {
-    if (!value || typeof value !== 'object') return null;
-    const hasCandidateShape = value.assistId || value.title || value.doi || value.journalName || value.journalShortName || value.reason;
-    if (!hasCandidateShape) return null;
-    return {
-      assistId: normalizeText(value.assistId || '').slice(0, 80),
-      title: normalizeText(value.title || '').slice(0, 160),
-      doi: normalizeText(value.doi || '').slice(0, 120),
-      journal: normalizeText(value.journalName || value.journalShortName || '').slice(0, 160),
-      reason: normalizeText(value.reason || '').slice(0, 120)
-    };
-  }
-
-  function sanitizeTraceUrl(value, traceLevel) {
-    if (traceLevel === 'verbose') return sanitizeReportUrl(value);
-    try {
-      const parsed = deps?.urlHostPath ? deps.urlHostPath(value || '') : null;
-      if (parsed && (parsed.host || parsed.path)) return parsed;
-    } catch (_) {}
-    return String(value || '').slice(0, 120);
-  }
-
-  function sanitizeTraceValue(value, depth = 0, traceLevel = 'normal') {
-    if (value === null || value === undefined) return value;
-    if (typeof value === 'string') {
-      const text = value.length > 500 ? value.slice(0, 500) + '...' : value;
-      if (/^https?:\/\//i.test(text)) return sanitizeTraceUrl(text, traceLevel);
-      return text;
-    }
-    if (typeof value === 'number' || typeof value === 'boolean') return value;
-    if (Array.isArray(value)) {
-      if (traceLevel !== 'verbose' && value.length > 5) return `[array:${value.length}]`;
-      if (depth >= 2) return `[array:${value.length}]`;
-      return value.slice(0, traceLevel === 'verbose' ? 20 : 5).map(item => sanitizeTraceValue(item, depth + 1, traceLevel));
-    }
-    if (typeof value === 'object') {
-      if (traceLevel !== 'verbose') {
-        const compact = compactTraceCandidate(value);
-        if (compact) return compact;
-      }
-      if (depth >= 2) return '[object]';
-      const output = {};
-      const maxEntries = traceLevel === 'verbose' ? 30 : 18;
-      for (const [key, item] of Object.entries(value).slice(0, maxEntries)) {
-        if (/token|cookie|csrf|signature|credential|secret|auth|password/i.test(key)) {
-          output[key] = '<redacted>';
-        } else if (/url$/i.test(key) || key === 'url' || key === 'detailUrl' || key === 'listUrl') {
-          output[key] = sanitizeTraceUrl(item, traceLevel);
-        } else {
-          output[key] = sanitizeTraceValue(item, depth + 1, traceLevel);
-        }
-      }
-      return output;
-    }
-    return String(value);
-  }
-
   async function appendWatcherTrace(step, details = {}) {
     try {
       const traceLevel = await getTraceLevel();
@@ -2015,7 +1959,11 @@
         tabId: details.tabId ?? '',
         url: traceLevel === 'verbose' ? sanitizeReportUrl(url) : '',
         urlHostPath: deps?.urlHostPath ? deps.urlHostPath(url || '') : null,
-        details: sanitizeTraceValue(details, 0, traceLevel)
+        details: sanitizeTraceValue(details, 0, traceLevel, {
+          normalizeText,
+          sanitizeFullUrl: sanitizeReportUrl,
+          urlHostPath: deps?.urlHostPath
+        })
       });
       if (traceBuffer.length >= TRACE_FLUSH_BATCH_SIZE) {
         await flushWatcherTrace();
