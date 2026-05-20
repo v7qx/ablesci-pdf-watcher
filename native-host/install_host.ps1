@@ -65,6 +65,14 @@ $manifest = [ordered]@{
 
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
 
+# Copy notification icon alongside the helper binary
+$NotifyIconSrc = Join-Path $RepoRoot "extension\icons\icon48.png"
+if (Test-Path $NotifyIconSrc) {
+  $NotifyIconDst = Join-Path $InstallDir "icon48.png"
+  Copy-Item -LiteralPath $NotifyIconSrc -Destination $NotifyIconDst -Force
+  Write-Host "Copied notify icon: $NotifyIconDst"
+}
+
 $Browsers = if ($Browser -eq "All") { @("Chrome", "Edge") } else { @($Browser) }
 foreach ($BrowserName in $Browsers) {
   if ($BrowserName -eq "Chrome") {

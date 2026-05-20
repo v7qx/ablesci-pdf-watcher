@@ -35,6 +35,11 @@ try {
   if (Test-Path $TelegramTemplate) {
     Copy-Item -LiteralPath $TelegramTemplate -Destination (Join-Path $OutDir "telegram.example.json") -Force
   }
+  $NotifyIcon = Join-Path $RepoRoot "extension\icons\icon48.png"
+  if (Test-Path $NotifyIcon) {
+    Copy-Item -LiteralPath $NotifyIcon -Destination (Join-Path $OutDir "icon48.png") -Force
+    Write-Host "Copied notify icon: $NotifyIcon -> $OutDir\icon48.png"
+  }
   Write-Host "Built: $Output"
 } finally {
   Pop-Location

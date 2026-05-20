@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -206,13 +207,78 @@ func handleDeleteFile(req Request) error {
 }
 
 func handleNotifyUser(req Request) error {
-	title := limitText(firstNonEmpty(req.Title, "Ablesci PDF Watcher"), 80)
+	brand := "Ablesci PDF Watcher"
+	title := limitText(firstNonEmpty(req.Title, brand), 80)
 	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
 	if runtime.GOOS == "windows" {
-		script := `$title = $args[0]; $msg = $args[1]; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Text = $title; $n.Visible = $true; $n.BalloonTipTitle = $title; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000); $form = New-Object System.Windows.Forms.Form; $form.Text = $title; $form.ShowInTaskbar = $false; $form.TopMost = $true; $form.FormBorderStyle = 'FixedToolWindow'; $form.StartPosition = 'Manual'; $form.Size = New-Object System.Drawing.Size(360,120); $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 16), ($area.Bottom - $form.Height - 16)); $titleLabel = New-Object System.Windows.Forms.Label; $titleLabel.Text = $title; $titleLabel.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 10, [System.Drawing.FontStyle]::Bold); $titleLabel.AutoSize = $false; $titleLabel.Location = New-Object System.Drawing.Point(12,10); $titleLabel.Size = New-Object System.Drawing.Size(320,24); $msgLabel = New-Object System.Windows.Forms.Label; $msgLabel.Text = $msg; $msgLabel.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9); $msgLabel.AutoSize = $false; $msgLabel.Location = New-Object System.Drawing.Point(12,38); $msgLabel.Size = New-Object System.Drawing.Size(320,56); $form.Controls.Add($titleLabel); $form.Controls.Add($msgLabel); $form.Show(); $deadline = (Get-Date).AddSeconds(6); while ((Get-Date) -lt $deadline) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }; $form.Close(); $n.Dispose()`
-		if err := exec.Command("powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, title, message).Start(); err != nil {
-			return err
+		// Escape single quotes for PowerShell single-quoted strings (double them)
+		escapedTitle := strings.ReplaceAll(title, "'", "''")
+		escapedMsg := strings.ReplaceAll(message, "'", "''")
+
+		// Find plugin icon relative to the executable
+		iconPath := ""
+		if exePath, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exePath), "icon48.png")
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				iconPath = candidate
+			}
 		}
+		escapedIconPath := strings.ReplaceAll(iconPath, "'", "''")
+
+		// Build script with diagnostic log header
+		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
+		logEnd := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
+
+		// Load assemblies once
+		loadAssemblies := `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing`
+
+		// Load custom icon from PNG, fallback to system info icon
+		loadIcon := `try { $bitmap = New-Object System.Drawing.Bitmap($iconPath); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information }`
+
+		// System tray balloon notification (default BalloonTipIcon is already Info)
+		trayNotify := `[System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = $appIcon; $n.Text = $brand; $n.Visible = $true; $n.BalloonTipTitle = $brand; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000)`
+
+		// Popup form at bottom-right corner (use double quotes for string literals to avoid encoding issues)
+		formBody := `$form = New-Object System.Windows.Forms.Form; $form.Icon = $appIcon; $form.Text = $brand; $form.ShowInTaskbar = $false; $form.TopMost = $true; $form.FormBorderStyle = "FixedToolWindow"; $form.StartPosition = "Manual"; $form.Size = New-Object System.Drawing.Size(380,108); $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 16), ($area.Bottom - $form.Height - 16)); $titleLabel = New-Object System.Windows.Forms.Label; $titleLabel.Text = $title; $titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold); $titleLabel.AutoSize = $false; $titleLabel.Location = New-Object System.Drawing.Point(12,10); $titleLabel.Size = New-Object System.Drawing.Size(340,22); $msgLabel = New-Object System.Windows.Forms.Label; $msgLabel.Text = $msg; $msgLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9); $msgLabel.AutoSize = $false; $msgLabel.Location = New-Object System.Drawing.Point(12,36); $msgLabel.Size = New-Object System.Drawing.Size(340,44); $form.Controls.Add($titleLabel); $form.Controls.Add($msgLabel); $form.Show(); $deadline = (Get-Date).AddSeconds(6); while ((Get-Date) -lt $deadline) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }; $form.Close(); $n.Dispose()`
+
+		scriptBody := logStart + "; " + loadAssemblies + "; " + loadIcon + "; " + trayNotify + "; " + formBody + "; " + logEnd
+		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $iconPath = '" + escapedIconPath + "'; $brand = '" + brand + "';\n" + scriptBody
+
+		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
+		if err != nil {
+			return fmt.Errorf("notify: create temp script: %w", err)
+		}
+		tmpPath := tmpFile.Name()
+		// Write UTF-8 BOM so Windows PowerShell can parse the script correctly
+		tmpFile.Write([]byte{0xEF, 0xBB, 0xBF})
+		if _, err := tmpFile.WriteString(fullScript); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("notify: write temp script: %w", err)
+		}
+		tmpFile.Close()
+
+		// Use cmd /c start /min to launch completely detached from Chrome's Job Object.
+		cmd := exec.Command("cmd.exe", "/c", "start", "/min", "", "powershell.exe",
+			"-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
+			"-WindowStyle", "Hidden", "-File", tmpPath)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		}
+		cmd.Stdin = strings.NewReader("")
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		if err := cmd.Start(); err != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("notify: launch: %w", err)
+		}
+
+		// Clean up temp script after notification window disappears (6s + margin)
+		go func() {
+			time.Sleep(10 * time.Second)
+			os.Remove(tmpPath)
+		}()
+
 		return writeResponse(Response{OK: true, Action: "notify_user"})
 	}
 	fmt.Fprint(os.Stderr, "\a")
