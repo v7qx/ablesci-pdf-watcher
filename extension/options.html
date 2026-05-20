@@ -394,7 +394,7 @@
 
     details.setting-details summary::-webkit-details-marker { display: none; }
 
-    details.setting-details summary::after {
+    details.setting-details > summary::after {
       content: "";
       position: absolute;
       right: 20px;
@@ -407,11 +407,11 @@
       transition: transform .16s ease;
     }
 
-    details.setting-details[open] summary {
+    details.setting-details[open] > summary {
       border-bottom: 1px solid var(--border);
     }
 
-    details.setting-details[open] summary::after {
+    details.setting-details[open] > summary::after {
       transform: translateY(-35%) rotate(225deg);
     }
 
@@ -677,7 +677,7 @@
 
     <section class="card">
       <h2 class="card-title">实验：低频值守</h2>
-      <details class="setting-details nested-setting-details" open>
+      <details class="setting-details nested-setting-details">
         <summary>基础设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
@@ -741,7 +741,7 @@
       </details>
       <details class="setting-details">
         <summary>低频值守更多设置</summary>
-      <details class="setting-details nested-setting-details" open>
+      <details class="setting-details nested-setting-details">
         <summary>调度规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
@@ -862,7 +862,7 @@
         </div>
       </div>
       </details>
-      <details class="setting-details nested-setting-details" open>
+      <details class="setting-details nested-setting-details">
         <summary>候选筛选</summary>
       <div class="setting-row">
         <div class="setting-copy">
