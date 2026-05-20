@@ -23,6 +23,8 @@ import (
 
 const allowedOSSHost = "https://ables1.oss-cn-shanghai.aliyuncs.com/"
 
+const createNoWindow = 0x08000000
+
 type Request struct {
 	Action     string            `json:"action"`
 	Path       string            `json:"path"`
@@ -234,8 +236,8 @@ func handleNotifyUser(req Request) error {
 		logEnd := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
 
 		// Windows Toast Notification — app source icon is provided by the Start Menu shortcut.
-		toastNotify := `[System.Media.SystemSounds]::Exclamation.Play(); ` +
-			`$escTitle = [System.Security.SecurityElement]::Escape($title); ` +
+		// Sound is handled by the Toast XML <audio> element; do NOT call SystemSounds.Play() to avoid double beep.
+		toastNotify := `$escTitle = [System.Security.SecurityElement]::Escape($title); ` +
 			`$escMsg = [System.Security.SecurityElement]::Escape($msg); ` +
 			`$appID = "AblesciPDFUploader"; ` +
 			`$toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escTitle, $escMsg); ` +
@@ -263,31 +265,32 @@ func handleNotifyUser(req Request) error {
 		}
 		tmpFile.Close()
 
-		// Launch PowerShell via cmd /c start /min to detach from Chrome's Job Object.
-		// HideWindow prevents the intermediate cmd window from flashing in the taskbar.
-		// PowerShell's own -WindowStyle Hidden keeps its console invisible.
-		// The Toast notification is fire-and-forget: once Show() is called,
-		// Windows Notification Center handles display independently of the process lifetime.
-		cmd := exec.Command("cmd.exe", "/c", "start", "/min", "", "powershell.exe",
-			"-NoProfile", "-ExecutionPolicy", "Bypass", "-STA",
-			"-WindowStyle", "Hidden", "-File", tmpPath)
+		// Launch PowerShell directly (no cmd /c start /min intermediate).
+		// HideWindow + createNoWindow ensures no console or taskbar flash.
+		// PowerShell exits after ToastNotificationManager.Show(), which is fire-and-forget.
+		cmd := exec.Command("powershell.exe",
+			"-NoLogo",
+			"-NoProfile",
+			"-NonInteractive",
+			"-ExecutionPolicy", "Bypass",
+			"-STA",
+			"-WindowStyle", "Hidden",
+			"-File", tmpPath)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			HideWindow:    true,
-			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
 		}
 		cmd.Stdin = strings.NewReader("")
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
-		if err := cmd.Start(); err != nil {
+
+		if err := cmd.Run(); err != nil {
 			os.Remove(tmpPath)
 			return fmt.Errorf("notify: launch: %w", err)
 		}
 
-		// Clean up temp script after notification window disappears (6s + margin)
-		go func() {
-			time.Sleep(10 * time.Second)
-			os.Remove(tmpPath)
-		}()
+		// Clean up temp script immediately after PowerShell completes
+		os.Remove(tmpPath)
 
 		return writeResponse(Response{OK: true, Action: "notify_user"})
 	}
