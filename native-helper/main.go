@@ -227,7 +227,7 @@ func findPluginIcon(filename string) string {
 }
 
 func handleNotifyUser(req Request) error {
-	brand := "Ablesci PDF Watcher"
+	brand := "Ablesci PDF Uploader"
 	title := limitText(firstNonEmpty(req.Title, brand), 80)
 	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
 	if runtime.GOOS == "windows" {
@@ -239,7 +239,7 @@ func handleNotifyUser(req Request) error {
 		iconPath := findPluginIcon("icon48.png")
 		escapedIconPath := strings.ReplaceAll(iconPath, "'", "''")
 
-		// Set AppUserModelID so Windows Notification Center shows "Ablesci PDF Watcher"
+		// Set AppUserModelID so Windows Notification Center shows the brand name
 		// instead of "Windows PowerShell". Must be called before any WinForms objects are created.
 		setAppID := `$setAppIDSrc = @"` + "\r\n" +
 			`using System;` + "\r\n" +
@@ -251,7 +251,7 @@ func handleNotifyUser(req Request) error {
 			`}` + "\r\n" +
 			`"@` + "\r\n" +
 			`Add-Type -TypeDefinition $setAppIDSrc;` +
-			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPdfWatcher.Notification")`
+			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPDFUploader")`
 
 		// Build script with diagnostic log header
 		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
@@ -260,16 +260,17 @@ func handleNotifyUser(req Request) error {
 		// Load assemblies once
 		loadAssemblies := `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing`
 
-		// Load custom icon. If the Go-discovered path is empty, try common install locations in PowerShell.
-		loadIcon := `if ($iconPath -and (Test-Path $iconPath)) { try { $bitmap = New-Object System.Drawing.Bitmap($iconPath); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information } } else { $localIcon = Join-Path $env:LOCALAPPDATA "AblesciPdfWatcherPrivate\icon48.png"; if (Test-Path $localIcon) { try { $bitmap = New-Object System.Drawing.Bitmap($localIcon); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Information } } else { $appIcon = [System.Drawing.SystemIcons]::Information } }`
+		// Load custom icon for tray icon. Fallback: SystemIcons.Application (a proper .ico handle).
+		// The balloon tip icon is set separately via BalloonTipIcon below.
+		loadIcon := `if ($iconPath -and (Test-Path $iconPath)) { try { $bitmap = New-Object System.Drawing.Bitmap($iconPath); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Application } } else { $localIcon = Join-Path $env:LOCALAPPDATA "AblesciPdfWatcherPrivate\icon48.png"; if (Test-Path $localIcon) { try { $bitmap = New-Object System.Drawing.Bitmap($localIcon); $hIcon = $bitmap.GetHicon(); $appIcon = [System.Drawing.Icon]::FromHandle($hIcon) } catch { $appIcon = [System.Drawing.SystemIcons]::Application } } else { $appIcon = [System.Drawing.SystemIcons]::Application } }`
 
-		// System tray balloon notification
-		trayNotify := `[System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = $appIcon; $n.Text = $brand; $n.Visible = $true; $n.BalloonTipTitle = $brand; $n.BalloonTipText = $msg; $n.ShowBalloonTip(5000)`
+		// Single system tray balloon notification with visible icon via BalloonTipIcon
+		trayNotify := `[System.Media.SystemSounds]::Exclamation.Play(); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = $appIcon; $n.Text = $brand; $n.Visible = $true; $n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info; $n.BalloonTipTitle = $brand; $n.BalloonTipText = $msg; $n.ShowBalloonTip(6000); Start-Sleep -Seconds 7; $n.Dispose()`
 
-		// Popup form at bottom-right corner
-		formBody := `$form = New-Object System.Windows.Forms.Form; $form.Icon = $appIcon; $form.Text = $brand; $form.ShowInTaskbar = $false; $form.TopMost = $true; $form.FormBorderStyle = "FixedToolWindow"; $form.StartPosition = "Manual"; $form.Size = New-Object System.Drawing.Size(380,108); $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea; $form.Location = New-Object System.Drawing.Point(($area.Right - $form.Width - 16), ($area.Bottom - $form.Height - 16)); $titleLabel = New-Object System.Windows.Forms.Label; $titleLabel.Text = $title; $titleLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 10, [System.Drawing.FontStyle]::Bold); $titleLabel.AutoSize = $false; $titleLabel.Location = New-Object System.Drawing.Point(12,10); $titleLabel.Size = New-Object System.Drawing.Size(340,22); $msgLabel = New-Object System.Windows.Forms.Label; $msgLabel.Text = $msg; $msgLabel.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9); $msgLabel.AutoSize = $false; $msgLabel.Location = New-Object System.Drawing.Point(12,36); $msgLabel.Size = New-Object System.Drawing.Size(340,44); $form.Controls.Add($titleLabel); $form.Controls.Add($msgLabel); $form.Show(); $deadline = (Get-Date).AddSeconds(6); while ((Get-Date) -lt $deadline) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }; $form.Close(); $n.Dispose()`
+		// No custom WinForms popup - rely on the native system tray balloon notification only.
+		// The balloon tip shows the brand as title and BalloonTipIcon::Info provides a visible icon.
 
-		scriptBody := logStart + "; " + setAppID + "; " + loadAssemblies + "; " + loadIcon + "; " + trayNotify + "; " + formBody + "; " + logEnd
+		scriptBody := logStart + "; " + setAppID + "; " + loadAssemblies + "; " + loadIcon + "; " + trayNotify + "; " + logEnd
 		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $iconPath = '" + escapedIconPath + "'; $brand = '" + brand + "';\n" + scriptBody
 
 		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
