@@ -1,6 +1,6 @@
 'use strict';
 
-importScripts('common_config.js');
+importScripts('common_config.js', 'common_storage.js');
 
 const {
   DEFAULT_OPTIONS,
@@ -13,10 +13,13 @@ const {
   normalizeWatcherListUrls,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;
+const {
+  LAST_DIAGNOSTIC_KEY,
+  JOURNAL_ACCESS_STATS_KEY,
+  JOURNAL_ACCESS_LOOKUP_KEY,
+  loadOptionsFromStorage
+} = globalThis.AblesciWatcherStorage;
 
-const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
-const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
-const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
 const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
 const UPLOAD_TASK_SNAPSHOT_KEY = 'uploadTaskSnapshot';
 const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
@@ -174,15 +177,7 @@ async function cleanupOrphanPublisherTabs(reason = 'orphan_cleanup') {
 }
 
 async function getOptions() {
-  const keys = Object.keys(DEFAULT_OPTIONS);
-  const local = await chrome.storage.local.get(keys);
-  const missingLocal = keys.some(k => local[k] === undefined);
-  if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local });
-
-  const legacy = await chrome.storage.sync.get(DEFAULT_OPTIONS);
-  const migrated = normalizeOptions({ ...DEFAULT_OPTIONS, ...legacy, ...local });
-  await chrome.storage.local.set(migrated);
-  return migrated;
+  return loadOptionsFromStorage();
 }
 
 function formatBytes(size) {

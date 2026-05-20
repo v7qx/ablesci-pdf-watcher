@@ -11,15 +11,17 @@ const {
   normalizeWatcherListUrls,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;
-
-const ids = Object.keys(DEFAULT_OPTIONS);
-const LAST_DIAGNOSTIC_KEY = 'latestDiagnostic';
-const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
-const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
-const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
-const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
-const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
-const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
+const {
+  OPTION_IDS: ids,
+  LAST_DIAGNOSTIC_KEY,
+  JOURNAL_ACCESS_STATS_KEY,
+  JOURNAL_ACCESS_LOOKUP_KEY,
+  AUTO_WATCHER_STATE_KEY,
+  AUTO_WATCHER_LOG_KEY,
+  AUTO_WATCHER_TRACE_KEY,
+  DEMAND_SNAPSHOTS_KEY,
+  loadOptionsFromStorage
+} = globalThis.AblesciWatcherStorage;
 let advancedStatusCache = null;
 let advancedCountdownTimer = null;
 
@@ -40,15 +42,8 @@ function normalizeButtonPosition(value) {
 }
 
 async function loadOptions() {
-  const local = await chrome.storage.local.get(ids);
   const uiNormalizers = { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition };
-  const missingLocal = ids.some(id => local[id] === undefined);
-  if (!missingLocal) return normalizeOptions({ ...DEFAULT_OPTIONS, ...local }, uiNormalizers);
-
-  const legacy = await chrome.storage.sync.get(DEFAULT_OPTIONS);
-  const migrated = normalizeOptions({ ...DEFAULT_OPTIONS, ...legacy, ...local }, uiNormalizers);
-  await chrome.storage.local.set(migrated);
-  return migrated;
+  return loadOptionsFromStorage(uiNormalizers);
 }
 
 async function load() {
