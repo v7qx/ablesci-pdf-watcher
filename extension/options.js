@@ -9,6 +9,7 @@ const {
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
   normalizeWatcherListUrls,
+  parseJournalAccessRules,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;
 const {
@@ -22,24 +23,38 @@ const {
   DEMAND_SNAPSHOTS_KEY,
   loadOptionsFromStorage
 } = globalThis.AblesciWatcherStorage;
+const {
+  normalizeWorkdaysSet,
+  normalizeWorkWindowsDetailed,
+  weekdayNumber,
+  beijingMinutesNow,
+  isInWorkSchedule
+} = globalThis.AblesciWatcherWorktime;
+const { createOptionsHelpersApi } = globalThis.AblesciOptionsHelpers;
+const {
+  normalizeButtonLabel,
+  normalizeHexColor,
+  normalizeButtonPosition,
+  formatBeijingDateTime,
+  countdownText,
+  normalizeWorkdays,
+  normalizeWorkWindows,
+  nextDisplaySchedule,
+  todayKeyBeijing,
+  journalAccessSummary,
+  sanitizeUrlForExport,
+  watcherOptionSnapshot
+} = createOptionsHelpersApi({
+  defaultOptions: DEFAULT_OPTIONS,
+  normalizeWorkdaysSet,
+  normalizeWorkWindowsDetailed,
+  parseJournalAccessRules,
+  normalizeWatcherListUrls
+});
 let advancedStatusCache = null;
 let advancedCountdownTimer = null;
 
 function el(id) { return document.getElementById(id); }
-
-function normalizeButtonLabel(value) {
-  const s = String(value || '').trim();
-  return s.slice(0, 20) || DEFAULT_OPTIONS.buttonLabel;
-}
-
-function normalizeHexColor(value, fallback) {
-  const s = String(value || '').trim();
-  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
-}
-
-function normalizeButtonPosition(value) {
-  return value === 'start' ? 'start' : 'end';
-}
 
 async function loadOptions() {
   const uiNormalizers = { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition };
@@ -67,114 +82,6 @@ function setText(id, value) {
   }
 }
 
-function formatBeijingDateTime(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '-';
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).formatToParts(date).reduce((acc, item) => {
-    acc[item.type] = item.value;
-    return acc;
-  }, {});
-  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
-}
-
-function countdownText(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '-';
-  const seconds = Math.max(0, Math.round((date.getTime() - Date.now()) / 1000));
-  if (seconds <= 0) return '到点';
-  const minutes = Math.floor(seconds / 60);
-  const sec = seconds % 60;
-  if (minutes < 60) return `${minutes}分${String(sec).padStart(2, '0')}秒`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}时${String(minutes % 60).padStart(2, '0')}分`;
-}
-
-function parseMinuteOfDay(value) {
-  const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return NaN;
-  const hour = Number(m[1]);
-  const minute = Number(m[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return NaN;
-  return hour * 60 + minute;
-}
-
-function normalizeWorkdays(value) {
-  const items = String(value || DEFAULT_OPTIONS.watcherWorkdays)
-    .split(/[,\s]+/)
-    .map(item => Number(item.trim()))
-    .filter(day => Number.isInteger(day) && day >= 1 && day <= 7);
-  return new Set(items);
-}
-
-function normalizeWorkWindows(value) {
-  return String(value || DEFAULT_OPTIONS.watcherWorkWindows)
-    .split(/\r?\n|,/)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [startRaw, endRaw] = line.split('-').map(part => part.trim());
-      const start = parseMinuteOfDay(startRaw);
-      const end = parseMinuteOfDay(endRaw);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-      return { start, end };
-    })
-    .filter(Boolean);
-}
-
-function weekdayNumber(date = new Date()) {
-  const utc = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })).getDay();
-  return utc === 0 ? 7 : utc;
-}
-
-function beijingMinutesNow(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(date).reduce((acc, item) => {
-    acc[item.type] = item.value;
-    return acc;
-  }, {});
-  return Number(parts.hour) * 60 + Number(parts.minute);
-}
-
-function isInWorkSchedule(workdays, workWindows, date = new Date()) {
-  if (!workdays.has(weekdayNumber(date))) return false;
-  const minute = beijingMinutesNow(date);
-  return workWindows.some(win => minute >= win.start && minute < win.end);
-}
-
-function nextDisplaySchedule(state = {}) {
-  const schedulerMode = state.currentSchedulerMode || '';
-  const assistAt = state.nextAssistRunAt || '';
-  const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
-  if (schedulerMode === 'fixed') {
-    return { nextAssistAt: wakeAt, assistCountdownAt: wakeAt };
-  }
-  return { nextAssistAt: assistAt, assistCountdownAt: assistAt };
-}
-
-function todayKeyBeijing() {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(new Date()).reduce((acc, item) => {
-    acc[item.type] = item.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
 
 async function renderAdvancedWatcherStatus() {
   const stored = await chrome.storage.local.get([
@@ -399,25 +306,6 @@ async function copyDiagnostic() {
   }
 }
 
-function parseJournalAccessRules(raw) {
-  try {
-    const parsed = JSON.parse(String(raw || '{}'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
-    return {
-      blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
-      allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
-      partial: Array.isArray(parsed.partial) ? parsed.partial : []
-    };
-  } catch (_) {
-    return { blocked: [], allowed: [], partial: [] };
-  }
-}
-
-function journalAccessSummary(raw) {
-  const rules = parseJournalAccessRules(raw);
-  return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length}`;
-}
-
 function nativeConfigMessage(action, extra = {}) {
   const hostName = el('nativeHostName')?.value.trim() || DEFAULT_OPTIONS.nativeHostName;
   return new Promise(resolve => {
@@ -488,31 +376,6 @@ async function openConfigDir() {
   if (hostNode && previousHost !== undefined) hostNode.value = previousHost;
   showPill('journalAccessConfigStatus', res.ok ? '已打开目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
   if (res.ok && res.path) setText('journalAccessConfigSource', res.path);
-}
-
-function sanitizeUrlForExport(value) {
-  try {
-    const url = new URL(value);
-    for (const key of Array.from(url.searchParams.keys())) {
-      if (/token|cookie|csrf|signature|credential|key|secret|auth/i.test(key)) {
-        url.searchParams.set(key, '<redacted>');
-      }
-    }
-    return url.href;
-  } catch (_) {
-    return String(value || '').replace(/(token|cookie|csrf|signature|credential|key|secret|auth)=([^&\s]+)/ig, '$1=<redacted>');
-  }
-}
-
-function watcherOptionSnapshot(opts) {
-  const snapshot = {};
-  for (const key of Object.keys(DEFAULT_OPTIONS)) {
-    if (!key.startsWith('watcher')) continue;
-    snapshot[key] = key === 'watcherListUrls'
-      ? normalizeWatcherListUrls(opts[key]).map(sanitizeUrlForExport)
-      : opts[key];
-  }
-  return snapshot;
 }
 
 async function copyAutoWatcherConfig() {

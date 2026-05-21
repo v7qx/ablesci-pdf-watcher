@@ -81,6 +81,18 @@
     return /There was a problem providing the content you requested/i.test(text);
   }
 
+  function hasScienceDirectNoSubscriptionAccess() {
+    const bodyText = ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
+    if (/does not subscribe to this content on ScienceDirect/i.test(bodyText)) return true;
+    if (/your institution.*does not subscribe/i.test(bodyText)) return true;
+
+    const disabledFullText = document.querySelector('a.full-text-link[aria-disabled="true"], a.full-text-link[tabindex="-1"]');
+    const remoteAccessLink = document.querySelector('a[href*="/user/institution/login"]');
+    const nativePdfHref = findNativePdfHref();
+    const viewPdfButton = findViewPdfButton();
+    return !!(disabledFullText && remoteAccessLink && !nativePdfHref && !viewPdfButton);
+  }
+
   function isVisible(el) {
     if (!el) return false;
     const style = getComputedStyle(el);
@@ -172,6 +184,15 @@
 
     const articleUrl = makeScienceDirectArticleUrl();
     if (!articleUrl) return;
+    if (hasScienceDirectNoSubscriptionAccess()) {
+      sendScienceDirectMessage({
+        articleUrl,
+        noSubscription: true,
+        error: 'ScienceDirect 当前页面没有正文订阅权限。'
+      });
+      stopScienceDirectObserver();
+      return;
+    }
     const nativePdfHref = findNativePdfHref();
     if (nativePdfHref) {
       viewPdfTriggered = true;

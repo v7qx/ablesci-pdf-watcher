@@ -158,6 +158,22 @@
     return next;
   }
 
+  function parseJournalAccessRules(raw) {
+    try {
+      const parsed = JSON.parse(String(raw || '{}'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { blocked: [], allowed: [], partial: [] };
+      }
+      return {
+        blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
+        allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
+        partial: Array.isArray(parsed.partial) ? parsed.partial : []
+      };
+    } catch (_) {
+      return { blocked: [], allowed: [], partial: [] };
+    }
+  }
+
   function normalizeOptions(raw = {}, uiNormalizers = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...(raw || {}) };
     const schedulerMode = normalizeSchedulerMode(opts);
@@ -242,6 +258,7 @@
     normalizeSchedulerMode,
     normalizeWatcherIntervals,
     normalizeWatcherListUrls,
+    parseJournalAccessRules,
     normalizeOptions
   };
 })();
