@@ -2,6 +2,13 @@
 
 // Upload/download pipeline and publisher-page runtime listeners.
 (function initBackgroundUpload(globalThis) {
+  const ACCESS_ENV_ANOMALY_KEY = 'watcherAccessEnvironmentAnomaly';
+  const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
+  const ACCESS_ENV_WINDOW_MS = 15 * 60 * 1000;
+  const ACCESS_ENV_THRESHOLD = 3;
+  const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 3;
+  const ACCESS_ENV_NOTIFICATION_ICON_URL = 'icons/notify_empty.png';
+
   function createBackgroundUploadApi(deps) {
     const {
       chromeApi,
@@ -60,6 +67,107 @@
     let taskQueue = [];
     let activeTask = null;
     let nextTaskId = 1;
+
+    function payloadJournalKey(payload = {}) {
+      return String(payload?.journalName || '').trim().toLowerCase();
+    }
+
+    function payloadPublisherKey(payload = {}) {
+      return String(publisherForUrl(payload?.pdfUrl || payload?.pickedUrl || '') || '').trim().toLowerCase();
+    }
+
+    async function notifyAccessEnvironmentAnomaly(message) {
+      try {
+        await chromeApi.notifications.create({
+          type: 'basic',
+          iconUrl: ACCESS_ENV_NOTIFICATION_ICON_URL,
+          title: 'Ablesci PDF Watcher',
+          message,
+          priority: 2,
+          requireInteraction: true
+        });
+      } catch (err) {
+        console.warn('[Ablesci PDF Watcher] anomaly notification failed', err);
+      }
+    }
+
+    async function pauseWatcherForAccessEnvironment(payload) {
+      const now = Date.now();
+      const journalKey = payloadJournalKey(payload);
+      const publisherKey = payloadPublisherKey(payload);
+      const stored = await chromeApi.storage.local.get([ACCESS_ENV_ANOMALY_KEY, AUTO_WATCHER_STATE_KEY, 'watcherEnabled']);
+      const current = stored[ACCESS_ENV_ANOMALY_KEY] || {};
+      const recent = Array.isArray(current.events)
+        ? current.events.filter(item => item && Number(item.at || 0) > now - ACCESS_ENV_WINDOW_MS)
+        : [];
+      recent.push({
+        at: now,
+        journal: journalKey,
+        publisher: publisherKey,
+        assistId: String(payload?.assistId || '').trim()
+      });
+      const distinctJournals = new Set(recent.map(item => item.journal).filter(Boolean));
+      const distinctPublishers = new Set(recent.map(item => item.publisher).filter(Boolean));
+      const shouldPause = recent.length >= ACCESS_ENV_THRESHOLD && distinctJournals.size >= ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD;
+      const nextState = {
+        updatedAt: new Date(now).toISOString(),
+        events: recent.slice(-10),
+        lastPublisher: publisherKey,
+        paused: shouldPause
+      };
+      await chromeApi.storage.local.set({ [ACCESS_ENV_ANOMALY_KEY]: nextState });
+      if (!shouldPause) {
+        return {
+          paused: false,
+          count: recent.length,
+          distinctJournals: distinctJournals.size,
+          distinctPublishers: distinctPublishers.size
+        };
+      }
+
+      const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+      state.accessEnvironmentPausedAt = new Date(now).toISOString();
+      state.accessEnvironmentPauseReason = 'consecutive_no_access_anomaly';
+      state.accessEnvironmentAnomaly = {
+        count: recent.length,
+        distinctJournals: distinctJournals.size,
+        distinctPublishers: distinctPublishers.size,
+        publisher: publisherKey
+      };
+      await chromeApi.storage.local.set({
+        watcherEnabled: false,
+        [AUTO_WATCHER_STATE_KEY]: state,
+        [ACCESS_ENV_ANOMALY_KEY]: nextState
+      });
+      await chromeApi.alarms.clear('ablesciAutoWatcher');
+      const message = `短时间内连续出现 ${recent.length} 次无正文权限，且涉及 ${distinctJournals.size} 个期刊。已暂停值守，请检查代理、登录态或机构访问环境。`;
+      await notifyAccessEnvironmentAnomaly(message);
+      return {
+        paused: true,
+        count: recent.length,
+        distinctJournals: distinctJournals.size,
+        distinctPublishers: distinctPublishers.size,
+        message
+      };
+    }
+
+    async function recordAccessEnvironmentSuccess(payload) {
+      const stored = await chromeApi.storage.local.get(ACCESS_ENV_ANOMALY_KEY);
+      const current = stored[ACCESS_ENV_ANOMALY_KEY] || {};
+      const journalKey = payloadJournalKey(payload);
+      const publisherKey = payloadPublisherKey(payload);
+      const recent = Array.isArray(current.events)
+        ? current.events.filter(item => item && item.journal !== journalKey && item.publisher !== publisherKey)
+        : [];
+      await chromeApi.storage.local.set({
+        [ACCESS_ENV_ANOMALY_KEY]: {
+          updatedAt: new Date().toISOString(),
+          events: recent.slice(-10),
+          lastPublisher: publisherKey,
+          paused: false
+        }
+      });
+    }
 
     function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
       return new Promise((resolve, reject) => {
@@ -649,7 +757,8 @@
         if (opts.deleteAfterUpload) {
           try { await sendNativeMessage(opts.nativeHostName, { action: 'delete_file', path: stat.path }); } catch (e) { console.warn(e); }
         }
-        await recordJournalAccessResult(payload, { ok: true });
+          await recordAccessEnvironmentSuccess(payload);
+          await recordJournalAccessResult(payload, { ok: true });
         postDoneFromSiteResponse(port, permit, '上传成功');
         return;
       }
@@ -691,10 +800,12 @@
       }
       if (parsed && parsed.msg) {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+        await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
         postDoneFromSiteResponse(port, parsed, '上传成功');
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+        await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
         post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
           html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
@@ -756,6 +867,10 @@
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
           }
+          let accessEnvironmentPause = null;
+          if (failureReason === 'no_access') {
+            accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
+          }
           if (failureReason && failureReason !== 'login_required') {
             await recordJournalAccessResult(payload, { ok: false, reason: failureReason });
           }
@@ -781,7 +896,9 @@
                 skipReason: 'login_required'
               });
             } else if (failureReason === 'no_access') {
-              const message = '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。';
+              const message = accessEnvironmentPause?.paused
+                ? accessEnvironmentPause.message
+                : '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。';
               post(port, 'done', message, {
                 html: escapeHtml(message),
                 recomend: false,

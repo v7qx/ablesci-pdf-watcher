@@ -1,5 +1,7 @@
 // Responsibility: watcher attention notifications, CF challenge pause flow, and risk budget accounting.
 (function () {
+  const BROWSER_NOTIFICATION_ICON_URL = 'icons/notify_empty.png';
+
   function createWatcherNotificationApi(config) {
     const {
       chromeApi,
@@ -56,7 +58,7 @@
     async function sendBrowserNotification(message, opts = {}) {
       await chromeApi.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: BROWSER_NOTIFICATION_ICON_URL,
         title: 'Ablesci PDF Watcher',
         message,
         priority: opts.priority || 1,
