@@ -259,7 +259,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // PRIVATE_WATCHER_ONLY
-  importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/demand.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'auto_watcher.js');
+  importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/demand.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');
 globalThis.initPrivateAutoWatcher({
   getOptions,
   enqueueUpload,
