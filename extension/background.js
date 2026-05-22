@@ -56,6 +56,7 @@ const {
   rscArticleUrlFromPdfUrl,
   scienceDirectArticleUrlFromPdfUrl,
   publisherArticleUrlFromPdfUrl,
+  looksLikePdfDownloadUrl,
   isLikelyTargetDownload,
   isExpectedPublisherPage
 } = globalThis.AblesciBackgroundPublishers;
@@ -215,6 +216,7 @@ const {
   isDoiUrl,
   isScienceDirectAssetPdfUrl,
   publisherArticleUrlFromPdfUrl,
+  looksLikePdfDownloadUrl,
   isLikelyTargetDownload,
   isExpectedPublisherPage,
   registerPublisherTab,

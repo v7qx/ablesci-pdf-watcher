@@ -79,10 +79,17 @@
     return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || '';
   }
 
+  function looksLikePdfDownloadUrl(url) {
+    const value = String(url || '');
+    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/articlepdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf/i.test(value);
+  }
+
   function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
     const url = String(item?.finalUrl || item?.url || '');
     const filename = String(item?.filename || '');
     const mime = String(item?.mime || '');
+    const sourcePii = extractScienceDirectPii(sourceUrl);
+    const actualPii = extractScienceDirectPii(url);
     const sourceHost = (() => {
       try { return new URL(String(sourceUrl || '')).hostname; } catch (_) { return ''; }
     })();
@@ -90,11 +97,12 @@
       try { return new URL(url).hostname; } catch (_) { return ''; }
     })();
     const expected = String(expectedHost || '').toLowerCase();
+    const pdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url) || looksLikePdfDownloadUrl(sourceUrl);
+    if (!pdfLike) return false;
+    if (sourcePii && actualPii && sourcePii !== actualPii) return false;
     if (expected && finalHost.toLowerCase() === expected) return true;
     if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return true;
     if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return true;
-    if (/\.pdf$/i.test(filename)) return true;
-    if (/pdf/i.test(mime)) return true;
     return false;
   }
 
@@ -124,6 +132,7 @@
     rscArticleUrlFromPdfUrl,
     scienceDirectArticleUrlFromPdfUrl,
     publisherArticleUrlFromPdfUrl,
+    looksLikePdfDownloadUrl,
     isLikelyTargetDownload,
     isExpectedPublisherPage
   };

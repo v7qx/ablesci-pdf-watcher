@@ -83,12 +83,23 @@
   }
 
   function hasScienceDirectNoSubscriptionAccess() {
+    const preload = window.__PRELOADED_STATE__ || {};
+    const article = preload.article || {};
+    const entitlementReason = String(article.entitlementReason || article?.articleEntitlement?.entitlementOrigin || '').trim();
+    const entitled = article?.articleEntitlement?.entitled;
+    const displayViewFullText = article?.displayViewFullText;
+    const isAbstract = article?.isAbstract;
+    const isContentVisible = article?.isContentVisible;
+    const remoteAccessLink = document.querySelector('a[href*="/user/institution/login"]');
+    if (/unsubscribed/i.test(entitlementReason)) return true;
+    if (entitled === false && displayViewFullText === false && isAbstract === true && isContentVisible === false) return true;
+    if (entitled === false && remoteAccessLink && !findNativePdfHref() && !findViewPdfButton()) return true;
+
     const bodyText = ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
     if (/does not subscribe to this content on ScienceDirect/i.test(bodyText)) return true;
     if (/your institution.*does not subscribe/i.test(bodyText)) return true;
 
     const disabledFullText = document.querySelector('a.full-text-link[aria-disabled="true"], a.full-text-link[tabindex="-1"]');
-    const remoteAccessLink = document.querySelector('a[href*="/user/institution/login"]');
     const nativePdfHref = findNativePdfHref();
     const viewPdfButton = findViewPdfButton();
     return !!(disabledFullText && remoteAccessLink && !nativePdfHref && !viewPdfButton);
@@ -199,6 +210,15 @@
 
     const articleUrl = makeScienceDirectArticleUrl();
     if (!articleUrl) return;
+    if (hasScienceDirectNoSubscriptionAccess()) {
+      sendScienceDirectMessage({
+        articleUrl,
+        noSubscription: true,
+        error: 'ScienceDirect 当前页面没有正文订阅权限。'
+      });
+      stopScienceDirectObserver();
+      return;
+    }
     if (hasScienceDirectLoginRequiredAccess()) {
       if (!scienceDirectLoginPrompted) {
         scienceDirectLoginPrompted = true;
@@ -208,15 +228,6 @@
           source: 'sciencedirect_login_required'
         });
       }
-      return;
-    }
-    if (hasScienceDirectNoSubscriptionAccess()) {
-      sendScienceDirectMessage({
-        articleUrl,
-        noSubscription: true,
-        error: 'ScienceDirect 当前页面没有正文订阅权限。'
-      });
-      stopScienceDirectObserver();
       return;
     }
     const nativePdfHref = findNativePdfHref();

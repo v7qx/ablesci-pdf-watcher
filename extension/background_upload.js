@@ -33,6 +33,7 @@
       isDoiUrl,
       isScienceDirectAssetPdfUrl,
       publisherArticleUrlFromPdfUrl,
+      looksLikePdfDownloadUrl,
       isLikelyTargetDownload,
       isExpectedPublisherPage,
       registerPublisherTab,
@@ -343,6 +344,7 @@
         let abortListener = null;
         let sourceUrlForMatching = pdfUrl;
         let expectedHost = hostnameOf(sourceUrlForMatching);
+        let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。';
         const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl);
         const startedAfter = new Date(Date.now() - 2000).toISOString();
@@ -392,6 +394,9 @@
 
         function acceptCandidate(item, source) {
           if (settled || !item || seenIds.has(item.id)) return;
+          if (!downloadArmed) return;
+          if (isHtmlDownloadItem(item)) return;
+          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) return;
           if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) return;
           seenIds.add(item.id);
           downloadId = item.id;
@@ -450,9 +455,17 @@
             extendNoDownloadTimeout(timeoutMs, message) {
               armNoDownloadTimer(timeoutMs, message);
             },
+            armDownloadCapture(url) {
+              if (url) {
+                sourceUrlForMatching = url;
+                expectedHost = hostnameOf(sourceUrlForMatching);
+              }
+              downloadArmed = true;
+            },
             setExpectedDownloadUrl(url) {
               sourceUrlForMatching = url || sourceUrlForMatching;
               expectedHost = hostnameOf(sourceUrlForMatching);
+              if (looksLikePdfDownloadUrl(sourceUrlForMatching)) downloadArmed = true;
             }
           });
           registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
@@ -1023,6 +1036,7 @@
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.clicked) {
+        pending.armDownloadCapture?.(pending.lastNativePdfUrl || pending.pdfUrl || pending.articleUrl || '');
         post(pending.port, 'progress', '已在 ScienceDirect 页面触发原生 View PDF 按钮，继续监听浏览器下载。');
         sendResponse({ ok: true, action: 'clicked_native_view_pdf' });
         return false;
@@ -1048,6 +1062,7 @@
         pending.lastNativePdfUrl = msg.pdfUrl;
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
         if (msg.clicked) {
+          pending.armDownloadCapture?.(msg.pdfUrl);
           post(pending.port, 'progress', '已在 Nature 文章页触发原生正文 PDF 下载按钮，继续监听浏览器下载。');
           sendResponse({ ok: true, action: 'clicked_nature_pdf', pdfUrl: msg.pdfUrl });
           return false;
