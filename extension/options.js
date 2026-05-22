@@ -31,6 +31,8 @@ const {
   isInWorkSchedule
 } = globalThis.AblesciWatcherWorktime;
 const { createOptionsHelpersApi } = globalThis.AblesciOptionsHelpers;
+const { createOptionsStatusApi } = globalThis.AblesciOptionsStatus;
+const { createOptionsActionsApi } = globalThis.AblesciOptionsActions;
 const {
   normalizeButtonLabel,
   normalizeHexColor,
@@ -65,8 +67,6 @@ const {
   setText,
   showPill
 });
-let advancedStatusCache = null;
-let advancedCountdownTimer = null;
 
 function el(id) { return document.getElementById(id); }
 
@@ -94,70 +94,6 @@ function setText(id, value) {
     node.textContent = value;
     node.title = String(value ?? '');
   }
-}
-
-
-async function renderAdvancedWatcherStatus() {
-  const stored = await chrome.storage.local.get([
-    AUTO_WATCHER_STATE_KEY,
-    'watcherWorkdays',
-    'watcherWorkWindows',
-    'watcherEnabled'
-  ]);
-  const state = stored[AUTO_WATCHER_STATE_KEY] || {};
-  const daily = state.daily?.[todayKeyBeijing()] || {};
-  const workdays = normalizeWorkdays(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays);
-  const workWindows = normalizeWorkWindows(stored.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows);
-  const pausedUntilMs = state.riskPausedUntil ? new Date(state.riskPausedUntil).getTime() : 0;
-  const workStatus = stored.watcherEnabled !== true
-    ? '已关闭'
-    : (Number.isFinite(pausedUntilMs) && pausedUntilMs > Date.now()
-      ? `风险暂停至 ${formatBeijingDateTime(state.riskPausedUntil)}`
-      : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段'));
-  const schedule = nextDisplaySchedule(state);
-  advancedStatusCache = { state, schedule };
-  setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
-  setText('watcherWorkStatus', workStatus);
-  setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
-  setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
-  setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
-  setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
-  setText('advancedError', String(Number(state.targetError || state.lag || 0)));
-  setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
-  setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
-  setText('advancedH1Delta', String(Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)));
-  setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
-  setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
-  setText('watcherNextRunAt', formatBeijingDateTime(state.chromeAlarmScheduledAt || state.nextScheduledAt));
-  setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
-  setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
-  setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
-  setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
-  setText('watcherSavedWorkdays', String(stored.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays));
-  const top = (state.banditTopPublishers || [])
-    .slice(0, 5)
-    .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
-    .join(', ');
-  setText('advancedBanditTop', `Bandit top publishers: ${top || '-'}`);
-}
-
-function renderAdvancedWatcherCountdowns() {
-  if (!advancedStatusCache) return;
-  const state = advancedStatusCache.state || {};
-  const schedule = advancedStatusCache.schedule || nextDisplaySchedule(state);
-  setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
-  setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
-}
-
-function startAdvancedCountdownTimer() {
-  if (advancedCountdownTimer || document.hidden) return;
-  advancedCountdownTimer = setInterval(renderAdvancedWatcherCountdowns, 1000);
-}
-
-function stopAdvancedCountdownTimer() {
-  if (!advancedCountdownTimer) return;
-  clearInterval(advancedCountdownTimer);
-  advancedCountdownTimer = null;
 }
 
 function validateOptions(opts) {
@@ -271,266 +207,67 @@ async function save() {
   }
 }
 
-function showText(id, msg, isErr) {
-  const node = el(id);
-  node.textContent = msg;
-  node.style.color = isErr ? 'var(--danger)' : 'var(--ok)';
-  setTimeout(() => { node.textContent = ''; }, 7000);
-}
-
 function showPill(id, msg, isErr) {
   const node = el(id);
   node.textContent = msg;
   node.classList.toggle('ok', !isErr);
   node.classList.toggle('error', !!isErr);
 }
-
-function testNative() {
-  const hostName = el('nativeHostName').value.trim() || DEFAULT_OPTIONS.nativeHostName;
-  const status = el('nativeStatus');
-  status.classList.remove('ok', 'error');
-  status.textContent = '测试中';
-  chrome.runtime.sendNativeMessage(hostName, { action: 'ping' }, response => {
-    const lastErr = chrome.runtime.lastError;
-    if (lastErr) return showPill('nativeStatus', nativeFailureHelp(lastErr.message), true);
-    if (!response || !response.ok) return showPill('nativeStatus', '返回异常', true);
-    showPill('nativeStatus', '正常：' + response.action);
-  });
-}
-
-async function copyDiagnostic() {
-  const stored = await chrome.storage.local.get(LAST_DIAGNOSTIC_KEY);
-  const diagnostic = stored[LAST_DIAGNOSTIC_KEY];
-  if (!diagnostic) {
-    showPill('diagnosticStatus', '暂无信息', true);
-    return;
-  }
-
-  const text = JSON.stringify(diagnostic, null, 2);
-  try {
-    const ok = await copyTextToClipboard(text);
-    if (!ok) throw new Error('copy_failed');
-    showPill('diagnosticStatus', '已复制');
-  } catch (_) {
-    showPill('diagnosticStatus', '复制失败', true);
-  }
-}
-
-async function reloadJournalAccessConfig() {
-  return reloadJournalAccessConfigFromNative(save, loadOptions);
-}
-
-async function openConfigDir() {
-  return openConfigDirFromNative();
-}
-
-async function copyAutoWatcherConfig() {
-  const opts = await loadOptions();
-  const stored = await chrome.storage.local.get([
-    AUTO_WATCHER_STATE_KEY,
-    AUTO_WATCHER_LOG_KEY,
-    AUTO_WATCHER_TRACE_KEY,
-    DEMAND_SNAPSHOTS_KEY,
-    LAST_DIAGNOSTIC_KEY,
-    JOURNAL_ACCESS_STATS_KEY,
-    JOURNAL_ACCESS_LOOKUP_KEY
-  ]);
-  const logs = Array.isArray(stored[AUTO_WATCHER_LOG_KEY]) ? stored[AUTO_WATCHER_LOG_KEY] : [];
-  const traceLogs = Array.isArray(stored[AUTO_WATCHER_TRACE_KEY]) ? stored[AUTO_WATCHER_TRACE_KEY] : [];
-  const demandSnapshots = Array.isArray(stored[DEMAND_SNAPSHOTS_KEY]) ? stored[DEMAND_SNAPSHOTS_KEY] : [];
-  const state = stored[AUTO_WATCHER_STATE_KEY] || {};
-  const processed = state.processed || {};
-  const diagnostic = stored[LAST_DIAGNOSTIC_KEY] || null;
-  const journalAccessStats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
-  const journalAccessLookup = stored[JOURNAL_ACCESS_LOOKUP_KEY] || {};
-  const manifest = chrome.runtime.getManifest();
-
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    extension: {
-      name: manifest.name,
-      version: manifest.version
-    },
-    watcherOptions: watcherOptionSnapshot(opts),
-    watcherStateSummary: {
-      processedCount: Object.keys(processed).length,
-      today: state.daily?.[todayKeyBeijing()] || null,
-      currentSchedulerMode: state.currentSchedulerMode || '',
-      currentExecutionModel: state.currentExecutionModel || '',
-      nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
-      nextAssistRunAt: state.nextAssistRunAt || '',
-      nextAssistStrategy: state.nextAssistStrategy || '',
-      nextAssistReason: state.nextAssistReason || '',
-      nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
-      nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
-      nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
-      nextAssistGuardMode: state.nextAssistGuardMode || '',
-      nextAssistGuardApplied: state.nextAssistGuardApplied === true,
-      nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
-      nextAssistGuardWeight: state.nextAssistGuardWeight || '',
-      nextAssistPlan: state.nextAssistPlan || null,
-      nextAssistPlannedAt: state.nextAssistPlannedAt || '',
-      nextAssistPlanningData: state.nextAssistPlanningData || null,
-      targetPreview: state.targetPreview || null,
-      targetPreviewAt: state.targetPreviewAt || '',
-      marketDataAffects: state.marketDataAffects || '',
-      chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
-      lastAttempt: state.lastAttempt || null,
-      lastAssistStrategy: state.lastAssistStrategy || '',
-      lastAssistDecisionAt: state.lastAssistDecisionAt || '',
-      lastAssistDecision: state.lastAssistDecision || null,
-      lastRunTrigger: state.lastRunTrigger || '',
-      lastRunStartedAt: state.lastRunStartedAt || '',
-      lastRunFinishedAt: state.lastRunFinishedAt || '',
-      lastRunResult: state.lastRunResult || null,
-      runStats: state.runStats || {},
-      schedulerModelMode: state.schedulerModelMode || '',
-      marketRegime: state.marketRegime || state.marketData?.marketRegime || '',
-      workTimeProgressRatio: state.workTimeProgressRatio || 0,
-      activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
-      availabilityFactor: state.availabilityFactor || 1,
-      availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
-      availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
-      expectedDone: state.expectedDone || 0,
-      actualDone: state.actualDone || state.monthDone || 0,
-      targetError: state.targetError || state.lag || 0,
-      rateMultiplier: state.rateMultiplier || 1,
-      riskUsed: state.riskUsed || 0,
-      riskLimit: state.riskLimit || 0,
-      recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
-      currentSession: state.currentSession || null,
-      banditTopPublishers: state.banditTopPublishers || [],
-      journalAccessStatsCount: Object.keys(journalAccessStats || {}).length,
-      journalAccessLookupIndexSize: Object.keys(journalAccessLookup?.index || {}).length,
-      journalAccessNoAccessCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'no_access').length,
-      journalAccessPartialCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'partial_access').length,
-      journalShortNameMapCount: Object.keys(state.journalShortNameMap || {}).length,
-      journalShortNameMapPreview: Object.entries(state.journalShortNameMap || {}).slice(0, 10).map(([key, value]) => ({
-        key,
-        short: typeof value === 'object' ? value.short || '' : '',
-        full: typeof value === 'object' ? value.full || '' : String(value || '')
-      }))
-    },
-    latestWatcherLog: logs[0] || null,
-    latestTraceLogs: traceLogs.slice(0, 80),
-    latestDemandSnapshot: demandSnapshots[0] || null,
-    latestDiagnostic: diagnostic ? {
-      time: diagnostic.time || '',
-      stage: diagnostic.stage || '',
-      assistId: diagnostic.assistId || '',
-      doi: diagnostic.doi || '',
-      journalName: diagnostic.journalName || '',
-      assistDetailUrl: diagnostic.assistDetailUrl || diagnostic.pageUrl || '',
-      publisherHost: diagnostic.publisherHost || '',
-      pickedUrl: diagnostic.pickedUrl || null,
-      source: diagnostic.source || '',
-      error: diagnostic.error || ''
-    } : null
-  };
-
-  const text = JSON.stringify(payload, null, 2);
-  try {
-    const ok = await copyTextToClipboard(text);
-    if (!ok) throw new Error('copy_failed');
-    showPill('watcherConfigStatus', '已复制');
-  } catch (_) {
-    showPill('watcherConfigStatus', '复制失败', true);
-  }
-}
-
-async function clearJournalAccessStats() {
-  await chrome.storage.local.remove(JOURNAL_ACCESS_STATS_KEY);
-  showText('status', '已清除本地期刊失败记录。');
-}
-
-function sendRuntimeMessage(message) {
-  return new Promise(resolve => {
-    chrome.runtime.sendMessage(message, response => {
-      const lastErr = chrome.runtime.lastError;
-      if (lastErr) return resolve({ ok: false, reason: lastErr.message });
-      resolve(response || { ok: true });
-    });
-  });
-}
-
-async function copyTextToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) {
-    const active = document.activeElement;
-    const selection = window.getSelection();
-    const savedRanges = [];
-    if (selection) {
-      for (let i = 0; i < selection.rangeCount; i += 1) savedRanges.push(selection.getRangeAt(i).cloneRange());
-    }
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', 'readonly');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    if (selection) {
-      selection.removeAllRanges();
-      savedRanges.forEach(range => selection.addRange(range));
-    }
-    if (active && typeof active.focus === 'function') active.focus();
-    return ok;
-  }
-}
-
-document.addEventListener('copy', event => {
-  const active = document.activeElement;
-  const tag = String(active?.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || active?.isContentEditable) return;
-  const selection = window.getSelection?.();
-  const text = selection ? String(selection.toString() || '') : '';
-  if (!text) return;
-  const cleaned = text.replace(/\r\n/g, '\n').replace(/[\r\n]+$/, '');
-  if (cleaned === text) return;
-  event.preventDefault();
-  event.clipboardData?.setData('text/plain', cleaned);
+const {
+  renderAdvancedWatcherStatus,
+  startAdvancedCountdownTimer,
+  stopAdvancedCountdownTimer
+} = createOptionsStatusApi({
+  chromeApi: chrome,
+  defaultOptions: DEFAULT_OPTIONS,
+  autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
+  normalizeWorkdays,
+  normalizeWorkWindows,
+  isInWorkSchedule,
+  formatBeijingDateTime,
+  countdownText,
+  nextDisplaySchedule,
+  todayKeyBeijing,
+  setText
+});
+const {
+  showText,
+  testNative,
+  copyDiagnostic,
+  reloadJournalAccessConfig,
+  openConfigDir,
+  copyAutoWatcherConfig,
+  clearJournalAccessStats,
+  runAutoWatcherNow,
+  observeDemandNow,
+  testWatcherNotification,
+  clearAutoWatcherState,
+  clearAutoWatcherLogs,
+  handleDocumentCopy,
+  handleWindowBlur
+} = createOptionsActionsApi({
+  chromeApi: chrome,
+  el,
+  defaultOptions: DEFAULT_OPTIONS,
+  lastDiagnosticKey: LAST_DIAGNOSTIC_KEY,
+  autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
+  autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
+  autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
+  demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
+  journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
+  journalAccessLookupKey: JOURNAL_ACCESS_LOOKUP_KEY,
+  loadOptions,
+  watcherOptionSnapshot,
+  todayKeyBeijing,
+  nativeFailureHelp,
+  showPill,
+  setText,
+  save,
+  reloadJournalAccessConfigFromNative,
+  openConfigDirFromNative
 });
 
-async function runAutoWatcherNow() {
-  showPill('watcherRunStatus', '检查中');
-  const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
-  showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : ('失败：' + (res.reason || '未知错误')), !res.ok);
-}
-
-async function observeDemandNow() {
-  showPill('watcherRunStatus', '采样中');
-  const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
-  showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : ('失败：' + (res.reason || '未知错误')), !res.ok);
-}
-
-async function testWatcherNotification() {
-  await save();
-  showPill('watcherNotifyStatus', '发送中');
-  const res = await sendRuntimeMessage({ type: 'ablesciTestWatcherNotification' });
-  const mode = res.mode === 'browser' ? '浏览器' : 'Native';
-  const label = res.fallbackFrom === 'native'
-    ? `Native 失败，已回退到${mode}`
-    : mode;
-  showPill(
-    'watcherNotifyStatus',
-    res.ok ? `${label} 已发送` : `${mode} 失败：${res.reason || '未知错误'}`,
-    !res.ok
-  );
-}
-
-async function clearAutoWatcherState() {
-  const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherState' });
-  showText('status', res.ok ? '已清除 watcher 已处理记录。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
-}
-
-async function clearAutoWatcherLogs() {
-  const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherLogs' });
-  showText('status', res.ok ? '已清除 watcher 日志和 trace。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
-}
+document.addEventListener('copy', handleDocumentCopy);
 
 document.addEventListener('DOMContentLoaded', () => {
   load().then(startAdvancedCountdownTimer);
@@ -549,12 +286,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 window.addEventListener('blur', () => {
-  try {
-    window.getSelection()?.removeAllRanges();
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
-    }
-  } catch (_) {}
+  handleWindowBlur();
 });
 el('save').addEventListener('click', save);
 el('testNative').addEventListener('click', testNative);
