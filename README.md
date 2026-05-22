@@ -232,6 +232,18 @@ python .\scripts\build_icons.py
 .\native-host\uninstall_host.ps1 -RemoveFiles
 ```
 
+现在的卸载脚本是保守模式：
+
+- 只删除**已知属于本插件**的文件：
+  - `ablesci_pdf_helper.exe`
+  - `com.ablesci.pdf_watcher_private.json`
+  - `icon48.png`
+  - `icon.ico`
+  - 安装标记文件
+- 只有在目录被清空后，才会删除安装目录本身
+- 如果目录里有别的文件，脚本会停止目录删除并提示你手动检查
+- 如果安装目录里缺少插件标记或 manifest 不匹配，脚本会拒绝删文件，只建议你手动检查
+
 如果你想手动确认再删，可以先打开安装目录：
 
 ```powershell

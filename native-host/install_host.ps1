@@ -16,6 +16,7 @@ $RepoRoot = Split-Path -Parent $ScriptDir
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $PrebuiltExe = Join-Path $RepoRoot "native-helper\bin\windows-amd64\ablesci_pdf_helper.exe"
 $SourceGoDir = Join-Path $RepoRoot "native-helper"
+$MarkerFileName = ".ablesci_pdf_watcher_private.install.json"
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
@@ -64,6 +65,16 @@ $manifest = [ordered]@{
 }
 
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
+
+$MarkerPath = Join-Path $InstallDir $MarkerFileName
+$Marker = [ordered]@{
+  host_name = $HostName
+  install_dir = $InstallDir
+  helper_exe = [System.IO.Path]::GetFileName($TargetExe)
+  manifest = [System.IO.Path]::GetFileName($ManifestPath)
+  installed_at = (Get-Date).ToString("s")
+}
+$Marker | ConvertTo-Json -Depth 4 | Set-Content -Path $MarkerPath -Encoding UTF8
 
 # Copy notification icon alongside the helper binary
 $NotifyIconSrc = Join-Path $RepoRoot "extension\icons\icon48.png"
