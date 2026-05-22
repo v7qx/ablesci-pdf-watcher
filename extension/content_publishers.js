@@ -49,7 +49,7 @@
   }
 
   function getScienceDirectPii() {
-    const m = location.pathname.match(/\/science\/article\/pii\/([^/?#]+)/i);
+    const m = location.pathname.match(/\/science\/article\/(?:abs\/)?pii\/([^/?#]+)/i);
     return m ? m[1] : null;
   }
 
@@ -208,8 +208,7 @@
       return;
     }
 
-    const articleUrl = makeScienceDirectArticleUrl();
-    if (!articleUrl) return;
+    const articleUrl = makeScienceDirectArticleUrl() || location.href;
     if (hasScienceDirectNoSubscriptionAccess()) {
       sendScienceDirectMessage({
         articleUrl,

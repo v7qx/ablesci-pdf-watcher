@@ -1020,6 +1020,11 @@
         return false;
       }
 
+      if (msg.publisher === 'sciencedirect' && msg.noSubscription) {
+        pending.finishError(new Error('ScienceDirect 当前页面没有正文订阅权限。'));
+        sendResponse({ ok: true, action: 'science_direct_no_subscription' });
+        return false;
+      }
       if (msg.publisher === 'sciencedirect' && msg.error) {
         pending.finishError(new Error(msg.error));
         sendResponse({ ok: true, action: 'science_direct_error' });
