@@ -84,23 +84,50 @@
       return { list: next, removed };
     }
 
-    async function promoteJournalAccessRuleAfterSuccess(journalName, opts) {
+    function compactRuleEntry(journalName, stat = {}) {
       const journal = String(journalName || '').trim();
-      if (!journal) return;
+      const aliases = Array.from(new Set((Array.isArray(stat.aliases) ? stat.aliases : [])
+        .map(name => String(name || '').trim())
+        .filter(name => name && normalizeJournalKey(name) !== normalizeJournalKey(journal))));
+      return {
+        full: journal,
+        aliases,
+        successCount: Number(stat.successCount || 0),
+        failCount: Number(stat.failCount || 0),
+        consecutiveFailCount: Number(stat.consecutiveFailCount || 0),
+        doiFailureCount: Number(stat.doiFailureCount || 0),
+        consecutiveDoiFailureCount: Number(stat.consecutiveDoiFailureCount || 0),
+        accessState: String(stat.accessState || 'unknown')
+      };
+    }
+
+    function upsertRuleEntry(list, journalName, stat = {}) {
+      const journal = String(journalName || '').trim();
+      const target = normalizeJournalKey(journal);
+      const next = Array.isArray(list) ? list.slice() : [];
+      const entry = compactRuleEntry(journal, stat);
+      const idx = next.findIndex(item => journalRuleNames(item).some(name => normalizeJournalKey(name) === target));
+      if (idx >= 0) next[idx] = entry;
+      else next.push(entry);
+      return next;
+    }
+
+    async function syncJournalAccessRulesFromStats(journalName, stat, opts) {
+      const journal = String(journalName || '').trim();
+      if (!journal || !stat) return;
       const fileRules = await readJournalAccessRulesFromConfig(opts);
       const raw = fileRules.ok ? fileRules.raw : String(opts?.watcherJournalAccessRules || '').trim();
       const rules = parseJournalAccessRules(raw);
-      const blocked = removeRuleMatchingJournal(rules.blocked, journal);
-      const hasKnown = [...rules.allowed, ...rules.partial].some(entry =>
-        journalRuleNames(entry).some(name => normalizeJournalKey(name) === normalizeJournalKey(journal))
-      );
-      if (!blocked.removed && hasKnown) return;
-      rules.blocked = blocked.list;
-      if (!hasKnown) {
-        rules.partial = [
-          ...rules.partial,
-          { full: journal, source: 'upload_success', updatedAt: new Date().toISOString() }
-        ];
+      rules.blocked = removeRuleMatchingJournal(rules.blocked, journal).list;
+      rules.allowed = removeRuleMatchingJournal(rules.allowed, journal).list;
+      rules.partial = removeRuleMatchingJournal(rules.partial, journal).list;
+      const accessState = String(stat.accessState || 'unknown');
+      if (accessState === 'no_access') {
+        rules.blocked = upsertRuleEntry(rules.blocked, journal, stat);
+      } else if (accessState === 'partial_access') {
+        rules.partial = upsertRuleEntry(rules.partial, journal, stat);
+      } else if (accessState === 'has_access') {
+        rules.allowed = upsertRuleEntry(rules.allowed, journal, stat);
       }
       const text = JSON.stringify(rules, null, 2);
       await chromeApi.storage.local.set({ watcherJournalAccessRules: text });
@@ -196,10 +223,8 @@
           index: lookup
         }
       });
-      if (result?.ok) {
-        const opts = await getOptions();
-        await promoteJournalAccessRuleAfterSuccess(journal, opts);
-      }
+      const opts = await getOptions();
+      await syncJournalAccessRulesFromStats(journal, item, opts);
     }
 
     return {
@@ -208,7 +233,9 @@
       readJournalAccessRulesFromConfig,
       writeJournalAccessRulesToConfig,
       removeRuleMatchingJournal,
-      promoteJournalAccessRuleAfterSuccess,
+      compactRuleEntry,
+      upsertRuleEntry,
+      syncJournalAccessRulesFromStats,
       recordJournalAccessResult,
       recordJournalAccessResultNow
     };

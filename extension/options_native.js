@@ -47,7 +47,7 @@
       const current = opts || (typeof loadOptions === 'function' ? await loadOptions() : null) || {};
       const cached = String(current.watcherJournalAccessRules || '').trim();
       setText('journalAccessCacheSummary', cached ? journalAccessSummary(cached) : '缓存为空');
-      setText('journalAccessConfigSource', 'Native Helper 目录 / journal-access.json');
+      setText('journalAccessConfigSource', 'Native Helper 目录 / journal-access.json（config.local 仅兼容回退）');
       const res = await readJournalAccessConfig();
       if (res.ok) {
         const rules = parseJournalAccessRules(res.body || '');
@@ -55,7 +55,7 @@
         const hidden = el('watcherJournalAccessRules');
         if (hidden) hidden.value = text;
         setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已读取`);
-        setText('journalAccessConfigSource', res.path || 'Native Helper 目录 / journal-access.json');
+        setText('journalAccessConfigSource', res.path || 'Native Helper 目录 / journal-access.json（config.local 仅兼容回退）');
         showPill('journalAccessConfigStatus', '已加载文件');
         return;
       }

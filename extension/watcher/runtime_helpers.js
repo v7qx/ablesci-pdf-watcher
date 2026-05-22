@@ -69,7 +69,7 @@
         return {
           ...opts,
           watcherJournalAccessRules: text,
-          watcherJournalAccessRulesSource: res.path || 'config.local/journal-access.json'
+          watcherJournalAccessRulesSource: res.path || 'journal-access.json'
         };
       } catch (_) {
         return {

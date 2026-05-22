@@ -926,7 +926,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>期刊访问名单</strong>
-          <span>固定读取 Native Helper 目录中的 journal-access.json，不在设置页展示完整大名单。列表页命中 blocked 会跳过，allowed / partial 会提高候选优先级。</span>
+          <span>优先读取 Native Helper 目录中的 journal-access.json；旧版 config.local 仅作为兼容回退。不在设置页展示完整大名单。列表页命中 blocked 会跳过，allowed / partial 会提高候选优先级。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherJournalAccessRules" spellcheck="false" aria-label="期刊访问名单缓存 JSON" hidden></textarea>
@@ -938,7 +938,7 @@
           <button id="openWatcherConfigDir" class="secondary" type="button">打开配置目录</button>
           <button id="reloadJournalAccessConfig" class="secondary" type="button">重载名单</button>
           <span id="journalAccessConfigStatus" class="pill">未读取</span>
-          <div class="setting-hint">点击“打开配置目录”会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub。</div>
+          <div class="setting-hint">点击“打开配置目录”会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub；旧版 `config.local` 目录仅保留兼容回退读取。</div>
         </div>
       </div>
       <div class="setting-row">

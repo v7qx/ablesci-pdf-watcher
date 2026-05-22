@@ -234,7 +234,7 @@
       };
       const journalAccessJson = JSON.stringify(reportValueForJson({
         updatedAt: new Date().toISOString(),
-        note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 config.local/journal-access.json 或设置页指定路径。',
+        note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 Native Helper 目录中的 journal-access.json；config.local 仅保留旧版本兼容回退。',
         source: opts.watcherJournalAccessRulesSource || 'chrome.storage.local cache',
         summary: journalAccessSummary,
         manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
