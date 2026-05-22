@@ -546,6 +546,7 @@
     randomizeAssistListUrlWithMeta,
     incrementDaily,
     parseListUrl,
+    minSeekingGateForList,
     orderCandidatesForRun,
     enrichCandidateJournalFromMap,
     isListCandidateAllowed,
