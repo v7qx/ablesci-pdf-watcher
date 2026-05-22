@@ -43,6 +43,7 @@
       if (/doi\.org/i.test(raw) && /not found|404|invalid|不存在|未找到/i.test(raw)) return 'doi_resolution_failed';
       if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
       if (/ScienceDirect 当前页面没有正文订阅权限|does not subscribe to this content on ScienceDirect|当前页面没有正文订阅权限/i.test(raw)) return 'no_access';
+      if (/等待 ScienceDirect 登录\/机构访问超时|需要登录或机构访问|ScienceDirect 需要登录/i.test(raw)) return 'login_required';
       if (/未触发 PDF 下载超时|等待出版商页面触发 PDF 下载超时|后台标签页没有触发 PDF 下载/i.test(raw)) return 'download_not_triggered_timeout';
       if (/下载中超时|下载超时/i.test(raw)) return 'download_timeout';
       if (/任务总超时|单任务最长时间/i.test(raw)) return 'task_timeout';

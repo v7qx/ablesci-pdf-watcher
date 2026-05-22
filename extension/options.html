@@ -1029,7 +1029,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>失败期刊、提醒与日报</strong>
-          <span>仅当某期刊连续失败 10 次且暂无成功记录时才按无权限跳过；提醒优先走 Native Helper；日报由 Helper 直接写入本地。</span>
+          <span>仅当某期刊连续失败 10 次且暂无成功记录时才按无权限跳过；提醒默认走浏览器通知并带独立声音，Native Helper 仅作实验选项；日报由 Helper 直接写入本地。</span>
         </div>
         <div class="setting-control">
           <label class="toggle" title="启用提醒通知">
@@ -1049,8 +1049,8 @@
             <span class="toggle-text">图标倒计时</span>
           </label>
           <select id="watcherNotifyMode" aria-label="提醒方式">
-            <option value="native">Native Helper</option>
             <option value="browser">浏览器通知</option>
+            <option value="native">Native Helper（实验）</option>
           </select>
           <button id="testWatcherNotification" class="secondary" type="button">测试提醒</button>
           <span id="watcherNotifyStatus" class="pill">未测试</span>
@@ -1115,6 +1115,7 @@
 <script src="common_storage.js"></script>
 <script src="common_worktime.js"></script>
 <script src="options_helpers.js"></script>
+<script src="options_native.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

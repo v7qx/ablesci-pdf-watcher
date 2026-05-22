@@ -16,7 +16,59 @@
       nativeNotifyTimeoutMs
     } = config;
 
-    async function notifyWatcherNeedsAttention(reason, url) {
+    let creatingOffscreenDocument = null;
+
+    async function ensureOffscreenAudioDocument() {
+      if (!chromeApi.offscreen?.createDocument || !chromeApi.runtime?.getContexts) return false;
+      const offscreenUrl = chromeApi.runtime.getURL('offscreen_audio.html');
+      const contexts = await chromeApi.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl]
+      });
+      if (Array.isArray(contexts) && contexts.length) return true;
+      if (!creatingOffscreenDocument) {
+        creatingOffscreenDocument = chromeApi.offscreen.createDocument({
+          url: 'offscreen_audio.html',
+          reasons: ['AUDIO_PLAYBACK'],
+          justification: 'Play watcher notification sounds without relying on native helper.'
+        }).finally(() => {
+          creatingOffscreenDocument = null;
+        });
+      }
+      await creatingOffscreenDocument;
+      return true;
+    }
+
+    async function playBrowserNotificationSound(kind = 'default') {
+      try {
+        const ok = await ensureOffscreenAudioDocument();
+        if (!ok) return { ok: false, reason: 'offscreen_unavailable' };
+        const response = await chromeApi.runtime.sendMessage({
+          type: 'ablesciPlayNotificationSound',
+          kind
+        });
+        return response?.ok ? { ok: true } : { ok: false, reason: response?.reason || 'sound_failed' };
+      } catch (err) {
+        return { ok: false, reason: err?.message || String(err) };
+      }
+    }
+
+    async function sendBrowserNotification(message, opts = {}) {
+      await chromeApi.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Ablesci PDF Watcher',
+        message,
+        priority: opts.priority || 1,
+        requireInteraction: opts.requireInteraction === true
+      });
+      if (opts.playSound !== false) {
+        await playBrowserNotificationSound(opts.soundKind === 'urgent' ? 'urgent' : 'default');
+      }
+      return { ok: true, mode: 'browser' };
+    }
+
+    async function notifyWatcherNeedsAttention(reason, url, notifyOptions = {}) {
       const message = normalizeText(reason || '低频值守需要人工处理。').slice(0, 160);
       const opts = await deps.getOptions();
       if (!opts.watcherNotificationEnabled) {
@@ -34,19 +86,24 @@
           return { ok: true, mode: 'native' };
         } catch (err) {
           console.warn('[Ablesci Auto Watcher] native notify failed', err);
-          if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-          return { ok: false, mode: 'native', reason: err?.message || String(err) };
+          try {
+            const fallback = await sendBrowserNotification(message, notifyOptions);
+            if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
+            return {
+              ok: true,
+              mode: 'browser',
+              fallbackFrom: 'native',
+              reason: err?.message || String(err),
+              fallback
+            };
+          } catch (browserErr) {
+            if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
+            return { ok: false, mode: 'native', reason: err?.message || String(err), fallbackReason: browserErr?.message || String(browserErr) };
+          }
         }
       }
       try {
-        await chromeApi.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/icon48.png',
-          title: 'Ablesci PDF Watcher',
-          message,
-          priority: 1,
-          requireInteraction: false
-        });
+        await sendBrowserNotification(message, notifyOptions);
         if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
         return { ok: true, mode: 'browser' };
       } catch (err) {
@@ -156,7 +213,11 @@
         listUrl
       });
       if (reached) {
-        await notifyWatcherNeedsAttention(`连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`, listUrl);
+        await notifyWatcherNeedsAttention(
+          `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`,
+          listUrl,
+          { requireInteraction: true, soundKind: 'urgent', priority: 2 }
+        );
         await incrementDaily('notified');
       }
       const tg = await notifyCfChallengeTelegram(opts, listUrl, state.cfChallengeStreak, reached);

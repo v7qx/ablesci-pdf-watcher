@@ -235,6 +235,7 @@
         let abortListener = null;
         let sourceUrlForMatching = pdfUrl;
         let expectedHost = hostnameOf(sourceUrlForMatching);
+        let noDownloadTimeoutMessage = '未触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。';
         const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl);
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();
@@ -271,6 +272,14 @@
           revealed = true;
           chromeApi.tabs.update(tabId, { active: true }).catch(() => {});
           post(port, 'progress', reason || '后台静默等待较久，已切到出版商标签页；如有验证，请完成后插件会继续。');
+        }
+
+        function armNoDownloadTimer(timeoutMs, message) {
+          if (noDownloadTimer) clearTimeout(noDownloadTimer);
+          noDownloadTimeoutMessage = message || noDownloadTimeoutMessage;
+          noDownloadTimer = setTimeout(() => {
+            finishError(new Error(noDownloadTimeoutMessage));
+          }, timeoutMs);
         }
 
         function acceptCandidate(item, source) {
@@ -322,8 +331,17 @@
             port,
             finishError,
             revealPublisherTab,
+            payloadSummary: {
+              assistId: options.payload?.assistId || '',
+              doi: options.payload?.doi || '',
+              journalName: options.payload?.journalName || '',
+              title: options.payload?.title || options.payload?.suggestedFilename || ''
+            },
             publisher: publisherForUrl(articleUrl),
             lastNativePdfUrl: '',
+            extendNoDownloadTimeout(timeoutMs, message) {
+              armNoDownloadTimer(timeoutMs, message);
+            },
             setExpectedDownloadUrl(url) {
               sourceUrlForMatching = url || sourceUrlForMatching;
               expectedHost = hostnameOf(sourceUrlForMatching);
@@ -345,9 +363,7 @@
           setTimeout(pollDownloads, 500);
           setTimeout(pollDownloads, 2000);
 
-          noDownloadTimer = setTimeout(() => {
-            finishError(new Error('未触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。'));
-          }, noDownloadTimeoutMs);
+          armNoDownloadTimer(noDownloadTimeoutMs, noDownloadTimeoutMessage);
         } catch (err) {
           finishError(err);
         }
@@ -366,23 +382,23 @@
         const label = isDoiUrl(pdfUrl) ? 'DOI 跳转' : 'ScienceDirect';
         if (mode === 'publisher_tab' || sdMode === 'visible') {
           post(port, 'progress', `${label} 使用可见出版商页面模式。`);
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         if (mode === 'background_tab' || sdMode === 'silent') {
           post(port, 'progress', `${label} 使用后台静默出版商页面模式。`);
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 0 });
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 0, payload: opts.payloadContext || null });
         }
         post(port, 'progress', `${label} 使用后台静默出版商页面模式；如 30 秒内未触发下载，会自动切到前台。`);
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 
       if (isNatureUrl(pdfUrl)) {
         if (mode === 'publisher_tab') {
           post(port, 'progress', 'Nature 使用可见文章页原生 PDF 下载模式。');
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'Nature 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 
       if (isRscDirectPdfUrl(pdfUrl)) {
@@ -393,15 +409,15 @@
       if (isRscUrl(pdfUrl)) {
         if (mode === 'publisher_tab') {
           post(port, 'progress', 'RSC 使用可见文章页原生 PDF 下载模式。');
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'RSC 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000 });
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 
       if (mode === 'publisher_tab') {
         post(port, 'progress', '通过可见出版商标签页触发下载...');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true });
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
       }
       if (mode === 'background_tab') {
         post(port, 'progress', '通过后台标签页触发下载...');
@@ -542,7 +558,7 @@
 
       await saveDiagnostic({ ...diag, stage: 'picked' });
       post(port, 'progress', 'PDF URL：' + payload.pdfUrl);
-      const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', opts, port, signal);
+      const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', { ...opts, payloadContext: payload }, port, signal);
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
 
@@ -740,7 +756,7 @@
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
           }
-          if (failureReason) {
+          if (failureReason && failureReason !== 'login_required') {
             await recordJournalAccessResult(payload, { ok: false, reason: failureReason });
           }
 
@@ -753,6 +769,16 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true
+              });
+            } else if (failureReason === 'login_required') {
+              const message = 'ScienceDirect 需要登录或机构访问后才能继续。插件已保留这次为登录阻塞，不计入无权限期刊；完成登录后可重新触发。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: 'login_required'
               });
             } else if (failureReason === 'no_access') {
               const message = '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。';
@@ -867,6 +893,16 @@
       if (msg.publisher === 'sciencedirect' && msg.error) {
         pending.finishError(new Error(msg.error));
         sendResponse({ ok: true, action: 'science_direct_error' });
+        return false;
+      }
+      if (msg.publisher === 'sciencedirect' && msg.loginRequired) {
+        pending.revealPublisherTab?.('ScienceDirect 需要登录或机构访问，已切到前台；完成登录后插件会继续查找 PDF。');
+        pending.extendNoDownloadTimeout?.(
+          5 * 60 * 1000,
+          '等待 ScienceDirect 登录/机构访问超时；请完成登录后重新触发，或检查当前浏览器是否已具备正文访问权限。'
+        );
+        post(pending.port, 'progress', '检测到 ScienceDirect 需要登录或机构访问，已延长等待时间。');
+        sendResponse({ ok: true, action: 'science_direct_login_required' });
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.clicked) {

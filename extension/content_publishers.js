@@ -12,6 +12,7 @@
   let natureStopTimer = null;
   let rscStopTimer = null;
   let canControlPromise = null;
+  let scienceDirectLoginPrompted = false;
 
   function isScienceDirect() {
     return /(^|\.)sciencedirect\.com$/i.test(host);
@@ -91,6 +92,20 @@
     const nativePdfHref = findNativePdfHref();
     const viewPdfButton = findViewPdfButton();
     return !!(disabledFullText && remoteAccessLink && !nativePdfHref && !viewPdfButton);
+  }
+
+  function isScienceDirectAbstractPage() {
+    return /\/science\/article\/abs\/pii\/[^/?#]+(?:[/?#]|$)/i.test(location.pathname + location.search);
+  }
+
+  function hasScienceDirectLoginRequiredAccess() {
+    if (!isScienceDirectAbstractPage()) return false;
+    const hasNativePdf = !!findNativePdfHref();
+    const hasPdfButton = !!findViewPdfButton();
+    if (hasNativePdf || hasPdfButton) return false;
+    const loginLink = document.querySelector('a[href*="/user/institution/login"], a[href*="login?targetURL="], a[href*="via%3Dihub"]');
+    const text = ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
+    return !!loginLink || /\b(Remote access|Sign in|Access through your institution|institution login)\b/i.test(text);
   }
 
   function isVisible(el) {
@@ -184,6 +199,17 @@
 
     const articleUrl = makeScienceDirectArticleUrl();
     if (!articleUrl) return;
+    if (hasScienceDirectLoginRequiredAccess()) {
+      if (!scienceDirectLoginPrompted) {
+        scienceDirectLoginPrompted = true;
+        sendScienceDirectMessage({
+          articleUrl,
+          loginRequired: true,
+          source: 'sciencedirect_login_required'
+        });
+      }
+      return;
+    }
     if (hasScienceDirectNoSubscriptionAccess()) {
       sendScienceDirectMessage({
         articleUrl,
