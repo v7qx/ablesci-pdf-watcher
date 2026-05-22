@@ -22,6 +22,17 @@
       return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
     }
 
+    function pagePublisherAlias(listUrl, pagePublisher = '') {
+      const direct = publisherAlias(pagePublisher);
+      if (direct && direct !== 'Unknown') return direct;
+      try {
+        const u = new URL(listUrl);
+        return publisherAlias(u.searchParams.get('publisher') || '');
+      } catch (_) {
+        return direct || 'Unknown';
+      }
+    }
+
     function normalizeDocumentType(text) {
       const value = normalizeText(text);
       if (!value) return '';
@@ -388,6 +399,30 @@
       return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot, debug };
     }
 
+    function minSeekingGateForList(parsed, listUrl, pagePublisher, opts = {}) {
+      const threshold = Math.max(0, Number(opts.watcherMinNonSdSeekingCount || 0));
+      if (threshold <= 0) return { ok: true, count: null, publisher: '' };
+      const alias = pagePublisherAlias(listUrl, pagePublisher);
+      if (!alias || alias === 'Unknown' || /elsevier|sciencedirect/i.test(alias)) {
+        return { ok: true, count: null, publisher: alias };
+      }
+      const counts = parsed?.demandSnapshot?.publisherCounts || {};
+      const count = Object.entries(counts).reduce((sum, [name, value]) => {
+        return publisherAlias(name) === alias ? sum + Math.max(0, Number(value) || 0) : sum;
+      }, 0);
+      if (!Number.isFinite(count) || count <= 0) return { ok: true, count: null, publisher: alias };
+      if (count < threshold) {
+        return {
+          ok: false,
+          reason: 'list_low_seeking_count',
+          publisher: alias,
+          count,
+          threshold
+        };
+      }
+      return { ok: true, count, publisher: alias, threshold };
+    }
+
     function waitForAssistListDom(timeoutMs = 9000) {
       function text(el) {
         return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -507,6 +542,7 @@
       candidateModelScore,
       orderCandidatesForRun,
       parseAssistListPage,
+      minSeekingGateForList,
       waitForAssistListDom,
       isListCandidateAllowed,
       isDetailAllowedForWatcher,

@@ -36,6 +36,7 @@
       randomizeAssistListUrlWithMeta,
       incrementDaily,
       parseListUrl,
+      minSeekingGateForList,
       orderCandidatesForRun,
       enrichCandidateJournalFromMap,
       isListCandidateAllowed,
@@ -318,6 +319,18 @@
           if (parsed.cfChallenge) {
             if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
             return finish({ ok: false, reason: 'cf_challenge' });
+          }
+          const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
+          if (!sourceGate.ok) {
+            await appendWatcherTrace('list_scan_skip_source_gate', {
+              reason: sourceGate.reason,
+              trigger,
+              listUrl: pickedListUrl,
+              publisher: sourceGate.publisher,
+              count: sourceGate.count,
+              threshold: sourceGate.threshold
+            });
+            continue;
           }
           await resetCfChallengeStreak();
 

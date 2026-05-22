@@ -884,6 +884,15 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>非 SD 最低求助量</strong>
+          <span>除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherMinNonSdSeekingCount" type="number" min="0" max="100000" step="1" value="200">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>候选筛选</strong>
           <span>统一控制候选跳过条件。列表页先筛一次，详情页再按备注、文献类型、风险提示二次确认。</span>
         </div>

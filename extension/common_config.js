@@ -28,6 +28,7 @@
     watcherMinIntervalMinutes: 10,
     watcherMaxIntervalMinutes: 60,
     watcherMaxCandidatesPerRun: 1,
+    watcherMinNonSdSeekingCount: 200,
     watcherListUrls: [
       'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page=3',
       'https://www.ablesci.com/assist/index?status=waiting&publisher=rsc'
@@ -204,6 +205,7 @@
       watcherSchedulerMode: schedulerMode,
       ...intervals,
       watcherMaxCandidatesPerRun: 1,
+      watcherMinNonSdSeekingCount: clampNumber(opts.watcherMinNonSdSeekingCount, DEFAULT_OPTIONS.watcherMinNonSdSeekingCount, 0, 100000),
       watcherListUrls: normalizeWatcherListUrls(opts.watcherListUrls),
       watcherUploadCountdownSeconds: clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120),
       watcherDailyLimit: clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX),

@@ -113,6 +113,7 @@ function validateOptions(opts) {
     throw new Error('随机应助间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
+  if (opts.watcherMinNonSdSeekingCount < 0) throw new Error('非 SD 最低求助量不能小于 0。');
   if (opts.watcherMaxPerSession < 1 || opts.watcherMaxPerSession > 10) {
     throw new Error('每会话最多候选必须在 1–10 之间。');
   }
@@ -161,6 +162,7 @@ async function save() {
   opts.watcherSchedulerMode = normalizeSchedulerMode(opts);
   Object.assign(opts, normalizeWatcherIntervals(opts));
   opts.watcherMaxCandidatesPerRun = 1;
+  opts.watcherMinNonSdSeekingCount = clampNumber(opts.watcherMinNonSdSeekingCount, DEFAULT_OPTIONS.watcherMinNonSdSeekingCount, 0, 100000);
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX);
