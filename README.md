@@ -202,12 +202,52 @@ python .\scripts\build_icons.py
 
 ## 卸载
 
+这个项目分成两部分：
+
+1. **浏览器扩展**
+   - 直接在 Chrome / Edge 的扩展管理页移除即可
+   - 这部分不写系统注册表
+
+2. **Native Helper**
+   - 会写入当前用户注册表：
+     - `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ablesci.pdf_watcher_private`
+     - `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.ablesci.pdf_watcher_private`
+   - 会在本地安装目录放置：
+     - `ablesci_pdf_helper.exe`
+     - Native host manifest
+     - 图标文件
+   - 会创建一个开始菜单快捷方式，用于通知图标来源
+
+所以如果你只删除扩展，**Helper 不会自动消失**。
+
+只移除 Native Helper 注册信息和开始菜单快捷方式：
+
 ```powershell
 .\native-host\uninstall_host.ps1
 ```
 
-删除安装目录：
+连同安装目录一起删除：
 
 ```powershell
 .\native-host\uninstall_host.ps1 -RemoveFiles
 ```
+
+如果你想手动确认再删，可以先打开安装目录：
+
+```powershell
+.\native-host\uninstall_host.ps1 -OpenInstallDir
+```
+
+建议顺序：
+
+1. 在浏览器扩展管理页移除扩展
+2. 运行 `.\native-host\uninstall_host.ps1`
+3. 如果确认不再使用，再运行 `.\native-host\uninstall_host.ps1 -RemoveFiles`
+
+如果你更偏向手动处理，也可以只运行：
+
+```powershell
+.\native-host\uninstall_host.ps1 -OpenInstallDir
+```
+
+然后自行删除打开的安装目录。这样更适合排查“另一台电脑脚本看起来没生效”这种情况，因为你可以直接看到 Helper 文件是否还在。
