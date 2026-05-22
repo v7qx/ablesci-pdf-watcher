@@ -1,6 +1,6 @@
 // Responsibility: watcher attention notifications, CF challenge pause flow, and risk budget accounting.
 (function () {
-  const BROWSER_NOTIFICATION_ICON_URL = 'icons/notify_empty.png';
+  const BROWSER_NOTIFICATION_ICON_URL = 'icons/icon128.png';
 
   function createWatcherNotificationApi(config) {
     const {

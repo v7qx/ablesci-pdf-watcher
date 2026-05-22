@@ -7,7 +7,7 @@
   const ACCESS_ENV_WINDOW_MS = 15 * 60 * 1000;
   const ACCESS_ENV_THRESHOLD = 3;
   const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 3;
-  const ACCESS_ENV_NOTIFICATION_ICON_URL = 'icons/notify_empty.png';
+  const ACCESS_ENV_NOTIFICATION_ICON_URL = 'icons/icon128.png';
 
   function createBackgroundUploadApi(deps) {
     const {
