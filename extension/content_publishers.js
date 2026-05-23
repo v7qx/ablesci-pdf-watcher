@@ -582,8 +582,7 @@
     const candidates = Array.from(document.querySelectorAll(
       'button[data-id="article-toolbar-pdf"], button[aria-label="PDF"], button[aria-label*="PDF"], [role="button"][data-id="article-toolbar-pdf"]'
     ));
-    return candidates.find(el => {
-      if (!isVisible(el)) return false;
+    const matching = candidates.filter(el => {
       const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
       const marker = [
         el.className || '',
@@ -593,7 +592,8 @@
         el.getAttribute('data-action') || ''
       ].join(' ');
       return /(^| )PDF( |$)|Download PDF|Full Text PDF|下载PDF/i.test(`${text} ${marker}`);
-    }) || null;
+    });
+    return matching.find(isVisible) || matching[0] || null;
   }
 
   async function notifyRscReady() {
