@@ -182,10 +182,27 @@
     });
   }
 
+  function pageText() {
+    return ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
+  }
+
   function hasPublisherChallengePage() {
-    const text = ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
-    const title = String(document.title || '');
-    return /Cloudflare|Just a moment|验证你是真人|请完成验证|安全检查|security check|captcha|robot/i.test(`${title} ${text}`);
+    const text = pageText();
+    const shortText = text.slice(0, 4000);
+    const title = String(document.title || '').trim();
+    const hasChallengeDom = !!document.querySelector(
+      '#challenge-running, #challenge-stage, #cf-challenge-running, #cf-wrapper, #cf-error-details, ' +
+      'form#challenge-form, form[action*=\"/cdn-cgi/challenge-platform/\"], ' +
+      'iframe[title*=\"captcha\" i], iframe[src*=\"captcha\" i], ' +
+      'input[name=\"cf-turnstile-response\"], textarea[name=\"g-recaptcha-response\"], ' +
+      '[data-sitekey], .cf-turnstile, .g-recaptcha, .h-captcha'
+    );
+    const titleLooksLikeChallenge = /^(Just a moment|Attention Required|Security Check|Cloudflare)/i.test(title) ||
+      /验证你是真人|请完成验证|安全检查/i.test(title);
+    const bodyLooksLikeChallenge =
+      /verify you are human|complete the security check|checking your browser before accessing|enable javascript and cookies to continue|ray id|cf[- ]?challenge|cf[- ]?turnstile/i.test(shortText) ||
+      /验证你是真人|请完成验证|安全检查|正在检查您的浏览器/i.test(shortText);
+    return hasChallengeDom || titleLooksLikeChallenge || bodyLooksLikeChallenge;
   }
 
   function stopScienceDirectObserver() {
@@ -218,6 +235,17 @@
     }
 
     const articleUrl = makeScienceDirectArticleUrl() || location.href;
+    const nativePdfHref = findNativePdfHref();
+    if (nativePdfHref) {
+      viewPdfTriggered = true;
+      sendScienceDirectMessage({
+        articleUrl,
+        pdfUrl: nativePdfHref,
+        source: 'native_view_pdf_href'
+      });
+      stopScienceDirectObserver();
+      return;
+    }
     if (hasPublisherChallengePage()) {
       if (!scienceDirectChallengePrompted) {
         scienceDirectChallengePrompted = true;
@@ -247,17 +275,6 @@
           source: 'sciencedirect_login_required'
         });
       }
-      return;
-    }
-    const nativePdfHref = findNativePdfHref();
-    if (nativePdfHref) {
-      viewPdfTriggered = true;
-      sendScienceDirectMessage({
-        articleUrl,
-        pdfUrl: nativePdfHref,
-        source: 'native_view_pdf_href'
-      });
-      stopScienceDirectObserver();
       return;
     }
 
