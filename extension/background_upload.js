@@ -1198,6 +1198,13 @@
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }
+      if (msg.publisher === 'sage' && msg.clicked && !msg.pdfUrl) {
+        pending.publisher = 'sage';
+        pending.armDownloadCapture?.(pending.articleUrl || pending.pdfUrl || '');
+        post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 按钮，继续监听浏览器下载。');
+        sendResponse({ ok: true, action: 'clicked_sage_pdf_button' });
+        return false;
+      }
       if (msg.publisher === 'sage' && msg.pdfUrl) {
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: 'same sage pdf url already handled' });

@@ -502,6 +502,24 @@
     return found ? { link: found.el, href: found.href, source: 'article_pdf_link' } : null;
   }
 
+  function findSagePdfButton() {
+    const candidates = Array.from(document.querySelectorAll(
+      'button[data-id="article-toolbar-pdf"], button[aria-label="PDF"], button[aria-label*="PDF"], [role="button"][data-id="article-toolbar-pdf"]'
+    ));
+    return candidates.find(el => {
+      if (!isVisible(el)) return false;
+      const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      const marker = [
+        el.className || '',
+        el.id || '',
+        el.getAttribute('data-id') || '',
+        el.getAttribute('data-category') || '',
+        el.getAttribute('data-action') || ''
+      ].join(' ');
+      return /(^| )PDF( |$)|Download PDF|Full Text PDF|下载PDF/i.test(`${text} ${marker}`);
+    }) || null;
+  }
+
   async function notifyRscReady() {
     if (!isRsc() || rscPdfTriggered) return;
     if (!(await canControlCurrentPublisherPage())) {
@@ -562,13 +580,25 @@
       return;
     }
     const found = findSageArticlePdfLink();
-    if (!found) return;
+    if (found) {
+      sagePdfTriggered = true;
+      sendSageMessage({
+        articleUrl: location.href,
+        pdfUrl: found.href,
+        source: found.source
+      });
+      stopSageObserver();
+      return;
+    }
+    const button = findSagePdfButton();
+    if (!button) return;
     sagePdfTriggered = true;
     sendSageMessage({
       articleUrl: location.href,
-      pdfUrl: found.href,
-      source: found.source
+      clicked: true,
+      source: 'sage_toolbar_pdf_button'
     });
+    setTimeout(() => button.click(), 0);
     stopSageObserver();
   }
 
