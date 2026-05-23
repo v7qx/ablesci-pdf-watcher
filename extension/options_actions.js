@@ -11,6 +11,7 @@
       autoWatcherLogKey,
       autoWatcherTraceKey,
       demandSnapshotsKey,
+      lastSageTraceKey,
       journalAccessStatsKey,
       journalAccessLookupKey,
       loadOptions,
@@ -223,6 +224,23 @@
       }
     }
 
+    async function copyRecentSageTrace() {
+      const stored = await chromeApi.storage.local.get(lastSageTraceKey);
+      const trace = Array.isArray(stored[lastSageTraceKey]) ? stored[lastSageTraceKey] : [];
+      if (!trace.length) {
+        showPill('watcherTraceStatus', '暂无 Trace', true);
+        return;
+      }
+      const text = JSON.stringify(trace, null, 2);
+      try {
+        const ok = await copyTextToClipboard(text);
+        if (!ok) throw new Error('copy_failed');
+        showPill('watcherTraceStatus', '已复制');
+      } catch (_) {
+        showPill('watcherTraceStatus', '复制失败', true);
+      }
+    }
+
     async function clearJournalAccessStats() {
       await chromeApi.storage.local.remove(journalAccessStatsKey);
       showText('status', '已清除本地期刊失败记录。');
@@ -309,6 +327,7 @@
       reloadJournalAccessConfig,
       openConfigDir,
       copyAutoWatcherConfig,
+      copyRecentSageTrace,
       clearJournalAccessStats,
       copyTextToClipboard,
       runAutoWatcherNow,

@@ -4,6 +4,7 @@
 (function initBackgroundUpload(globalThis) {
   const ACCESS_ENV_ANOMALY_KEY = 'watcherAccessEnvironmentAnomaly';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
+  const LAST_SAGE_TRACE_KEY = 'lastSageTrace';
   const ACCESS_ENV_WINDOW_MS = 15 * 60 * 1000;
   const ACCESS_ENV_THRESHOLD = 3;
   const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 3;
@@ -69,6 +70,40 @@
     let taskQueue = [];
     let activeTask = null;
     let nextTaskId = 1;
+
+    function shouldTraceSagePending(pending) {
+      if (!pending) return false;
+      return pending.publisher === 'sage' ||
+        isSageUrl(pending.articleUrl || '') ||
+        isSageUrl(pending.pdfUrl || '');
+    }
+
+    function sanitizeTraceUrl(value) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return {
+          host: String(value.host || ''),
+          path: String(value.path || '')
+        };
+      }
+      return urlHostPath(value || '');
+    }
+
+    async function appendSageTrace(step, details = {}) {
+      try {
+        const stored = await chromeApi.storage.local.get(LAST_SAGE_TRACE_KEY);
+        const current = Array.isArray(stored[LAST_SAGE_TRACE_KEY]) ? stored[LAST_SAGE_TRACE_KEY] : [];
+        current.unshift({
+          time: new Date().toISOString(),
+          step,
+          details
+        });
+        await chromeApi.storage.local.set({
+          [LAST_SAGE_TRACE_KEY]: current.slice(0, 120)
+        });
+      } catch (err) {
+        console.warn('[Ablesci PDF Watcher] appendSageTrace failed', err);
+      }
+    }
 
     function payloadJournalKey(payload = {}) {
       return String(payload?.journalName || '').trim().toLowerCase();
@@ -457,6 +492,18 @@
           if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) return;
           if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) return;
           seenIds.add(item.id);
+          if (shouldTraceSagePending(pendingPublisherTabs.get(tabId))) {
+            void appendSageTrace('download_created', {
+              downloadId: item.id,
+              url: sanitizeTraceUrl(item.url || ''),
+              finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
+              filename: item.filename || '',
+              mime: item.mime || '',
+              state: item.state || '',
+              error: item.error || '',
+              matchSource: source
+            });
+          }
           downloadId = item.id;
           if (noDownloadTimer) {
             clearTimeout(noDownloadTimer);
@@ -468,9 +515,35 @@
               item._ablesciCreatedByPlugin = true;
               item._ablesciPublisherTabId = tabId;
               item._ablesciMatchSource = source;
+              if (shouldTraceSagePending(pendingPublisherTabs.get(tabId))) {
+                void appendSageTrace('download_changed', {
+                  downloadId: item.id,
+                  url: sanitizeTraceUrl(item.url || ''),
+                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
+                  filename: item.filename || '',
+                  mime: item.mime || '',
+                  state: item.state || '',
+                  error: item.error || '',
+                  matchSource: source
+                });
+              }
               finishOk(item);
             })
-            .catch(finishError);
+            .catch(err => {
+              if (shouldTraceSagePending(pendingPublisherTabs.get(tabId))) {
+                void appendSageTrace('download_changed', {
+                  downloadId: item.id,
+                  url: sanitizeTraceUrl(item.url || ''),
+                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
+                  filename: item.filename || '',
+                  mime: item.mime || '',
+                  state: item.state || '',
+                  error: err?.message || String(err),
+                  matchSource: source
+                });
+              }
+              finishError(err);
+            });
         }
 
         function onCreated(item) {
@@ -526,6 +599,12 @@
               if (looksLikePdfDownloadUrl(sourceUrlForMatching)) downloadArmed = true;
             }
           });
+          if (publisherForUrl(articleUrl) === 'sage' || /sage/i.test(String(options.payload?.journalName || ''))) {
+            void appendSageTrace('opened_sage_tab', {
+              tabId,
+              initialUrl: sanitizeTraceUrl(articleUrl)
+            });
+          }
           registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
 
           if (active) {
@@ -714,6 +793,9 @@
       throwIfAborted(signal);
       const opts = optsOverride || await getOptions();
       const diag = makeDiagnosticBase(payload, opts);
+      const traceSage = isSageUrl(payload?.pickedUrl || '') ||
+        isSageUrl(payload?.pdfUrl || '') ||
+        /sage/i.test(String(payload?.journalName || ''));
 
       if (!payload?.pdfUrl) {
         await saveDiagnostic({ ...diag, stage: 'skipped-missing-pdf-url', error: '缺少 pdfUrl，已按信息不全跳过' });
@@ -737,6 +819,14 @@
 
       await saveDiagnostic({ ...diag, stage: 'picked' });
       post(port, 'progress', 'PDF URL：' + payload.pdfUrl);
+      if (traceSage) {
+        await appendSageTrace('upload_started', {
+          filename: payload.suggestedFilename || '',
+          error: '',
+          pdfUrl: sanitizeTraceUrl(payload.pdfUrl || ''),
+          pickedUrl: sanitizeTraceUrl(payload.pickedUrl || '')
+        });
+      }
       const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', { ...opts, payloadContext: payload }, port, signal);
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
@@ -831,6 +921,12 @@
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
+        if (traceSage) {
+          await appendSageTrace('upload_success', {
+            filename: stat.filename || '',
+            error: ''
+          });
+        }
         postDoneFromSiteResponse(port, permit, '上传成功');
         return;
       }
@@ -875,12 +971,24 @@
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
+        if (traceSage) {
+          await appendSageTrace('upload_success', {
+            filename: stat.filename || '',
+            error: ''
+          });
+        }
         postDoneFromSiteResponse(port, parsed, '上传成功');
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
+        if (traceSage) {
+          await appendSageTrace('upload_success', {
+            filename: stat.filename || '',
+            error: ''
+          });
+        }
         post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
           html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
           recomend: false,
@@ -937,6 +1045,15 @@
           }, taskTimeoutMs);
           await handleUpload(port, payload, abortController.signal, opts);
         } catch (err) {
+          const traceSage = isSageUrl(payload?.pickedUrl || '') ||
+            isSageUrl(payload?.pdfUrl || '') ||
+            /sage/i.test(String(payload?.journalName || ''));
+          if (traceSage) {
+            await appendSageTrace('upload_failed', {
+              filename: payload?.suggestedFilename || '',
+              error: err?.message || String(err)
+            });
+          }
           let failureReason = classifyJournalAccessFailureReason(err);
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
@@ -1051,6 +1168,13 @@
       if (!pending) return;
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
+      if (shouldTraceSagePending(pending) || isSageUrl(url)) {
+        void appendSageTrace('sage_tab_updated', {
+          tabId,
+          url: sanitizeTraceUrl(url),
+          status: changeInfo.status || tab?.status || ''
+        });
+      }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
       if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url) || isSageUrl(url))) {
@@ -1078,6 +1202,23 @@
       const tabId = sender.tab && sender.tab.id;
       const pending = tabId != null ? pendingPublisherTabs.get(tabId) : null;
 
+      if (msg?.type === 'ablesciSageTrace') {
+        void appendSageTrace(msg.step || 'sage_trace', {
+          tabId: Number.isInteger(tabId) ? tabId : null,
+          url: sanitizeTraceUrl(msg.url || sender.tab?.url || ''),
+          status: msg.status || '',
+          selector: msg.selector || '',
+          buttonText: msg.buttonText || '',
+          candidateCount: Number(msg.candidateCount || 0),
+          foundDataIdButton: msg.foundDataIdButton === true,
+          foundAriaPdfButton: msg.foundAriaPdfButton === true,
+          runtimeLastError: msg.runtimeLastError || '',
+          action: msg.action || ''
+        });
+        sendResponse({ ok: true });
+        return false;
+      }
+
       if (msg?.type === 'ablesciPublisherCanControl') {
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
         if (msg.publisher && pending.publisher && msg.publisher !== pending.publisher) return sendResponse({ ok: false, reason: 'publisher mismatch' });
@@ -1089,6 +1230,13 @@
       if (!pending) {
         sendResponse({ ok: false, ignored: true, reason: 'no pending publisher task' });
         return false;
+      }
+      if (msg.publisher === 'sage') {
+        void appendSageTrace('content_script_ready', {
+          tabId: Number.isInteger(tabId) ? tabId : null,
+          url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || ''),
+          action: msg.source || ''
+        });
       }
       if (!isExpectedPublisherPage(pending, msg.pageUrl || '')) {
         sendResponse({ ok: false, ignored: true, reason: 'publisher page mismatch' });
@@ -1201,6 +1349,12 @@
       if (msg.publisher === 'sage' && msg.clicked && !msg.pdfUrl) {
         pending.publisher = 'sage';
         pending.armDownloadCapture?.(pending.articleUrl || pending.pdfUrl || '');
+        void appendSageTrace('clicked_sage_pdf_button', {
+          tabId: Number.isInteger(tabId) ? tabId : null,
+          selector: msg.selector || '',
+          buttonText: msg.buttonText || '',
+          currentUrl: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || '')
+        });
         post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 按钮，继续监听浏览器下载。');
         sendResponse({ ok: true, action: 'clicked_sage_pdf_button' });
         return false;

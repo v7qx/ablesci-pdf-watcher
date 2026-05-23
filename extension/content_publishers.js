@@ -20,6 +20,7 @@
   let natureChallengePrompted = false;
   let rscChallengePrompted = false;
   let sageChallengePrompted = false;
+  const LAST_SAGE_TRACE_KEY = 'lastSageTrace';
 
   function isScienceDirect() {
     return /(^|\.)sciencedirect\.com$/i.test(host);
@@ -53,7 +54,14 @@
         publisher: currentPublisher(),
         pageUrl: location.href
       }, resp => {
-        void chrome.runtime.lastError;
+        const lastErr = chrome.runtime.lastError;
+        if (lastErr && isSage()) {
+          appendLocalSageTrace('content_script_ready', {
+            url: traceUrlValue(location.href),
+            action: 'ablesciPublisherCanControl',
+            runtimeLastError: lastErr.message || String(lastErr)
+          });
+        }
         resolve(!!resp?.ok);
       });
     });
@@ -193,6 +201,50 @@
 
   function pageText() {
     return ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function traceUrlValue(value) {
+    try {
+      const parsed = new URL(value || location.href, location.href);
+      return { host: parsed.host, path: parsed.pathname || '/' };
+    } catch (_) {
+      return { host: '', path: '' };
+    }
+  }
+
+  function appendLocalSageTrace(step, details = {}) {
+    const entry = {
+      time: new Date().toISOString(),
+      step,
+      details
+    };
+    try {
+      chrome.storage.local.get(LAST_SAGE_TRACE_KEY, stored => {
+        const list = Array.isArray(stored?.[LAST_SAGE_TRACE_KEY]) ? stored[LAST_SAGE_TRACE_KEY] : [];
+        list.unshift(entry);
+        chrome.storage.local.set({ [LAST_SAGE_TRACE_KEY]: list.slice(0, 120) }, () => {
+          void chrome.runtime.lastError;
+        });
+      });
+    } catch (_) {}
+  }
+
+  function sendSageTrace(step, details = {}) {
+    appendLocalSageTrace(step, details);
+    chrome.runtime.sendMessage({
+      type: 'ablesciSageTrace',
+      step,
+      url: location.href,
+      ...details
+    }, () => {
+      const lastErr = chrome.runtime.lastError;
+      if (lastErr) {
+        appendLocalSageTrace(step, {
+          ...details,
+          runtimeLastError: lastErr.message || String(lastErr)
+        });
+      }
+    });
   }
 
   function hasPublisherChallengePage() {
@@ -384,7 +436,13 @@
       pageUrl: location.href,
       ...payload
     }, () => {
-      void chrome.runtime.lastError;
+      const lastErr = chrome.runtime.lastError;
+      if (lastErr) {
+        sendSageTrace('content_script_ready', {
+          action: payload?.source || '',
+          runtimeLastError: lastErr.message || String(lastErr)
+        });
+      }
     });
   }
 
@@ -582,6 +640,13 @@
     const found = findSageArticlePdfLink();
     if (found) {
       sagePdfTriggered = true;
+      sendSageTrace('sage_pdf_button_scan', {
+        url: traceUrlValue(location.href),
+        selector: 'direct_pdf_link',
+        candidateCount: 0,
+        foundDataIdButton: !!document.querySelector('button[data-id="article-toolbar-pdf"]'),
+        foundAriaPdfButton: !!document.querySelector('button[aria-label="PDF"]')
+      });
       sendSageMessage({
         articleUrl: location.href,
         pdfUrl: found.href,
@@ -591,12 +656,33 @@
       return;
     }
     const button = findSagePdfButton();
+    const allCandidates = Array.from(document.querySelectorAll(
+      'button[data-id="article-toolbar-pdf"], button[aria-label="PDF"], button[aria-label*="PDF"], [role="button"][data-id="article-toolbar-pdf"]'
+    ));
+    const selector = button?.matches?.('button[data-id="article-toolbar-pdf"], [role="button"][data-id="article-toolbar-pdf"]')
+      ? 'button[data-id="article-toolbar-pdf"]'
+      : (button?.matches?.('button[aria-label="PDF"], button[aria-label*="PDF"]') ? 'button[aria-label="PDF"]' : '');
+    sendSageTrace('sage_pdf_button_scan', {
+      url: traceUrlValue(location.href),
+      selector,
+      candidateCount: allCandidates.length,
+      foundDataIdButton: !!document.querySelector('button[data-id="article-toolbar-pdf"], [role="button"][data-id="article-toolbar-pdf"]'),
+      foundAriaPdfButton: !!document.querySelector('button[aria-label="PDF"], button[aria-label*="PDF"]')
+    });
     if (!button) return;
     sagePdfTriggered = true;
+    const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+    sendSageTrace('clicked_sage_pdf_button', {
+      selector,
+      buttonText,
+      currentUrl: traceUrlValue(location.href)
+    });
     sendSageMessage({
       articleUrl: location.href,
       clicked: true,
-      source: 'sage_toolbar_pdf_button'
+      source: 'sage_toolbar_pdf_button',
+      selector,
+      buttonText
     });
     setTimeout(() => button.click(), 0);
     stopSageObserver();
@@ -692,6 +778,10 @@
       rscStopTimer = setTimeout(stopRscObserver, 30000);
     }
     if (isSage()) {
+      sendSageTrace('content_script_injected', {
+        url: traceUrlValue(location.href),
+        status: document.readyState
+      });
       waitForSagePdf();
       sageObserver = new MutationObserver(() => notifySageReady());
       sageObserver.observe(document.documentElement, { childList: true, subtree: true });
