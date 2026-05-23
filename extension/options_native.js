@@ -21,7 +21,7 @@
 
     function journalAccessSummary(raw) {
       const rules = parseJournalAccessRules(raw);
-      return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length}`;
+      return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length} / unknown ${rules.unknown.length}`;
     }
 
     function runtimeMessage(message) {

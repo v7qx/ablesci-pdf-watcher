@@ -144,15 +144,16 @@
     try {
       const parsed = JSON.parse(String(raw || '{}'));
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { blocked: [], allowed: [], partial: [] };
+        return { blocked: [], allowed: [], partial: [], unknown: [] };
       }
       return {
         blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
         allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
-        partial: Array.isArray(parsed.partial) ? parsed.partial : []
+        partial: Array.isArray(parsed.partial) ? parsed.partial : [],
+        unknown: Array.isArray(parsed.unknown) ? parsed.unknown : []
       };
     } catch (_) {
-      return { blocked: [], allowed: [], partial: [] };
+      return { blocked: [], allowed: [], partial: [], unknown: [] };
     }
   }
 

@@ -130,7 +130,7 @@ function validateOptions(opts) {
     try {
       const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('期刊访问名单必须是 JSON 对象。');
-      for (const key of ['blocked', 'allowed', 'partial']) {
+      for (const key of ['blocked', 'allowed', 'partial', 'unknown']) {
         if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`${key} 必须是数组。`);
       }
     } catch (err) {

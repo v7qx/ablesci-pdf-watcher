@@ -117,7 +117,8 @@
       return {
         blocked: Array.isArray(rules.blocked) ? rules.blocked.length : 0,
         partial: Array.isArray(rules.partial) ? rules.partial.length : 0,
-        allowed: Array.isArray(rules.allowed) ? rules.allowed.length : 0
+        allowed: Array.isArray(rules.allowed) ? rules.allowed.length : 0,
+        unknown: Array.isArray(rules.unknown) ? rules.unknown.length : 0
       };
     }
 
@@ -160,6 +161,7 @@
       rules.blocked = removeRuleMatchingJournal(rules.blocked, journal).list;
       rules.allowed = removeRuleMatchingJournal(rules.allowed, journal).list;
       rules.partial = removeRuleMatchingJournal(rules.partial, journal).list;
+      rules.unknown = removeRuleMatchingJournal(rules.unknown, journal).list;
       const accessState = String(stat.accessState || 'unknown');
       if (accessState === 'no_access') {
         rules.blocked = upsertRuleEntry(rules.blocked, journal, stat);
@@ -167,6 +169,8 @@
         rules.partial = upsertRuleEntry(rules.partial, journal, stat);
       } else if (accessState === 'has_access') {
         rules.allowed = upsertRuleEntry(rules.allowed, journal, stat);
+      } else {
+        rules.unknown = upsertRuleEntry(rules.unknown, journal, stat);
       }
       const text = JSON.stringify(rules, null, 2);
       await chromeApi.storage.local.set({ watcherJournalAccessRules: text });

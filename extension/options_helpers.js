@@ -84,8 +84,8 @@
     }
 
     function journalAccessSummary(raw) {
-      const rules = deps.parseJournalAccessRules ? deps.parseJournalAccessRules(raw) : { blocked: [], partial: [], allowed: [] };
-      return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length}`;
+      const rules = deps.parseJournalAccessRules ? deps.parseJournalAccessRules(raw) : { blocked: [], partial: [], allowed: [], unknown: [] };
+      return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length} / unknown ${rules.unknown.length}`;
     }
 
     function sanitizeUrlForExport(value) {
