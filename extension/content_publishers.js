@@ -20,7 +20,6 @@
   let natureChallengePrompted = false;
   let rscChallengePrompted = false;
   let sageChallengePrompted = false;
-  let sageCapturedDownloadFetchUrl = false;
   const LAST_SAGE_TRACE_KEY = 'lastSageTrace';
 
   function isScienceDirect() {
@@ -248,48 +247,62 @@
     });
   }
 
-  function requestSageFetchHook() {
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+  }
+
+  function waitForDocumentComplete(timeoutMs = 5000) {
+    if (document.readyState === 'complete') return Promise.resolve(true);
     return new Promise(resolve => {
-      sendSageTrace('sage_fetch_hook_installing', {
-        currentUrl: traceUrlValue(location.href)
-      });
+      let settled = false;
+      const timer = setTimeout(() => done(false), Math.max(500, Number(timeoutMs) || 5000));
+
+      function done(ok) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        document.removeEventListener('readystatechange', onReadyStateChange);
+        window.removeEventListener('load', onLoad);
+        resolve(ok);
+      }
+
+      function onReadyStateChange() {
+        if (document.readyState === 'complete') done(true);
+      }
+
+      function onLoad() {
+        done(true);
+      }
+
+      document.addEventListener('readystatechange', onReadyStateChange);
+      window.addEventListener('load', onLoad, { once: true });
+    });
+  }
+
+  function requestSageWebRequestCapture() {
+    return new Promise(resolve => {
       chrome.runtime.sendMessage({
-        type: 'ablesciInstallSageFetchHook',
+        type: 'ablesciPrepareSageWebRequestCapture',
         pageUrl: location.href
       }, resp => {
         const lastErr = chrome.runtime.lastError;
         if (lastErr) {
-          sendSageTrace('sage_fetch_hook_installed', {
-            action: 'install_failed',
+          sendSageTrace('timeout_if_no_webrequest_captured', {
+            currentUrl: traceUrlValue(location.href),
             runtimeLastError: lastErr.message || String(lastErr)
           });
           return resolve(false);
         }
-        sendSageTrace('sage_fetch_hook_installed', {
-          action: resp?.ok ? 'installed' : 'install_failed',
-          runtimeLastError: resp?.error || ''
-        });
+        if (!resp?.ok) {
+          sendSageTrace('timeout_if_no_webrequest_captured', {
+            currentUrl: traceUrlValue(location.href),
+            runtimeLastError: resp?.error || 'webRequest capture setup failed'
+          });
+        }
         resolve(!!resp?.ok);
       });
     });
   }
-
-  window.addEventListener('message', event => {
-    if (event.source !== window) return;
-    const data = event.data || {};
-    if (data.source !== 'ablesci-sage-fetch-hook' || data.type !== 'captured_sage_download_fetch_url') return;
-    const url = String(data.url || '');
-    if (!/\/website\/journal\/download\?articleId=/i.test(url)) return;
-    sageCapturedDownloadFetchUrl = true;
-    sendSageTrace('captured_sage_download_fetch_url', {
-      url: traceUrlValue(url)
-    });
-    sendSageMessage({
-      articleUrl: location.href,
-      pdfUrl: url,
-      source: 'sage_captured_fetch_url'
-    });
-  });
 
   function hasPublisherChallengePage() {
     const text = pageText();
@@ -716,15 +729,18 @@
     if (button) {
       sagePdfTriggered = true;
       const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
-      const hookOk = await requestSageFetchHook();
-      if (!hookOk) {
-        sendSageTrace('timeout_if_no_fetch_captured', {
+      await waitForDocumentComplete(5000);
+      await delay(1000);
+      const captureOk = await requestSageWebRequestCapture();
+      if (!captureOk) {
+        sendSageTrace('timeout_if_no_webrequest_captured', {
           selector,
           currentUrl: traceUrlValue(location.href),
-          runtimeLastError: 'fetch hook install failed before click'
+          runtimeLastError: 'webRequest capture setup failed before click'
         });
         return;
       }
+      button.click();
       sendSageMessage({
         articleUrl: location.href,
         clicked: true,
@@ -732,22 +748,6 @@
         selector,
         buttonText
       });
-      setTimeout(() => {
-        button.click();
-        sendSageTrace('clicked_sage_pdf_button', {
-          selector,
-          buttonText,
-          currentUrl: traceUrlValue(location.href)
-        });
-      }, 0);
-      setTimeout(() => {
-        if (!sageCapturedDownloadFetchUrl) {
-          sendSageTrace('timeout_if_no_fetch_captured', {
-            selector,
-            currentUrl: traceUrlValue(location.href)
-          });
-        }
-      }, 5000);
       stopSageObserver();
       return;
     }

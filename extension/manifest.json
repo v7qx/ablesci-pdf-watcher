@@ -17,7 +17,8 @@
     "offscreen",
     "scripting",
     "storage",
-    "tabs"
+    "tabs",
+    "webRequest"
   ],
   "host_permissions": [
     "https://www.ablesci.com/*",
