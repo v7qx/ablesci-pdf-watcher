@@ -941,7 +941,7 @@
             failureReason = 'doi_resolution_failed';
           }
           let accessEnvironmentPause = null;
-          if (failureReason === 'no_access') {
+          if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
           if (failureReason && failureReason !== 'login_required' && failureReason !== 'cf_challenge') {
@@ -980,7 +980,7 @@
                 blocked: true,
                 skipReason: 'cf_challenge'
               });
-            } else if (failureReason === 'no_access') {
+            } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
               const message = accessEnvironmentPause?.paused
                 ? accessEnvironmentPause.message
                 : '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。';
@@ -1093,7 +1093,7 @@
       }
 
       if (msg.publisher === 'sciencedirect' && msg.noSubscription) {
-        pending.finishError(new Error('ScienceDirect 当前页面没有正文订阅权限。'));
+        pending.finishError(new Error('ScienceDirect 明确返回无正文订阅权限（does not subscribe to this content on ScienceDirect）。'));
         sendResponse({ ok: true, action: 'science_direct_no_subscription' });
         return false;
       }

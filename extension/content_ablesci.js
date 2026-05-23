@@ -183,9 +183,11 @@
     renderJournalAccessHint(btn).catch(() => {});
   }
 
-  function setStatus(msg, type) {
+  function setStatus(msg, type, extra = null) {
     const btn = $('#' + BTN_ID);
     const log = $('#' + LOG_ID);
+    const titleText = extra && extra.title ? extra.title : msg;
+    const logText = extra && Object.prototype.hasOwnProperty.call(extra, 'logText') ? extra.logText : msg;
     if (btn) {
       btn.classList.remove('busy', 'ok', 'err');
       btn.classList.remove('warn');
@@ -204,9 +206,9 @@
               ? '上传失败'
               : idleButtonText();
       if (!type) applyButtonAppearance(btn);
-      btn.title = msg || '一键下载并上传 PDF';
+      btn.title = titleText || '一键下载并上传 PDF';
     }
-    if (log) log.textContent = msg || '';
+    if (log) log.textContent = logText || '';
     console.log('[Ablesci Native PDF Uploader]', msg);
   }
 
@@ -555,7 +557,14 @@
         const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush)
           ? { ...msg, message: '上传成功', html: '上传成功', recomend: false, recommend: false }
           : msg;
-        setStatus(completionMsg.message || '上传成功', completionMsg.blocked ? 'blocked' : (completionMsg.downloadOnly ? 'downloadOnly' : 'ok'));
+        if (completionMsg.blocked) {
+          setStatus('已跳过', 'blocked', {
+            title: completionMsg.message || '当前任务已跳过',
+            logText: ''
+          });
+        } else {
+          setStatus(completionMsg.message || '上传成功', completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
+        }
         if (!msg.downloadOnly) {
           showSiteLikeCompletion(completionMsg);
         }

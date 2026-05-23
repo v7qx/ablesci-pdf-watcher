@@ -232,7 +232,9 @@
           item.consecutiveDoiFailureCount += 1;
           item.lastDoiFailureAt = item.lastFailAt;
         }
-        if (item.successCount > 0) {
+        if (reason === 'explicit_no_subscription') {
+          item.accessState = 'no_access';
+        } else if (item.successCount > 0) {
           item.accessState = 'partial_access';
         } else if (item.consecutiveFailCount >= 10) {
           item.accessState = 'no_access';
