@@ -304,6 +304,48 @@
     });
   }
 
+  function requestSageCaptureStatus() {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage({
+        type: 'ablesciSageCaptureStatus',
+        pageUrl: location.href
+      }, resp => {
+        const lastErr = chrome.runtime.lastError;
+        if (lastErr) return resolve({ ok: false, error: lastErr.message || String(lastErr) });
+        resolve(resp || { ok: false });
+      });
+    });
+  }
+
+  function notifySageAutoCaptureFailed(selector) {
+    chrome.runtime.sendMessage({
+      type: 'ablesciSageAutoCaptureFailed',
+      pageUrl: location.href,
+      selector
+    }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
+  function clickSagePdfButton(button) {
+    try {
+      button.scrollIntoView({ block: 'center', inline: 'center' });
+    } catch (_) {}
+    try {
+      button.focus();
+    } catch (_) {}
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      try {
+        button.dispatchEvent(new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: window
+        }));
+      } catch (_) {}
+    }
+  }
+
   function hasPublisherChallengePage() {
     const text = pageText();
     const shortText = text.slice(0, 4000);
@@ -729,8 +771,16 @@
     if (button) {
       sagePdfTriggered = true;
       const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      sendSageTrace('sage_auto_start', {
+        url: traceUrlValue(location.href),
+        selector
+      });
       await waitForDocumentComplete(5000);
-      await delay(1000);
+      await delay(1800);
+      sendSageTrace('wait_after_complete_or_hydration', {
+        url: traceUrlValue(location.href),
+        selector
+      });
       const captureOk = await requestSageWebRequestCapture();
       if (!captureOk) {
         sendSageTrace('timeout_if_no_webrequest_captured', {
@@ -740,14 +790,48 @@
         });
         return;
       }
-      button.click();
-      sendSageMessage({
-        articleUrl: location.href,
-        clicked: true,
-        source: 'sage_toolbar_pdf_button',
-        selector,
-        buttonText
-      });
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const statusBefore = await requestSageCaptureStatus();
+        if (statusBefore?.captured || statusBefore?.handled) break;
+        const currentButton = findSagePdfButton();
+        const currentUrl = location.href;
+        const urlOk = /^https:\/\/sage\.cnpereading\.com\/doi\//i.test(currentUrl);
+        if (!urlOk || !currentButton) {
+          sendSageTrace('timeout_if_no_webrequest_captured_after_retries', {
+            selector,
+            currentUrl: traceUrlValue(currentUrl),
+            attempt,
+            runtimeLastError: !urlOk ? 'sage doi url changed before retry' : 'sage pdf button missing before retry'
+          });
+          notifySageAutoCaptureFailed(selector);
+          break;
+        }
+        sendSageTrace('sage_auto_click_attempt', {
+          attempt,
+          selector,
+          currentUrl: traceUrlValue(currentUrl)
+        });
+        clickSagePdfButton(currentButton);
+        sendSageMessage({
+          articleUrl: location.href,
+          clicked: true,
+          source: 'sage_toolbar_pdf_button',
+          selector,
+          buttonText,
+          attempt
+        });
+        await delay(5000);
+        const statusAfter = await requestSageCaptureStatus();
+        if (statusAfter?.captured || statusAfter?.handled) break;
+        if (attempt === 3) {
+          sendSageTrace('timeout_if_no_webrequest_captured_after_retries', {
+            selector,
+            currentUrl: traceUrlValue(location.href),
+            attempt
+          });
+          notifySageAutoCaptureFailed(selector);
+        }
+      }
       stopSageObserver();
       return;
     }
