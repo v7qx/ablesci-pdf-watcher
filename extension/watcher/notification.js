@@ -195,6 +195,17 @@
       const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
       state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
       const reached = opts.watcherAdvancedSchedulerEnabled || state.cfChallengeStreak >= threshold;
+      if (opts.watcherCfNotificationEnabled !== false) {
+        const message = reached
+          ? `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`
+          : `检测到 Ablesci 验证页（第 ${state.cfChallengeStreak} 次）。请前往浏览器处理；若继续累积将自动暂停值守。`;
+        await notifyWatcherNeedsAttention(
+          message,
+          listUrl,
+          { requireInteraction: true, soundKind: 'urgent', priority: 2 }
+        );
+        await incrementDaily('notified');
+      }
       if (reached) {
         state.pausedByCfChallenge = true;
         await chromeApi.storage.local.set({ watcherEnabled: false });
@@ -214,14 +225,6 @@
         paused: reached,
         listUrl
       });
-      if (reached) {
-        await notifyWatcherNeedsAttention(
-          `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`,
-          listUrl,
-          { requireInteraction: true, soundKind: 'urgent', priority: 2 }
-        );
-        await incrementDaily('notified');
-      }
       const tg = await notifyCfChallengeTelegram(opts, listUrl, state.cfChallengeStreak, reached);
       if (tg?.ok) {
         await appendWatcherLog({

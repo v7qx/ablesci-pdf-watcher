@@ -380,7 +380,17 @@
         function revealPublisherTab(reason) {
           if (settled || tabId === null || revealed) return;
           revealed = true;
-          chromeApi.tabs.update(tabId, { active: true }).catch(() => {});
+          chromeApi.tabs.get(tabId).then(tab => {
+            const windowId = tab?.windowId;
+            if (Number.isInteger(windowId) && chromeApi.windows?.update) {
+              return chromeApi.windows.update(windowId, { focused: true, state: 'normal' })
+                .catch(() => null)
+                .then(() => chromeApi.tabs.update(tabId, { active: true }).catch(() => {}));
+            }
+            return chromeApi.tabs.update(tabId, { active: true }).catch(() => {});
+          }).catch(() => {
+            chromeApi.tabs.update(tabId, { active: true }).catch(() => {});
+          });
           post(port, 'progress', reason || '后台静默等待较久，已切到出版商标签页；如有验证，请完成后插件会继续。');
         }
 
