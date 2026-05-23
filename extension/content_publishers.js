@@ -5,17 +5,21 @@
   let viewPdfTriggered = false;
   let naturePdfTriggered = false;
   let rscPdfTriggered = false;
+  let sagePdfTriggered = false;
   let scienceDirectObserver = null;
   let natureObserver = null;
   let rscObserver = null;
+  let sageObserver = null;
   let scienceDirectStopTimer = null;
   let natureStopTimer = null;
   let rscStopTimer = null;
+  let sageStopTimer = null;
   let canControlPromise = null;
   let scienceDirectLoginPrompted = false;
   let scienceDirectChallengePrompted = false;
   let natureChallengePrompted = false;
   let rscChallengePrompted = false;
+  let sageChallengePrompted = false;
 
   function isScienceDirect() {
     return /(^|\.)sciencedirect\.com$/i.test(host);
@@ -29,10 +33,15 @@
     return /(^|\.)pubs\.rsc\.org$/i.test(host);
   }
 
+  function isSage() {
+    return /(^|\.)journals\.sagepub\.com$/i.test(host) || /(^|\.)sage\.cnpereading\.com$/i.test(host);
+  }
+
   function currentPublisher() {
     if (isScienceDirect()) return 'sciencedirect';
     if (isNature()) return 'nature';
     if (isRsc()) return 'rsc';
+    if (isSage()) return 'sage';
     return '';
   }
 
@@ -368,6 +377,17 @@
     });
   }
 
+  function sendSageMessage(payload) {
+    chrome.runtime.sendMessage({
+      type: 'ablesciPublisherArticleReady',
+      publisher: 'sage',
+      pageUrl: location.href,
+      ...payload
+    }, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+
   function stopRscObserver() {
     if (rscObserver) {
       rscObserver.disconnect();
@@ -376,6 +396,17 @@
     if (rscStopTimer) {
       clearTimeout(rscStopTimer);
       rscStopTimer = null;
+    }
+  }
+
+  function stopSageObserver() {
+    if (sageObserver) {
+      sageObserver.disconnect();
+      sageObserver = null;
+    }
+    if (sageStopTimer) {
+      clearTimeout(sageStopTimer);
+      sageStopTimer = null;
     }
   }
 
@@ -429,6 +460,48 @@
     return found ? { link: found.a, href: found.href, source: 'article_pdf_link' } : null;
   }
 
+  function findSageArticlePdfLink() {
+    const metaSelectors = [
+      'meta[name="citation_pdf_url"]',
+      'meta[property="citation_pdf_url"]'
+    ];
+    for (const sel of metaSelectors) {
+      const value = document.querySelector(sel)?.getAttribute('content') || '';
+      const href = normalizeUrl(value, location.href);
+      if (href && !/supplement|suppl|appendix|supporting/i.test(href)) {
+        return { href, source: 'citation_pdf_url' };
+      }
+    }
+
+    const links = Array.from(document.querySelectorAll('a[href], button[data-href]'))
+      .map(el => {
+        const rawHref = el.getAttribute('href') || el.getAttribute('data-href') || '';
+        const href = normalizeUrl(decodeHtmlUrl(rawHref), location.href);
+        const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        const marker = [
+          el.className || '',
+          el.id || '',
+          el.getAttribute('data-id') || '',
+          el.getAttribute('data-category') || '',
+          el.getAttribute('data-action') || ''
+        ].join(' ');
+        const articlePdf = /\/doi\/(?:pdf|epdf)\//i.test(href || '') ||
+          /Download PDF|View PDF|Full Text PDF|PDF下载|下载PDF|PDF/i.test(`${text} ${marker}`);
+        const supplementary = /supplement|suppl|supporting|appendix|peer review|table|figure/i.test(`${href || ''} ${text} ${marker}`);
+        return { el, href, text, articlePdf, supplementary };
+      })
+      .filter(item => item.href && item.articlePdf && !item.supplementary);
+
+    links.sort((left, right) => {
+      const leftStrong = /Download PDF|Full Text PDF|下载PDF/i.test(left.text) ? 1 : 0;
+      const rightStrong = /Download PDF|Full Text PDF|下载PDF/i.test(right.text) ? 1 : 0;
+      return rightStrong - leftStrong;
+    });
+
+    const found = links[0];
+    return found ? { link: found.el, href: found.href, source: 'article_pdf_link' } : null;
+  }
+
   async function notifyRscReady() {
     if (!isRsc() || rscPdfTriggered) return;
     if (!(await canControlCurrentPublisherPage())) {
@@ -464,6 +537,47 @@
     const tick = () => {
       notifyRscReady();
       if (Date.now() - startedAt < timeoutMs && !rscPdfTriggered) {
+        setTimeout(tick, 1000);
+      }
+    };
+    tick();
+  }
+
+  async function notifySageReady() {
+    if (!isSage() || sagePdfTriggered) return;
+    if (!(await canControlCurrentPublisherPage())) {
+      console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending SAGE task');
+      stopSageObserver();
+      return;
+    }
+    if (hasPublisherChallengePage()) {
+      if (!sageChallengePrompted) {
+        sageChallengePrompted = true;
+        sendSageMessage({
+          articleUrl: location.href,
+          publisherChallenge: true,
+          source: 'sage_challenge_page'
+        });
+      }
+      return;
+    }
+    const found = findSageArticlePdfLink();
+    if (!found) return;
+    sagePdfTriggered = true;
+    sendSageMessage({
+      articleUrl: location.href,
+      pdfUrl: found.href,
+      source: found.source
+    });
+    stopSageObserver();
+  }
+
+  function waitForSagePdf(timeoutMs = 30000) {
+    if (!isSage()) return;
+    const startedAt = Date.now();
+    const tick = () => {
+      notifySageReady();
+      if (Date.now() - startedAt < timeoutMs && !sagePdfTriggered) {
         setTimeout(tick, 1000);
       }
     };
@@ -546,6 +660,12 @@
       rscObserver = new MutationObserver(() => notifyRscReady());
       rscObserver.observe(document.documentElement, { childList: true, subtree: true });
       rscStopTimer = setTimeout(stopRscObserver, 30000);
+    }
+    if (isSage()) {
+      waitForSagePdf();
+      sageObserver = new MutationObserver(() => notifySageReady());
+      sageObserver.observe(document.documentElement, { childList: true, subtree: true });
+      sageStopTimer = setTimeout(stopSageObserver, 30000);
     }
   });
 })();

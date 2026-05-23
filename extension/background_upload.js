@@ -29,6 +29,7 @@
       isNatureUrl,
       isRscDirectPdfUrl,
       isRscUrl,
+      isSageUrl,
       publisherForUrl,
       isDoiUrl,
       isScienceDirectAssetPdfUrl,
@@ -1052,9 +1053,11 @@
       if (!url) return;
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url) || isSageUrl(url))) {
         pending.articleUrl = url;
-        pending.publisher = isScienceDirectUrl(url) ? 'sciencedirect' : (isNatureUrl(url) ? 'nature' : 'rsc');
+        pending.publisher = isScienceDirectUrl(url)
+          ? 'sciencedirect'
+          : (isNatureUrl(url) ? 'nature' : (isRscUrl(url) ? 'rsc' : 'sage'));
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -1192,6 +1195,27 @@
         post(pending.port, 'progress', '已从 RSC 文章页取得 Download this article PDF 链接，正在打开下载链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_rsc_pdf', pdfUrl: msg.pdfUrl }))
+          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+      }
+      if (msg.publisher === 'sage' && msg.pdfUrl) {
+        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+          sendResponse({ ok: true, ignored: true, reason: 'same sage pdf url already handled' });
+          return false;
+        }
+        pending.lastNativePdfUrl = msg.pdfUrl;
+        if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
+        pending.publisher = 'sage';
+        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (msg.clicked) {
+          pending.armDownloadCapture?.(msg.pdfUrl);
+          post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 下载入口，继续监听浏览器下载。');
+          sendResponse({ ok: true, action: 'clicked_sage_pdf', pdfUrl: msg.pdfUrl });
+          return false;
+        }
+        post(pending.port, 'progress', '已从 SAGE 文章页取得正文 PDF 下载链接，正在打开下载链接。');
+        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
+          .then(() => sendResponse({ ok: true, action: 'navigate_to_sage_pdf', pdfUrl: msg.pdfUrl }))
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }

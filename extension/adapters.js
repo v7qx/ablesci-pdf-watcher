@@ -44,6 +44,10 @@
       return `https://doi.org/${doi}`;
     }
 
+    if (/^https?:\/\/(?:journals\.sagepub\.com|sage\.cnpereading\.com)\//i.test(url) && doi) {
+      return `https://doi.org/${doi}`;
+    }
+
     const sd = url.match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/([^/?#]+))(?:\/(?:pdfft|pdf)(?:[?#].*)?|[?#].*)?$/i);
     if (sd) {
       return sd[1];
@@ -88,6 +92,7 @@
     if (h.includes('iopscience.iop.org')) return `https://iopscience.iop.org/article/${enc}/pdf`;
     if (h.includes('nature.com')) return hintUrl;
     if (h.includes('pubs.rsc.org')) return hintUrl;
+    if (h.includes('journals.sagepub.com') || h.includes('sage.cnpereading.com')) return `https://doi.org/${enc}`;
     if (h.includes('sciencedirect.com')) return null;
     if (/^10\.1016\//i.test(doi)) return `https://doi.org/${enc}`;
 
