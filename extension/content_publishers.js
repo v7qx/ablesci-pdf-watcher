@@ -560,6 +560,24 @@
     return found ? { link: found.el, href: found.href, source: 'article_pdf_link' } : null;
   }
 
+  function findSageDownloadEndpoint() {
+    if (!/(^|\.)sage\.cnpereading\.com$/i.test(host)) return null;
+    const html = document.documentElement?.innerHTML || '';
+    const absoluteMatch = html.match(/https:\/\/sage\.cnpereading\.com\/website\/journal\/download\?articleId=([A-F0-9]{16,})/i);
+    if (absoluteMatch) {
+      return `https://sage.cnpereading.com/website/journal/download?articleId=${absoluteMatch[1]}`;
+    }
+    const relativeMatch = html.match(/\/website\/journal\/download\?articleId=([A-F0-9]{16,})/i);
+    if (relativeMatch) {
+      return `https://sage.cnpereading.com/website/journal/download?articleId=${relativeMatch[1]}`;
+    }
+    const idMatch = html.match(/["']articleId["']\s*:\s*["']([A-F0-9]{16,})["']/i);
+    if (idMatch) {
+      return `https://sage.cnpereading.com/website/journal/download?articleId=${idMatch[1]}`;
+    }
+    return null;
+  }
+
   function findSagePdfButton() {
     const candidates = Array.from(document.querySelectorAll(
       'button[data-id="article-toolbar-pdf"], button[aria-label="PDF"], button[aria-label*="PDF"], [role="button"][data-id="article-toolbar-pdf"]'
@@ -667,6 +685,25 @@
         buttonText
       });
       setTimeout(() => button.click(), 0);
+      stopSageObserver();
+      return;
+    }
+
+    const endpoint = findSageDownloadEndpoint();
+    if (endpoint) {
+      sagePdfTriggered = true;
+      sendSageTrace('sage_pdf_button_scan', {
+        url: traceUrlValue(location.href),
+        selector: 'download_endpoint',
+        candidateCount: 0,
+        foundDataIdButton: false,
+        foundAriaPdfButton: false
+      });
+      sendSageMessage({
+        articleUrl: location.href,
+        pdfUrl: endpoint,
+        source: 'sage_download_endpoint'
+      });
       stopSageObserver();
       return;
     }

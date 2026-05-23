@@ -1368,13 +1368,18 @@
         if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
         pending.publisher = 'sage';
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (msg.source === 'sage_download_endpoint' || /\/website\/journal\/download\?articleId=/i.test(String(msg.pdfUrl || ''))) {
+          pending.armDownloadCapture?.(msg.pdfUrl);
+        }
         if (msg.clicked) {
           pending.armDownloadCapture?.(msg.pdfUrl);
           post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 下载入口，继续监听浏览器下载。');
           sendResponse({ ok: true, action: 'clicked_sage_pdf', pdfUrl: msg.pdfUrl });
           return false;
         }
-        post(pending.port, 'progress', '已从 SAGE 文章页取得正文 PDF 下载链接，正在打开下载链接。');
+        post(pending.port, 'progress', msg.source === 'sage_download_endpoint'
+          ? '已从 SAGE 页面解析到站内下载接口，正在打开下载接口。'
+          : '已从 SAGE 文章页取得正文 PDF 下载链接，正在打开下载链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_sage_pdf', pdfUrl: msg.pdfUrl }))
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
