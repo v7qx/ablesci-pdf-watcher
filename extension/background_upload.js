@@ -1233,8 +1233,17 @@
 
       let settled = false;
       let timeout = null;
-      const requestFilter = {
+      let activeListener = null;
+      let broadRequestCount = 0;
+      const manifest = chromeApi.runtime.getManifest?.() || {};
+      const permissions = Array.isArray(manifest.permissions) ? manifest.permissions : [];
+      const hostPermissions = Array.isArray(manifest.host_permissions) ? manifest.host_permissions : [];
+      const strictRequestFilter = {
         urls: ['https://sage.cnpereading.com/website/journal/download?articleId=*'],
+        tabId
+      };
+      const broadRequestFilter = {
+        urls: ['https://sage.cnpereading.com/*'],
         tabId
       };
 
@@ -1243,22 +1252,18 @@
           clearTimeout(timeout);
           timeout = null;
         }
-        try {
-          chromeApi.webRequest.onBeforeRequest.removeListener(listener);
-        } catch (_) {}
+        if (activeListener) {
+          try {
+            chromeApi.webRequest.onBeforeRequest.removeListener(activeListener);
+          } catch (_) {}
+          activeListener = null;
+        }
         if (pending.cleanupSageWebRequestCapture === cleanup) {
           pending.cleanupSageWebRequestCapture = null;
         }
       }
 
-      function listener(details) {
-        if (settled) return;
-        if (details.tabId !== tabId) return;
-        const capturedUrl = String(details.url || '');
-        if (!/\/website\/journal\/download\?articleId=/i.test(capturedUrl)) return;
-
-        settled = true;
-        cleanup();
+      function startDirectDownload(capturedUrl, manual) {
         pending.publisher = 'sage';
         pending.lastNativePdfUrl = capturedUrl;
         pending.setExpectedDownloadUrl?.(capturedUrl);
@@ -1267,6 +1272,12 @@
           tabId,
           url: sanitizeTraceUrl(capturedUrl)
         });
+        if (manual) {
+          void appendSageTrace('manual_click_capture_success', {
+            tabId,
+            url: sanitizeTraceUrl(capturedUrl)
+          });
+        }
         chromeApi.downloads.download({
           url: capturedUrl,
           conflictAction: 'uniquify',
@@ -1288,26 +1299,102 @@
         });
       }
 
+      function captureIfDownload(details, manual) {
+        if (settled) return;
+        if (details.tabId !== tabId) return;
+        const capturedUrl = String(details.url || '');
+        if (!/\/website\/journal\/download\?articleId=/i.test(capturedUrl)) return;
+
+        settled = true;
+        cleanup();
+        startDirectDownload(capturedUrl, manual);
+      }
+
+      function strictListener(details) {
+        captureIfDownload(details, false);
+      }
+
+      function broadListener(details) {
+        if (settled || details.tabId !== tabId) return;
+        const url = String(details.url || '');
+        if (broadRequestCount < 40) {
+          broadRequestCount += 1;
+          void appendSageTrace('sage_tab_request', {
+            tabId,
+            url: sanitizeTraceUrl(url),
+            method: details.method || '',
+            type: details.type || '',
+            frameId: Number.isInteger(details.frameId) ? details.frameId : null,
+            initiator: details.initiator || ''
+          });
+        }
+        captureIfDownload(details, true);
+      }
+
+      function startManualCapture() {
+        if (settled) return;
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+        if (activeListener) {
+          try {
+            chromeApi.webRequest.onBeforeRequest.removeListener(activeListener);
+          } catch (_) {}
+        }
+        activeListener = broadListener;
+        chromeApi.webRequest.onBeforeRequest.addListener(broadListener, broadRequestFilter);
+        pending.extendNoDownloadTimeout?.(
+          70 * 1000,
+          'SAGE 手动捕获等待超时；自动点击可能没有触发网站下载逻辑，请复制最近 Sage trace。'
+        );
+        pending.revealPublisherTab?.('SAGE 自动点击没有触发下载请求；请在打开的页面上手动点击 PDF，插件会继续捕获下载。');
+        post(pending.port, 'progress', 'SAGE 自动点击未产生下载请求，已进入手动捕获测试：请在出版商页面手动点击 PDF。');
+        void appendSageTrace('sage_manual_capture_waiting', {
+          tabId,
+          url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
+          listenerFilter: broadRequestFilter
+        });
+        timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          void appendSageTrace('timeout_if_no_webrequest_captured', {
+            tabId,
+            selector: 'manual_click_pdf',
+            currentUrl: sanitizeTraceUrl(pageUrl || pending.articleUrl || '')
+          });
+          pending.finishError?.(new Error('SAGE 手动捕获等待超时：timeout_if_no_webrequest_captured'));
+        }, 60 * 1000);
+      }
+
       void appendSageTrace('sage_webrequest_capture_installing', {
         tabId,
-        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || '')
+        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
+        hasWebRequestApi: !!chromeApi.webRequest?.onBeforeRequest,
+        hasWebRequestPermission: permissions.includes('webRequest'),
+        hasSageHostPermission: hostPermissions.includes('https://sage.cnpereading.com/*'),
+        listenerFilter: strictRequestFilter
       });
-      chromeApi.webRequest.onBeforeRequest.addListener(listener, requestFilter);
+      activeListener = strictListener;
+      chromeApi.webRequest.onBeforeRequest.addListener(strictListener, strictRequestFilter);
       pending.cleanupSageWebRequestCapture = cleanup;
       timeout = setTimeout(() => {
         if (settled) return;
-        settled = true;
-        cleanup();
         void appendSageTrace('timeout_if_no_webrequest_captured', {
           tabId,
           selector: 'button[data-id="article-toolbar-pdf"]',
           currentUrl: sanitizeTraceUrl(pageUrl || pending.articleUrl || '')
         });
-        pending.finishError?.(new Error('SAGE 下载请求捕获超时：timeout_if_no_webrequest_captured'));
+        startManualCapture();
       }, 8000);
       void appendSageTrace('sage_webrequest_capture_installed', {
         tabId,
-        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || '')
+        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
+        hasWebRequestApi: !!chromeApi.webRequest?.onBeforeRequest,
+        hasWebRequestPermission: permissions.includes('webRequest'),
+        hasSageHostPermission: hostPermissions.includes('https://sage.cnpereading.com/*'),
+        listenerFilter: strictRequestFilter
       });
     }
 
