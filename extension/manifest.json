@@ -32,6 +32,8 @@
     "https://nature.com/*",
     "https://pubs.rsc.org/*",
     "https://xlink.rsc.org/*",
+    "https://journals.sagepub.com/*",
+    "https://sage.cnpereading.com/*",
     "https://link.springer.com/*",
     "https://pubs.acs.org/*",
     "https://onlinelibrary.wiley.com/*"
@@ -67,7 +69,9 @@
         "https://sciencedirect.com/*",
         "https://www.nature.com/*",
         "https://nature.com/*",
-        "https://pubs.rsc.org/*"
+        "https://pubs.rsc.org/*",
+        "https://journals.sagepub.com/*",
+        "https://sage.cnpereading.com/*"
       ],
       "js": [
         "content_publishers.js"
