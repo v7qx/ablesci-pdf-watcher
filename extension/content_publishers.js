@@ -20,6 +20,7 @@
   let natureChallengePrompted = false;
   let rscChallengePrompted = false;
   let sageChallengePrompted = false;
+  let sageCapturedDownloadFetchUrl = false;
   const LAST_SAGE_TRACE_KEY = 'lastSageTrace';
 
   function isScienceDirect() {
@@ -246,6 +247,46 @@
       }
     });
   }
+
+  function requestSageFetchHook() {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage({
+        type: 'ablesciInstallSageFetchHook',
+        pageUrl: location.href
+      }, resp => {
+        const lastErr = chrome.runtime.lastError;
+        if (lastErr) {
+          sendSageTrace('sage_fetch_hook_installed', {
+            action: 'install_failed',
+            runtimeLastError: lastErr.message || String(lastErr)
+          });
+          return resolve(false);
+        }
+        sendSageTrace('sage_fetch_hook_installed', {
+          action: resp?.ok ? 'installed' : 'install_failed',
+          runtimeLastError: resp?.error || ''
+        });
+        resolve(!!resp?.ok);
+      });
+    });
+  }
+
+  window.addEventListener('message', event => {
+    if (event.source !== window) return;
+    const data = event.data || {};
+    if (data.source !== 'ablesci-sage-fetch-hook' || data.type !== 'captured_sage_download_fetch_url') return;
+    const url = String(data.url || '');
+    if (!/\/website\/journal\/download\?articleId=/i.test(url)) return;
+    sageCapturedDownloadFetchUrl = true;
+    sendSageTrace('captured_sage_download_fetch_url', {
+      url: traceUrlValue(url)
+    });
+    sendSageMessage({
+      articleUrl: location.href,
+      pdfUrl: url,
+      source: 'sage_captured_fetch_url'
+    });
+  });
 
   function hasPublisherChallengePage() {
     const text = pageText();
@@ -677,6 +718,7 @@
         buttonText,
         currentUrl: traceUrlValue(location.href)
       });
+      await requestSageFetchHook();
       sendSageMessage({
         articleUrl: location.href,
         clicked: true,
@@ -685,6 +727,14 @@
         buttonText
       });
       setTimeout(() => button.click(), 0);
+      setTimeout(() => {
+        if (!sageCapturedDownloadFetchUrl) {
+          sendSageTrace('timeout_if_no_fetch_captured', {
+            selector,
+            currentUrl: traceUrlValue(location.href)
+          });
+        }
+      }, 5000);
       stopSageObserver();
       return;
     }

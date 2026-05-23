@@ -105,6 +105,62 @@
       }
     }
 
+    function sageFetchHookMainWorld() {
+      const marker = '__ablesciSageFetchHookInstalled';
+      const targetPattern = /\/website\/journal\/download\?articleId=/i;
+      if (window[marker]) return { installed: true, reused: true };
+      window[marker] = true;
+
+      function urlOf(input) {
+        try {
+          if (typeof input === 'string') return input;
+          if (input && typeof input.url === 'string') return input.url;
+        } catch (_) {}
+        return '';
+      }
+
+      function publish(url) {
+        const value = String(url || '');
+        if (!targetPattern.test(value)) return;
+        window.postMessage({
+          source: 'ablesci-sage-fetch-hook',
+          type: 'captured_sage_download_fetch_url',
+          url: value
+        }, '*');
+      }
+
+      const originalFetch = window.fetch;
+      if (typeof originalFetch === 'function') {
+        window.fetch = function patchedFetch(input, init) {
+          publish(urlOf(input));
+          return originalFetch.apply(this, arguments);
+        };
+      }
+
+      const OriginalXHR = window.XMLHttpRequest;
+      if (typeof OriginalXHR === 'function' && OriginalXHR.prototype) {
+        const originalOpen = OriginalXHR.prototype.open;
+        OriginalXHR.prototype.open = function patchedOpen(method, url) {
+          try { publish(url); } catch (_) {}
+          return originalOpen.apply(this, arguments);
+        };
+      }
+
+      return { installed: true, reused: false };
+    }
+
+    async function installSageFetchHook(tabId) {
+      if (!chromeApi.scripting?.executeScript || !Number.isInteger(tabId)) {
+        throw new Error('chrome.scripting.executeScript unavailable');
+      }
+      const result = await chromeApi.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: sageFetchHookMainWorld
+      });
+      return result?.[0]?.result || { installed: true };
+    }
+
     function payloadJournalKey(payload = {}) {
       return String(payload?.journalName || '').trim().toLowerCase();
     }
@@ -1219,6 +1275,36 @@
         return false;
       }
 
+      if (msg?.type === 'ablesciInstallSageFetchHook') {
+        if (!pending) {
+          sendResponse({ ok: false, error: 'no pending publisher task' });
+          return false;
+        }
+        if (!isExpectedPublisherPage(pending, msg.pageUrl || sender.tab?.url || '')) {
+          sendResponse({ ok: false, error: 'publisher page mismatch' });
+          return false;
+        }
+        installSageFetchHook(tabId)
+          .then(result => {
+            appendSageTrace('sage_fetch_hook_installed', {
+              tabId: Number.isInteger(tabId) ? tabId : null,
+              url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || ''),
+              action: result?.reused ? 'reused' : 'installed'
+            });
+            sendResponse({ ok: true, result });
+          })
+          .catch(err => {
+            appendSageTrace('sage_fetch_hook_installed', {
+              tabId: Number.isInteger(tabId) ? tabId : null,
+              url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || ''),
+              action: 'install_failed',
+              runtimeLastError: err?.message || String(err)
+            });
+            sendResponse({ ok: false, error: err?.message || String(err) });
+          });
+        return true;
+      }
+
       if (msg?.type === 'ablesciPublisherCanControl') {
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
         if (msg.publisher && pending.publisher && msg.publisher !== pending.publisher) return sendResponse({ ok: false, reason: 'publisher mismatch' });
@@ -1368,6 +1454,33 @@
         if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
         pending.publisher = 'sage';
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (msg.source === 'sage_captured_fetch_url') {
+          pending.armDownloadCapture?.(msg.pdfUrl);
+          void appendSageTrace('captured_sage_download_fetch_url', {
+            tabId: Number.isInteger(tabId) ? tabId : null,
+            url: sanitizeTraceUrl(msg.pdfUrl)
+          });
+          chromeApi.downloads.download({
+            url: msg.pdfUrl,
+            conflictAction: 'uniquify',
+            saveAs: false
+          }).then(downloadId => {
+            appendSageTrace('direct_download_started', {
+              tabId: Number.isInteger(tabId) ? tabId : null,
+              downloadId,
+              url: sanitizeTraceUrl(msg.pdfUrl)
+            });
+            sendResponse({ ok: true, action: 'sage_direct_download_started', downloadId });
+          }).catch(err => {
+            appendSageTrace('direct_download_started', {
+              tabId: Number.isInteger(tabId) ? tabId : null,
+              url: sanitizeTraceUrl(msg.pdfUrl),
+              error: err?.message || String(err)
+            });
+            sendResponse({ ok: false, error: err?.message || String(err) });
+          });
+          return true;
+        }
         if (msg.source === 'sage_download_endpoint' || /\/website\/journal\/download\?articleId=/i.test(String(msg.pdfUrl || ''))) {
           pending.armDownloadCapture?.(msg.pdfUrl);
         }
