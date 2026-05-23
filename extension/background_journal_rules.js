@@ -112,6 +112,45 @@
       return next;
     }
 
+    function journalAccessRuleSummary(raw) {
+      const rules = parseJournalAccessRules(raw);
+      return {
+        blocked: Array.isArray(rules.blocked) ? rules.blocked.length : 0,
+        partial: Array.isArray(rules.partial) ? rules.partial.length : 0,
+        allowed: Array.isArray(rules.allowed) ? rules.allowed.length : 0
+      };
+    }
+
+    async function resolveJournalAccessRulesForOptions(opts, extra = {}) {
+      const persist = extra?.persist !== false;
+      const sourceLabel = String(opts?.watcherJournalAccessRules || '').trim() ? 'chrome.storage.local cache' : '';
+      const fileRules = await readJournalAccessRulesFromConfig(opts);
+      if (!fileRules.ok || !fileRules.raw) {
+        return {
+          ...opts,
+          watcherJournalAccessRulesSource: sourceLabel,
+          journalAccessConfigPath: '',
+          journalAccessRuleSummary: journalAccessRuleSummary(opts?.watcherJournalAccessRules || '')
+        };
+      }
+      const parsed = parseJournalAccessRules(fileRules.raw);
+      const text = JSON.stringify(parsed, null, 2);
+      if (persist && text !== String(opts?.watcherJournalAccessRules || '').trim()) {
+        await chromeApi.storage.local.set({ watcherJournalAccessRules: text });
+      }
+      return {
+        ...opts,
+        watcherJournalAccessRules: text,
+        watcherJournalAccessRulesSource: fileRules.path || 'journal-access.json',
+        journalAccessConfigPath: fileRules.path || '',
+        journalAccessRuleSummary: journalAccessRuleSummary(text)
+      };
+    }
+
+    async function reloadJournalAccessRulesFromConfig(opts) {
+      return resolveJournalAccessRulesForOptions(opts, { persist: true });
+    }
+
     async function syncJournalAccessRulesFromStats(journalName, stat, opts) {
       const journal = String(journalName || '').trim();
       if (!journal || !stat) return;
@@ -235,6 +274,9 @@
       removeRuleMatchingJournal,
       compactRuleEntry,
       upsertRuleEntry,
+      journalAccessRuleSummary,
+      resolveJournalAccessRulesForOptions,
+      reloadJournalAccessRulesFromConfig,
       syncJournalAccessRulesFromStats,
       recordJournalAccessResult,
       recordJournalAccessResultNow

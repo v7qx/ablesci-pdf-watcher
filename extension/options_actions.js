@@ -229,19 +229,33 @@
     }
 
     async function runAutoWatcherNow() {
+      const saved = await save();
+      if (!saved) {
+        showPill('watcherRunStatus', '保存失败，未执行检查', true);
+        return;
+      }
       showPill('watcherRunStatus', '检查中');
       const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
       showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : ('失败：' + (res.reason || '未知错误')), !res.ok);
     }
 
     async function observeDemandNow() {
+      const saved = await save();
+      if (!saved) {
+        showPill('watcherRunStatus', '保存失败，未执行采样', true);
+        return;
+      }
       showPill('watcherRunStatus', '采样中');
       const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
       showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : ('失败：' + (res.reason || '未知错误')), !res.ok);
     }
 
     async function testWatcherNotification() {
-      await save();
+      const saved = await save();
+      if (!saved) {
+        showPill('watcherNotifyStatus', '保存失败，未发送测试提醒', true);
+        return;
+      }
       showPill('watcherNotifyStatus', '发送中');
       const res = await sendRuntimeMessage({ type: 'ablesciTestWatcherNotification' });
       const mode = res.mode === 'browser' ? '浏览器' : 'Native';

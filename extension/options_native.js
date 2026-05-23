@@ -24,6 +24,16 @@
       return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length}`;
     }
 
+    function runtimeMessage(message) {
+      return new Promise(resolve => {
+        chromeApi.runtime.sendMessage(message, response => {
+          const lastErr = chromeApi.runtime.lastError;
+          if (lastErr) return resolve({ ok: false, error: lastErr.message });
+          resolve(response || { ok: false, error: '后台没有返回内容' });
+        });
+      });
+    }
+
     function nativeConfigMessage(action, extra = {}) {
       const hostName = el('nativeHostName')?.value.trim() || defaultOptions.nativeHostName;
       return new Promise(resolve => {
@@ -46,40 +56,41 @@
     async function renderJournalAccessConfigStatus(opts = null, loadOptions = null) {
       const current = opts || (typeof loadOptions === 'function' ? await loadOptions() : null) || {};
       const cached = String(current.watcherJournalAccessRules || '').trim();
-      setText('journalAccessCacheSummary', cached ? journalAccessSummary(cached) : '缓存为空');
       setText('journalAccessConfigSource', 'Native Helper 目录 / journal-access.json（config.local 仅兼容回退）');
-      const res = await readJournalAccessConfig();
+      const res = await runtimeMessage({ type: 'ablesciGetJournalAccessRuntimeStatus' });
       if (res.ok) {
-        const rules = parseJournalAccessRules(res.body || '');
-        const text = JSON.stringify(rules, null, 2);
+        const text = String(res.text || '').trim();
         const hidden = el('watcherJournalAccessRules');
         if (hidden) hidden.value = text;
-        setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已读取`);
-        setText('journalAccessConfigSource', res.path || 'Native Helper 目录 / journal-access.json（config.local 仅兼容回退）');
-        showPill('journalAccessConfigStatus', '已加载文件');
+        setText('journalAccessCacheSummary', text ? journalAccessSummary(text) : '缓存为空');
+        setText('journalAccessFileSummary', `${text ? journalAccessSummary(text) : '空名单'}，已加载到运行配置`);
+        setText('journalAccessConfigSource', res.path || res.source || 'Native Helper 目录 / journal-access.json（config.local 仅兼容回退）');
+        showPill('journalAccessConfigStatus', res.path ? '已加载文件' : '使用缓存');
         return;
       }
+      setText('journalAccessCacheSummary', cached ? journalAccessSummary(cached) : '缓存为空');
       setText('journalAccessFileSummary', `未读取文件，使用缓存：${cached ? journalAccessSummary(cached) : '空名单'}`);
       showPill('journalAccessConfigStatus', '使用缓存', false);
     }
 
     async function reloadJournalAccessConfig(save, loadOptions) {
-      await save();
-      const opts = await loadOptions();
-      const res = await readJournalAccessConfig();
+      const saved = await save();
+      if (!saved) {
+        showPill('journalAccessConfigStatus', '保存失败，未重载', true);
+        return;
+      }
+      const res = await runtimeMessage({ type: 'ablesciReloadJournalAccessRules' });
       if (!res.ok) {
         showPill('journalAccessConfigStatus', '读取失败：' + (res.error || '未找到文件'), true);
         return;
       }
       try {
-        const parsed = parseJournalAccessRules(res.body || '');
-        const text = JSON.stringify(parsed, null, 2);
-        await chromeApi.storage.local.set({ watcherJournalAccessRules: text });
+        const text = String(res.text || '').trim();
         const hidden = el('watcherJournalAccessRules');
         if (hidden) hidden.value = text;
         setText('journalAccessCacheSummary', journalAccessSummary(text));
-        setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已同步到缓存`);
-        setText('journalAccessConfigSource', res.path || '');
+        setText('journalAccessFileSummary', `${journalAccessSummary(text)}，已同步到运行配置`);
+        setText('journalAccessConfigSource', res.path || res.source || '');
         showPill('journalAccessConfigStatus', '已重载');
       } catch (err) {
         showPill('journalAccessConfigStatus', 'JSON 无效：' + (err?.message || String(err)), true);

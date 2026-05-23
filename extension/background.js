@@ -75,12 +75,17 @@ const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
 const NATIVE_MESSAGE_LONG_TIMEOUT_MS = 5 * 60 * 1000;
 const ORPHAN_PUBLISHER_TAB_MAX_AGE_MS = 5 * 60 * 1000;
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
+let resolveJournalAccessRulesForRuntime = null;
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
 const pendingPublisherTabs = new Map();
 
 async function getOptions() {
-  return loadOptionsFromStorage();
+  const opts = await loadOptionsFromStorage();
+  if (typeof resolveJournalAccessRulesForRuntime === 'function') {
+    return resolveJournalAccessRulesForRuntime(opts, { persist: true });
+  }
+  return opts;
 }
 
 const {
@@ -134,6 +139,9 @@ const {
   writeJournalAccessRulesToConfig,
   removeRuleMatchingJournal,
   promoteJournalAccessRuleAfterSuccess,
+  journalAccessRuleSummary,
+  resolveJournalAccessRulesForOptions,
+  reloadJournalAccessRulesFromConfig,
   recordJournalAccessResult,
   recordJournalAccessResultNow
 } = createBackgroundJournalRulesApi({
@@ -146,6 +154,7 @@ const {
   normalizeText: value => String(value || '').trim(),
   readConfigTimeoutMs: NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS
 });
+resolveJournalAccessRulesForRuntime = resolveJournalAccessRulesForOptions;
 const {
   makeDiagnosticBase,
   classifyJournalAccessFailureReason,
@@ -248,6 +257,35 @@ const {
   clearUploadTaskSnapshot
 });
 attachRuntimeListeners();
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'ablesciGetJournalAccessRuntimeStatus') {
+    getOptions()
+      .then(opts => sendResponse({
+        ok: true,
+        source: opts.watcherJournalAccessRulesSource || (String(opts.watcherJournalAccessRules || '').trim() ? 'chrome.storage.local cache' : ''),
+        path: opts.journalAccessConfigPath || '',
+        text: String(opts.watcherJournalAccessRules || '').trim(),
+        summary: journalAccessRuleSummary(opts.watcherJournalAccessRules || '')
+      }))
+      .catch(err => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  if (msg?.type === 'ablesciReloadJournalAccessRules') {
+    loadOptionsFromStorage()
+      .then(opts => reloadJournalAccessRulesFromConfig(opts))
+      .then(opts => sendResponse({
+        ok: true,
+        source: opts.watcherJournalAccessRulesSource || '',
+        path: opts.journalAccessConfigPath || '',
+        text: String(opts.watcherJournalAccessRules || '').trim(),
+        summary: journalAccessRuleSummary(opts.watcherJournalAccessRules || '')
+      }))
+      .catch(err => sendResponse({ ok: false, error: err?.message || String(err) }));
+    return true;
+  }
+  return false;
+});
 
 recoverUploadTaskSnapshot('service_worker_init').catch(() => {});
 cleanupOrphanPublisherTabs('service_worker_init').catch(() => {});

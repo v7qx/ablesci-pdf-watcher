@@ -204,8 +204,10 @@ async function save() {
     validateOptions(opts);
     await chrome.storage.local.set(opts);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
+    return true;
   } catch (err) {
     showText('status', err.message || String(err), true);
+    return false;
   }
 }
 
