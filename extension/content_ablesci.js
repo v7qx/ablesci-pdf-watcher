@@ -330,6 +330,7 @@
       rejectedHistory: false,
       reportedWarning: false,
       systemRisk: false,
+      systemPromptSupplementDoi: false,
       remark: false
     };
     const titleText = visibleText($('.assist-title'));
@@ -358,13 +359,14 @@
       reasons.push('当前求助被网站标记为涉嫌违规或正在被举报。');
     }
 
-    const systemWarnings = Array.from(document.querySelectorAll('.special-assist-alert, .assist-detail .alert-warning'))
+    const systemWarnings = Array.from(document.querySelectorAll('.special-assist-alert, .assist-detail .alert-warning, .assist-detail .layui-alert, .assist-detail .layui-card-body'))
       .map(visibleText)
-      .filter(t => /系统提示/.test(t))
-      .filter(t => /Supplementary|补充材料|并非全文|不是全文/i.test(t));
+      .filter(t => /系统提示|提醒：由于doi是数字文件的唯一标识/i.test(t))
+      .filter(t => /Supplementary|补充材料|并非全文|不是全文|该doi的文献可能是补充材料/i.test(t));
     if (systemWarnings.length > 0) {
       flags.systemRisk = true;
-      reasons.push('网站系统提示 DOI 可能对应补充材料或并非全文，需要人工核对。');
+      flags.systemPromptSupplementDoi = true;
+      reasons.push('网站系统提示该 DOI 可能对应补充材料或并非全文，已按异常情况跳过。');
     }
 
     const remarkRows = Array.from(document.querySelectorAll('.assist-detail tr'))

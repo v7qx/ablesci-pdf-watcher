@@ -260,6 +260,7 @@
         detail_rejected_history: '详情页存在驳回应助历史，已跳过',
         detail_reported_warning: '详情页存在举报/违规提示，已跳过',
         detail_system_risk: '详情页存在系统风险提示，已跳过',
+        detail_system_prompt_si: '详情页系统提示 DOI 可能是补充材料或并非全文，已跳过',
         detail_remark: '详情页存在备注，已按设置跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
         journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过',
@@ -506,6 +507,9 @@
       if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
       if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
       if (journalAccessRuleFor({}, opts, payload).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
+      if (opts.watcherSkipRiskText && flags.systemPromptSupplementDoi) {
+        return { ok: false, reason: 'detail_system_prompt_si' };
+      }
       if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
         return { ok: false, reason: 'detail_risk_text' };
       }
