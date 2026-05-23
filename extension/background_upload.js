@@ -170,6 +170,53 @@
       });
     }
 
+    async function recordPublisherCfChallenge(pageUrl = '') {
+      const opts = await getOptions();
+      if (opts.watcherStopOnCfChallenge === false) {
+        return { paused: false, streak: 0, threshold: 0, notified: false };
+      }
+      const stored = await chromeApi.storage.local.get([AUTO_WATCHER_STATE_KEY, 'watcherEnabled']);
+      const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+      const threshold = Math.max(1, Number(opts.watcherCfPauseThreshold || defaultOptions.watcherCfPauseThreshold || 3));
+      state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
+      const reached = opts.watcherAdvancedSchedulerEnabled === true || state.cfChallengeStreak >= threshold;
+      if (reached) {
+        state.pausedByCfChallenge = true;
+        await chromeApi.storage.local.set({
+          watcherEnabled: false,
+          [AUTO_WATCHER_STATE_KEY]: state
+        });
+        await chromeApi.alarms.clear('ablesciAutoWatcher');
+      } else {
+        await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+      }
+
+      let notified = false;
+      if (opts.watcherCfNotificationEnabled !== false) {
+        const message = reached
+          ? `连续 ${state.cfChallengeStreak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`
+          : `检测到出版商验证页（第 ${state.cfChallengeStreak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
+        await notifyAccessEnvironmentAnomaly(message);
+        notified = true;
+      }
+      return {
+        paused: reached,
+        streak: state.cfChallengeStreak,
+        threshold,
+        notified,
+        pageUrl: urlHostPath(pageUrl || '')
+      };
+    }
+
+    async function clearPublisherCfChallengeState() {
+      const stored = await chromeApi.storage.local.get(AUTO_WATCHER_STATE_KEY);
+      const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+      if (!state.cfChallengeStreak && !state.pausedByCfChallenge) return;
+      state.cfChallengeStreak = 0;
+      state.pausedByCfChallenge = false;
+      await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+    }
+
     function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -780,8 +827,9 @@
         if (opts.deleteAfterUpload) {
           try { await sendNativeMessage(opts.nativeHostName, { action: 'delete_file', path: stat.path }); } catch (e) { console.warn(e); }
         }
-          await recordAccessEnvironmentSuccess(payload);
-          await recordJournalAccessResult(payload, { ok: true });
+        await clearPublisherCfChallengeState();
+        await recordAccessEnvironmentSuccess(payload);
+        await recordJournalAccessResult(payload, { ok: true });
         postDoneFromSiteResponse(port, permit, '上传成功');
         return;
       }
@@ -823,11 +871,13 @@
       }
       if (parsed && parsed.msg) {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+        await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
         postDoneFromSiteResponse(port, parsed, '上传成功');
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
+        await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
         post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
@@ -894,7 +944,7 @@
           if (failureReason === 'no_access') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
-          if (failureReason && failureReason !== 'login_required') {
+          if (failureReason && failureReason !== 'login_required' && failureReason !== 'cf_challenge') {
             await recordJournalAccessResult(payload, { ok: false, reason: failureReason });
           }
 
@@ -917,6 +967,18 @@
                 downloadOnly: true,
                 blocked: true,
                 skipReason: 'login_required'
+              });
+            } else if (failureReason === 'cf_challenge') {
+              const message = /暂停低频值守/.test(formatTaskError(err))
+                ? formatTaskError(err)
+                : '检测到出版商验证页，已中断本次任务并计入验证次数；达到阈值后会自动暂停低频值守。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: 'cf_challenge'
               });
             } else if (failureReason === 'no_access') {
               const message = accessEnvironmentPause?.paused
@@ -1033,6 +1095,36 @@
       if (msg.publisher === 'sciencedirect' && msg.noSubscription) {
         pending.finishError(new Error('ScienceDirect 当前页面没有正文订阅权限。'));
         sendResponse({ ok: true, action: 'science_direct_no_subscription' });
+        return false;
+      }
+      if (msg.publisherChallenge) {
+        if (pending.publisherChallengeSeen) {
+          sendResponse({ ok: true, ignored: true, reason: 'same publisher challenge already handled' });
+          return false;
+        }
+        pending.publisherChallengeSeen = true;
+        recordPublisherCfChallenge(msg.pageUrl || pending.articleUrl || pending.pdfUrl || '')
+          .then(result => {
+            pending.revealPublisherTab?.('检测到出版商验证页，已尝试恢复浏览器窗口并切到前台；请完成验证。');
+            if (result.paused) {
+              pending.finishError(new Error(`检测到出版商验证页，连续达到阈值 ${result.threshold}，已暂停低频值守。`));
+              return;
+            }
+            pending.extendNoDownloadTimeout?.(
+              5 * 60 * 1000,
+              '等待出版商验证超时；请完成验证后重新触发，或检查浏览器是否被最小化。'
+            );
+            post(pending.port, 'progress', `检测到出版商验证页，已计入第 ${result.streak} 次验证并延长等待。`);
+          })
+          .catch(err => {
+            console.warn('[Ablesci PDF Watcher] record publisher challenge failed', err);
+            pending.revealPublisherTab?.('检测到出版商验证页，已切到前台；请完成验证。');
+            pending.extendNoDownloadTimeout?.(
+              5 * 60 * 1000,
+              '等待出版商验证超时；请完成验证后重新触发，或检查浏览器是否被最小化。'
+            );
+          });
+        sendResponse({ ok: true, action: 'publisher_challenge_detected' });
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.error) {

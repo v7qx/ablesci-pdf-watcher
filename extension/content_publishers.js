@@ -13,6 +13,9 @@
   let rscStopTimer = null;
   let canControlPromise = null;
   let scienceDirectLoginPrompted = false;
+  let scienceDirectChallengePrompted = false;
+  let natureChallengePrompted = false;
+  let rscChallengePrompted = false;
 
   function isScienceDirect() {
     return /(^|\.)sciencedirect\.com$/i.test(host);
@@ -179,6 +182,12 @@
     });
   }
 
+  function hasPublisherChallengePage() {
+    const text = ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim();
+    const title = String(document.title || '');
+    return /Cloudflare|Just a moment|验证你是真人|请完成验证|安全检查|security check|captcha|robot/i.test(`${title} ${text}`);
+  }
+
   function stopScienceDirectObserver() {
     if (scienceDirectObserver) {
       scienceDirectObserver.disconnect();
@@ -209,6 +218,17 @@
     }
 
     const articleUrl = makeScienceDirectArticleUrl() || location.href;
+    if (hasPublisherChallengePage()) {
+      if (!scienceDirectChallengePrompted) {
+        scienceDirectChallengePrompted = true;
+        sendScienceDirectMessage({
+          articleUrl,
+          publisherChallenge: true,
+          source: 'sciencedirect_challenge_page'
+        });
+      }
+      return;
+    }
     if (hasScienceDirectNoSubscriptionAccess()) {
       sendScienceDirectMessage({
         articleUrl,
@@ -399,6 +419,17 @@
       stopRscObserver();
       return;
     }
+    if (hasPublisherChallengePage()) {
+      if (!rscChallengePrompted) {
+        rscChallengePrompted = true;
+        sendRscMessage({
+          articleUrl: location.href,
+          publisherChallenge: true,
+          source: 'rsc_challenge_page'
+        });
+      }
+      return;
+    }
     const found = findRscArticlePdfLink();
     if (!found) return;
     rscPdfTriggered = true;
@@ -438,6 +469,17 @@
     if (!(await canControlCurrentPublisherPage())) {
       console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending Nature task');
       stopNatureObserver();
+      return;
+    }
+    if (hasPublisherChallengePage()) {
+      if (!natureChallengePrompted) {
+        natureChallengePrompted = true;
+        sendNatureMessage({
+          articleUrl: location.href,
+          publisherChallenge: true,
+          source: 'nature_challenge_page'
+        });
+      }
       return;
     }
     const found = findNatureArticlePdfLink();
