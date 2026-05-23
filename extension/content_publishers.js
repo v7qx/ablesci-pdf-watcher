@@ -637,24 +637,6 @@
       }
       return;
     }
-    const found = findSageArticlePdfLink();
-    if (found) {
-      sagePdfTriggered = true;
-      sendSageTrace('sage_pdf_button_scan', {
-        url: traceUrlValue(location.href),
-        selector: 'direct_pdf_link',
-        candidateCount: 0,
-        foundDataIdButton: !!document.querySelector('button[data-id="article-toolbar-pdf"]'),
-        foundAriaPdfButton: !!document.querySelector('button[aria-label="PDF"]')
-      });
-      sendSageMessage({
-        articleUrl: location.href,
-        pdfUrl: found.href,
-        source: found.source
-      });
-      stopSageObserver();
-      return;
-    }
     const button = findSagePdfButton();
     const allCandidates = Array.from(document.querySelectorAll(
       'button[data-id="article-toolbar-pdf"], button[aria-label="PDF"], button[aria-label*="PDF"], [role="button"][data-id="article-toolbar-pdf"]'
@@ -669,22 +651,41 @@
       foundDataIdButton: !!document.querySelector('button[data-id="article-toolbar-pdf"], [role="button"][data-id="article-toolbar-pdf"]'),
       foundAriaPdfButton: !!document.querySelector('button[aria-label="PDF"], button[aria-label*="PDF"]')
     });
-    if (!button) return;
+    if (button) {
+      sagePdfTriggered = true;
+      const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      sendSageTrace('clicked_sage_pdf_button', {
+        selector,
+        buttonText,
+        currentUrl: traceUrlValue(location.href)
+      });
+      sendSageMessage({
+        articleUrl: location.href,
+        clicked: true,
+        source: 'sage_toolbar_pdf_button',
+        selector,
+        buttonText
+      });
+      setTimeout(() => button.click(), 0);
+      stopSageObserver();
+      return;
+    }
+
+    const found = findSageArticlePdfLink();
+    if (!found) return;
     sagePdfTriggered = true;
-    const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
-    sendSageTrace('clicked_sage_pdf_button', {
-      selector,
-      buttonText,
-      currentUrl: traceUrlValue(location.href)
+    sendSageTrace('sage_pdf_button_scan', {
+      url: traceUrlValue(location.href),
+      selector: 'direct_pdf_link',
+      candidateCount: 0,
+      foundDataIdButton: false,
+      foundAriaPdfButton: false
     });
     sendSageMessage({
       articleUrl: location.href,
-      clicked: true,
-      source: 'sage_toolbar_pdf_button',
-      selector,
-      buttonText
+      pdfUrl: found.href,
+      source: found.source
     });
-    setTimeout(() => button.click(), 0);
     stopSageObserver();
   }
 
