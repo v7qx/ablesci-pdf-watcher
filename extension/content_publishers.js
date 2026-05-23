@@ -250,6 +250,9 @@
 
   function requestSageFetchHook() {
     return new Promise(resolve => {
+      sendSageTrace('sage_fetch_hook_installing', {
+        currentUrl: traceUrlValue(location.href)
+      });
       chrome.runtime.sendMessage({
         type: 'ablesciInstallSageFetchHook',
         pageUrl: location.href
@@ -713,12 +716,15 @@
     if (button) {
       sagePdfTriggered = true;
       const buttonText = (button.innerText || button.textContent || button.getAttribute('aria-label') || button.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
-      sendSageTrace('clicked_sage_pdf_button', {
-        selector,
-        buttonText,
-        currentUrl: traceUrlValue(location.href)
-      });
-      await requestSageFetchHook();
+      const hookOk = await requestSageFetchHook();
+      if (!hookOk) {
+        sendSageTrace('timeout_if_no_fetch_captured', {
+          selector,
+          currentUrl: traceUrlValue(location.href),
+          runtimeLastError: 'fetch hook install failed before click'
+        });
+        return;
+      }
       sendSageMessage({
         articleUrl: location.href,
         clicked: true,
@@ -726,7 +732,14 @@
         selector,
         buttonText
       });
-      setTimeout(() => button.click(), 0);
+      setTimeout(() => {
+        button.click();
+        sendSageTrace('clicked_sage_pdf_button', {
+          selector,
+          buttonText,
+          currentUrl: traceUrlValue(location.href)
+        });
+      }, 0);
       setTimeout(() => {
         if (!sageCapturedDownloadFetchUrl) {
           sendSageTrace('timeout_if_no_fetch_captured', {

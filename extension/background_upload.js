@@ -1284,6 +1284,10 @@
           sendResponse({ ok: false, error: 'publisher page mismatch' });
           return false;
         }
+        appendSageTrace('sage_fetch_hook_installing', {
+          tabId: Number.isInteger(tabId) ? tabId : null,
+          url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || '')
+        });
         installSageFetchHook(tabId)
           .then(result => {
             appendSageTrace('sage_fetch_hook_installed', {
