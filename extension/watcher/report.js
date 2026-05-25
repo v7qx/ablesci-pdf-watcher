@@ -23,7 +23,6 @@
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
-      demandSnapshotsKey,
       journalAccessStatsKey,
       alarmName,
       doiFailureSkipThreshold
@@ -95,7 +94,6 @@
         autoWatcherStateKey,
         autoWatcherLogKey,
         autoWatcherTraceKey,
-        demandSnapshotsKey,
         journalAccessStatsKey
       ]);
       const state = stored[autoWatcherStateKey] || {};
@@ -103,8 +101,6 @@
       const chromeAlarm = await chromeApi.alarms.get(alarmName).catch(() => null);
       const chromeAlarmScheduledAt = chromeAlarm?.scheduledTime ? new Date(chromeAlarm.scheduledTime).toISOString() : (state.chromeAlarmScheduledAt || '');
       const lastAttempt = state.lastAttempt || {};
-      const demandSnapshots = (Array.isArray(stored[demandSnapshotsKey]) ? stored[demandSnapshotsKey] : [])
-        .filter(item => item.dayKey === date);
       const logs = (Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
@@ -113,14 +109,14 @@
 
       const csvHeader = [
         'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
-        'marketRegime', 'totalSeeking', 'supplementCount', 'publisher', 'open', 'high', 'low', 'close', 'delta',
+        'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
         'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
         'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
-        'sessionDurationMs', 'score', 'estimatedSuccessRate', 'demandPressure', 'sourceTrend',
+        'sessionDurationMs', 'score', 'estimatedSuccessRate',
         'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
         'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
-        'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextAssistMarketDataAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
+        'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
         'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',
         'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
         'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'pickedPage', 'pageCurve', 'pageMin', 'pageMax',
@@ -128,7 +124,6 @@
         'randomValue', 'step', 'trigger', 'tabId', 'url', 'details'
       ];
       const baseReportFields = {
-        marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
         workTimeProgressRatio: state.workTimeProgressRatio || '',
         expectedDone: state.expectedDone || '',
         actualDone: state.actualDone || state.monthDone || '',
@@ -154,7 +149,6 @@
         nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
         nextAssistGuardWeight: state.nextAssistGuardWeight || '',
         nextAssistPlannedAt: state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : '',
-        nextAssistMarketDataAt: state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : '',
         nextWakeAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''),
         chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
         lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
@@ -188,18 +182,7 @@
           ...value
         }));
       }
-      const observeEvents = traces
-        .filter(trace => /observe_|market_sample|demand_snapshot/i.test(`${trace.step || ''} ${trace.reason || ''}`))
-        .map(trace => reportRow('observe_event', {
-          time: formatBeijingDateTime(trace.time),
-          status: trace.step || '',
-          reason: trace.reason || '',
-          trigger: trace.trigger || '',
-          url: trace.url || `${trace.urlHostPath?.host || ''}${trace.urlHostPath?.path || ''}`
-        }));
       const dataRows = [
-        ...demandSnapshots.map(item => jsonLine('market_sample', item)),
-        ...['m15', 'h1', 'd1'].flatMap(frame => (state.marketData?.candles?.[frame] || []).map(candle => jsonLine(`candle_${frame}`, candle))),
         ...logs.map(log => jsonLine('assist_event', log)),
         ...traces.map(trace => jsonLine('trace', trace)),
         ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
@@ -320,10 +303,7 @@
         reportRow('summary', {
           time: formatBeijingDateTime(new Date()),
           status: state.currentExecutionModel || state.schedulerModelMode || 'simple',
-          reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} observe=${Number(daily.manualObserveRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`,
-          totalSeeking: state.lastDemandSnapshot?.totalSeeking || '',
-          supplementCount: state.lastDemandSnapshot?.supplementCount || '',
-          delta: state.recentH1DemandDelta || state.marketData?.h1Delta || ''
+          reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`
         }),
         reportRow('session', {
           time: formatBeijingDateTime(state.lastSession?.finishedAt || state.lastSession?.startedAt || new Date()),
@@ -348,15 +328,6 @@
           trigger: lastAttempt.trigger || '',
           url: lastAttempt.pickedListUrl || ''
         }),
-        ...observeEvents,
-        ...(state.banditTopPublishers || []).slice(0, 20).map(item => reportRow('bandit', {
-          time: formatBeijingDateTime(new Date()),
-          publisher: item.source || '',
-          score: item.score || '',
-          estimatedSuccessRate: item.estimatedSuccessRate || '',
-          demandPressure: item.demandPressure || '',
-          sourceTrend: item.sourceTrend || ''
-        })),
         ...logs.map(log => reportRow('log', {
           time: formatBeijingDateTime(log.time),
           sessionId: log.sessionId || '',
@@ -405,30 +376,26 @@
         `- Failed: ${Number(daily.failed || 0)}`,
         `- Notified: ${Number(daily.notified || 0)}`,
         `- Speed mode: ${state.speedMode || 'normal'}`,
-        `- Demand regime: ${state.demandRegime || 'normal'}`,
         `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
         `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
         `- Current assist strategy: ${state.lastAssistStrategy || ''}`,
         `- Next wake: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- Next assist attempt: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
         `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
-        `- Next assist plan data: planned=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}, market=${state.nextAssistPlanningData?.marketDataAt ? formatBeijingDateTime(state.nextAssistPlanningData.marketDataAt) : ''}`,
-        `- Latest sample affects: ${state.marketDataAffects || ''}`,
+        `- Next assist plan data: planned=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
         `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
         `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
-        `- Runs auto / manual / observe: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)} / ${Number(daily.manualObserveRuns || 0)}`,
+        `- Runs auto / manual: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
         `- Last attempt time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- Last attempt trigger: ${lastAttempt.trigger || ''}`,
         `- Last attempt result: ${lastAttempt.resultReason || ''}`,
-        `- Last attempt observe: ${lastAttempt.observeSnapshot === true ? 'yes' : 'no'} ${lastAttempt.observeReason || ''}`,
         `- Last attempt target session size: ${lastAttempt.targetSessionSize ?? ''}`,
         `- Last attempt checked delta: ${lastAttempt.checkedDelta ?? ''}`,
         `- Last attempt downloaded delta: ${lastAttempt.downloadedDelta ?? ''}`,
         `- Last attempt list scan started: ${lastAttempt.listScanStarted === true ? 'yes' : 'no'}`,
         `- Last attempt picked list URL: ${lastAttempt.pickedListUrl || ''}`,
         `- Last attempt random session: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, random=${lastAttempt.randomValue ?? ''}`,
-        `- Demand factor: ${Number(state.demandFactor || 1).toFixed(2)}`,
         `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
         `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
         `- Active progress / availability: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
@@ -437,25 +404,14 @@
         `- Rate multiplier: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
         `- Hour target: ${Number(state.hourTarget || 0)}`,
         `- Risk used / limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
-        `- Recent 1h demand delta: ${Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)}`,
         `- Today target: ${Number(state.todayTarget || 0)}`,
-        `- Latest demand: ${Number(state.lastDemandSnapshot?.totalSeeking || 0)}`,
         `- Detailed data file: ${monthDir}/watcher-data-${date}.jsonl`,
         `- Journal access files: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
-        `- Latest demand anomaly: ${state.lastDemandAnomaly?.dayKey === date ? `${state.lastDemandAnomaly.anomalyType || 'yes'} (${Number(state.lastDemandAnomaly.totalSeeking || 0)})` : 'none'}`,
         `- Session ID: ${state.lastSession?.id || ''}`,
         `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
         `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
         `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
         `- Trace events: ${traces.length}`,
-        '',
-        '## Bandit',
-        '',
-        '| Publisher | Score | Estimated Success | Demand Pressure |',
-        '| --- | --- | --- | --- |',
-        ...(state.banditTopPublishers || []).slice(0, 8).map(item =>
-          `| ${String(item.source || '').replace(/\|/g, '\\|')} | ${Number(item.score || 0).toFixed(4)} | ${Number(item.estimatedSuccessRate || 0).toFixed(4)} | ${Number(item.demandPressure || 0).toFixed(4)} |`
-        ),
         '',
         '## Skips And Decisions',
         '',
@@ -469,22 +425,6 @@
           row.detail,
           formatBeijingDateOnly(row.time)
         ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
-        '',
-        '## Observe Events',
-        '',
-        '| Time | Trigger | Step | Reason | URL |',
-        '| --- | --- | --- | --- | --- |',
-        ...observeEvents.slice(0, 20).map(row => {
-          const record = {};
-          csvHeader.forEach((key, index) => { record[key] = row[index]; });
-          return [
-            record.time,
-            record.trigger,
-            record.status,
-            record.reason,
-            record.url
-          ].map(v => String(v || '').replace(/\|/g, '\\|')).join(' | ');
-        }).map(row => `| ${row} |`),
         '',
         '## Recent Events',
         '',

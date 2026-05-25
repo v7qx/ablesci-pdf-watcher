@@ -104,8 +104,18 @@
 
     function watcherOptionSnapshot(opts) {
       const snapshot = {};
+      const hiddenKeys = new Set([
+        'watcherDemandObserveUrl',
+        'watcherObserveTimes',
+        'watcherObserveIntervalMinutes',
+        'watcherObserveFallbackMinutes',
+        'watcherObserveOnly',
+        'watcherObserveMode',
+        'watcherAdvancedSchedulerEnabled'
+      ]);
       for (const key of Object.keys(defaultOptions)) {
         if (!key.startsWith('watcher')) continue;
+        if (hiddenKeys.has(key)) continue;
         snapshot[key] = key === 'watcherListUrls'
           ? deps.normalizeWatcherListUrls(opts[key]).map(sanitizeUrlForExport)
           : opts[key];

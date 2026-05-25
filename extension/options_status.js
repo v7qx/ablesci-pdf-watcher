@@ -38,7 +38,6 @@
           : ((state.currentSchedulerMode === 'fixed' || isInWorkSchedule(workdays, workWindows)) ? '工作时段内' : '非工作时段'));
       const schedule = nextDisplaySchedule(state);
       advancedStatusCache = { state, schedule };
-      setText('advancedMarketRegime', state.marketRegime || state.marketData?.marketRegime || '-');
       setText('watcherWorkStatus', workStatus);
       setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
@@ -47,7 +46,6 @@
       setText('advancedError', String(Number(state.targetError || state.lag || 0)));
       setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
       setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
-      setText('advancedH1Delta', String(Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0)));
       setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
       setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
       setText('watcherNextRunAt', formatBeijingDateTime(state.chromeAlarmScheduledAt || state.nextScheduledAt));
@@ -56,11 +54,6 @@
       setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
       setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
       setText('watcherSavedWorkdays', String(stored.watcherWorkdays || defaultOptions.watcherWorkdays));
-      const top = (state.banditTopPublishers || [])
-        .slice(0, 5)
-        .map(item => `${item.source}:${Number(item.score || 0).toFixed(2)}`)
-        .join(', ');
-      setText('advancedBanditTop', `Bandit top publishers: ${top || '-'}`);
     }
 
     function renderAdvancedWatcherCountdowns() {

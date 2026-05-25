@@ -115,7 +115,7 @@
         const initialState = await getWatcherState();
         attempt.nextAssistBefore = initialState.nextAssistRunAt || '';
         Object.assign(attempt, Object.fromEntries(Object.entries(dailyCounterSnapshot(initialState)).map(([key, value]) => [`${key}Before`, value])));
-        if (!opts.watcherEnabled && trigger !== 'manual' && trigger !== 'manual-observe') {
+        if (!opts.watcherEnabled && trigger !== 'manual') {
           await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
           return finish({ ok: false, reason: 'disabled' });
         }
@@ -131,15 +131,12 @@
           });
           return finish({ ok: true, reason: 'outside_work_schedule' });
         }
-        const observeResult = await collectDemandIfDue(opts, trigger === 'manual-observe');
+        const observeResult = await collectDemandIfDue(opts, false);
         attempt.observeSnapshot = observeResult?.snapshot ? true : false;
         attempt.observeReason = observeResult?.reason || '';
         if (observeResult?.reason === 'cf_challenge') {
           if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, opts.watcherDemandObserveUrl);
           return finish({ ok: false, reason: 'cf_challenge' });
-        }
-        if (trigger === 'manual-observe') {
-          return finish({ ok: !!observeResult?.snapshot, reason: observeResult?.snapshot ? 'demand_observed' : 'demand_observe_skipped' });
         }
         if (opts.watcherObserveMode === 'observe_only') {
           return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' });

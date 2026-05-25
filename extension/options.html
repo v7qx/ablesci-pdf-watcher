@@ -412,7 +412,7 @@
       padding: 15px 44px 15px 18px;
       font-size: 15px;
       font-weight: 650;
-      user-select: none;
+      user-select: text;
     }
 
     details.card summary::-webkit-details-marker { display: none; }
@@ -448,7 +448,7 @@
       cursor: pointer;
       padding: 14px 44px 14px 18px;
       font-weight: 600;
-      user-select: none;
+      user-select: text;
     }
 
     details.setting-details summary::-webkit-details-marker { display: none; }
@@ -560,6 +560,12 @@
 
     <details class="card">
       <summary>上传规则</summary>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>处理方式</strong>
+          <span>默认自动打开详情、下载并校验；上传前仍需人工确认。</span>
+        </div>
+      </div>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>自动上传范围</strong>
@@ -767,20 +773,19 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>调度模式</strong>
-          <span>固定间隔适合 1 分钟等高频测试；量化调度按采样和目标运行；高级调度启用实验模型。</span>
+          <span>固定间隔适合测试；每月预计会按月目标、日目标和工作窗口推算下一次应助。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <select id="watcherSchedulerMode" aria-label="调度模式">
             <option value="fixed">固定间隔 / 测试</option>
-            <option value="quant">量化规则调度</option>
-            <option value="advanced">高级调度实验</option>
+            <option value="quant">每月预计</option>
           </select>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>应助间隔</strong>
-          <span>固定间隔模式按基准/最小/最大随机应助；量化/高级模式用最小值做软防高频，模型低于最小时会融合计算，不直接截断。</span>
+          <span>固定间隔模式按基准/最小/最大随机应助；每月预计模式用最小值做软防高频。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
@@ -799,18 +804,6 @@
           </div>
         </div>
       </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>运行模式</strong>
-          <span>量化和高级调度会按采样数据、历史对比、工作时间和月目标进度安排下一次应助。</span>
-        </div>
-        <div class="setting-control">
-          <select id="watcherObserveMode" aria-label="运行模式">
-            <option value="assist">应助+采样</option>
-            <option value="observe_only">纯采样</option>
-          </select>
-        </div>
-      </div>
       </details>
       <details class="setting-details">
         <summary>低频值守更多设置</summary>
@@ -818,44 +811,8 @@
         <summary>调度规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>采样 URL</strong>
-          <span>用于采集求助总量和出版社需求量，建议使用求助中总页。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <input id="watcherDemandObserveUrl" type="text" placeholder="https://www.ablesci.com/assist/index?status=waiting">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>采样时间</strong>
-          <span>每行一个北京时间 HH:mm。固定时间用于对齐日内采样点，高频采样会按频率补充。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <textarea id="watcherObserveTimes" spellcheck="false"></textarea>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>采样间隔</strong>
-          <span>1–60 分钟，默认 5 分钟。只用于采样 totalSeeking 和 publisherCounts，不直接触发应助。</span>
-        </div>
-        <div class="setting-control">
-          <input id="watcherObserveIntervalMinutes" type="number" min="1" max="60" step="1" value="5" aria-label="采样间隔分钟">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>兜底采样间隔</strong>
-          <span>30–720 分钟；用于浏览器长时间休眠、错过采样后恢复时补采样。</span>
-        </div>
-        <div class="setting-control">
-          <input id="watcherObserveFallbackMinutes" type="number" min="30" max="720" step="10" value="180" aria-label="兜底采样间隔分钟">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>工作日与窗口</strong>
-          <span>工作日用 1–7 表示周一到周日；窗口外仍可采样需求，但不打开详情、不下载。</span>
+          <span>工作日用 1–7 表示周一到周日；窗口外不打开详情、不下载。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <input id="watcherWorkdays" type="text" placeholder="1,2,3,4,5">
@@ -865,7 +822,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>目标与会话</strong>
-          <span>按月目标推算当天应助量，再根据进度和需求量切换 slow / normal / fast。</span>
+          <span>按月目标推算当天应助量，再根据进度切换 slow / normal / fast。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
@@ -885,21 +842,8 @@
               <label for="watcherMaxPerSession">会话上限</label>
               <input id="watcherMaxPerSession" type="number" min="1" max="10" step="1" value="1" aria-label="每会话最多候选">
             </div>
-            <div class="metric-field">
-              <label for="watcherRiskBudgetLimit">风险预算</label>
-              <input id="watcherRiskBudgetLimit" type="number" min="1" max="100" step="1" value="10" aria-label="每日风险预算">
-            </div>
           </div>
-          <div class="setting-hint">会话候选可手动输入 1–10；这是单轮硬上限，实际数量仍受每日上限、目标剩余量、风险预算和全局串行队列限制。</div>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>高级调度实验</strong>
-          <span>通过“调度模式”选择。高级模式使用 MarketData、TargetControl、Bandit、Session 和 RiskBudget 模型。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <div class="setting-hint">不会增加并发；仍然使用全局串行队列，遇到 CF / challenge 会暂停。</div>
+          <div class="setting-hint">会话候选可手动输入 1–10；这是单轮硬上限，实际数量仍受每日上限、目标剩余量和全局串行队列限制。</div>
         </div>
       </div>
       </details>
@@ -907,12 +851,11 @@
         <summary>高级排查</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>高级状态</strong>
-          <span>从本地 watcher 状态读取，仅用于排查和调参。</span>
+          <strong>值守状态</strong>
+          <span>从本地 watcher 状态读取，仅用于排查。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
-            <div class="metric-field"><label>Market</label><span id="advancedMarketRegime" class="pill">-</span></div>
             <div class="metric-field"><label>时段</label><span id="watcherWorkStatus" class="pill">-</span></div>
             <div class="metric-field"><label>窗口进度</label><span id="advancedWorkProgress" class="pill">-</span></div>
             <div class="metric-field"><label>有效进度</label><span id="advancedActiveProgress" class="pill">-</span></div>
@@ -921,7 +864,6 @@
             <div class="metric-field"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
             <div class="metric-field"><label>Rate</label><span id="advancedRateMultiplier" class="pill">-</span></div>
             <div class="metric-field"><label>风险预算</label><span id="advancedRiskBudget" class="pill">-</span></div>
-            <div class="metric-field"><label>1h Delta</label><span id="advancedH1Delta" class="pill">-</span></div>
             <div class="metric-field"><label>Session</label><span id="advancedSessionStatus" class="pill">-</span></div>
             <div class="metric-field"><label>Logic</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
             <div class="metric-field"><label>Next Wake</label><span id="watcherNextRunAt" class="pill">-</span></div>
@@ -931,7 +873,6 @@
             <div class="metric-field"><label>Runs</label><span id="watcherRunCounts" class="pill">-</span></div>
             <div class="metric-field"><label>工作日</label><span id="watcherSavedWorkdays" class="pill">-</span></div>
           </div>
-          <div class="setting-hint" id="advancedBanditTop">Bandit top publishers: -</div>
         </div>
       </div>
       </details>
@@ -1170,12 +1111,11 @@
       <div class="setting-row watcher-action-row">
         <div class="setting-copy">
           <strong>值守操作</strong>
-          <span>手动触发、采样和复制排查配置；清理类操作放在更多设置中。</span>
+          <span>手动触发和复制排查配置；清理类操作放在更多设置中。</span>
         </div>
         <div class="setting-control watcher-action-control">
           <div class="watcher-action-buttons">
             <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
-            <button id="observeDemandNow" class="secondary" type="button">立即采样</button>
             <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
             <button id="copyRecentSageTrace" class="secondary" type="button">复制最近 Trace</button>
           </div>

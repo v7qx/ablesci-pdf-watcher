@@ -109,8 +109,8 @@
 
   function normalizeSchedulerMode(opts) {
     const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
-    if (raw === 'fixed' || raw === 'quant' || raw === 'advanced') return raw;
-    if (opts?.watcherAdvancedSchedulerEnabled === true) return 'advanced';
+    if (raw === 'fixed' || raw === 'quant') return raw;
+    if (raw === 'advanced' || opts?.watcherAdvancedSchedulerEnabled === true) return 'quant';
     if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
     return 'quant';
   }
@@ -218,14 +218,14 @@
       watcherJournalAccessConfigPath: String(opts.watcherJournalAccessConfigPath || '').trim(),
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),
       watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
-      watcherAdvancedSchedulerEnabled: schedulerMode === 'advanced',
+      watcherAdvancedSchedulerEnabled: false,
       watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100),
-      watcherObserveMode: opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist',
-      watcherObserveOnly: opts.watcherObserveMode === 'observe_only',
-      watcherDemandObserveUrl: normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl,
-      watcherObserveTimes: String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim(),
-      watcherObserveIntervalMinutes: clampNumber(opts.watcherObserveIntervalMinutes, DEFAULT_OPTIONS.watcherObserveIntervalMinutes, 1, 60),
-      watcherObserveFallbackMinutes: clampNumber(opts.watcherObserveFallbackMinutes, DEFAULT_OPTIONS.watcherObserveFallbackMinutes, 30, 720),
+      watcherObserveMode: 'assist',
+      watcherObserveOnly: false,
+      watcherDemandObserveUrl: DEFAULT_OPTIONS.watcherDemandObserveUrl,
+      watcherObserveTimes: DEFAULT_OPTIONS.watcherObserveTimes,
+      watcherObserveIntervalMinutes: DEFAULT_OPTIONS.watcherObserveIntervalMinutes,
+      watcherObserveFallbackMinutes: DEFAULT_OPTIONS.watcherObserveFallbackMinutes,
       watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
       watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
       watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000),

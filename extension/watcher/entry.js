@@ -76,35 +76,6 @@
             .catch(err => sendResponse({ ok: false, reason: err?.message || String(err) }));
           return true;
         }
-        if (msg?.type === 'ablesciObserveDemandNow') {
-          if (stateRef.autoWatcherRunning) {
-            sendResponse({ ok: false, reason: 'already_running' });
-            return false;
-          }
-          getWatcherState()
-            .then(state => {
-              state.lastManualObserveStartedAt = new Date().toISOString();
-              state.lastManualObserveStatus = 'running';
-              return saveWatcherState(state);
-            })
-            .then(() => runAutoWatcherOnce('manual-observe'))
-            .then(async result => {
-              const state = await getWatcherState();
-              state.lastManualObserveFinishedAt = new Date().toISOString();
-              state.lastManualObserveStatus = result.ok ? 'ok' : 'failed';
-              state.lastManualObserveReason = result.reason || '';
-              await saveWatcherState(state);
-            })
-            .catch(async err => {
-              const state = await getWatcherState();
-              state.lastManualObserveFinishedAt = new Date().toISOString();
-              state.lastManualObserveStatus = 'failed';
-              state.lastManualObserveReason = err?.message || String(err);
-              await saveWatcherState(state);
-            });
-          sendResponse({ ok: true, reason: 'demand_observe_started' });
-          return false;
-        }
         if (msg?.type === 'ablesciTestWatcherNotification') {
           notifyWatcherNeedsAttention('这是一条低频值守测试提醒，不会执行检查。')
             .then(sendResponse)

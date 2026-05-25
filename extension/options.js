@@ -21,7 +21,6 @@ const {
   AUTO_WATCHER_STATE_KEY,
   AUTO_WATCHER_LOG_KEY,
   AUTO_WATCHER_TRACE_KEY,
-  DEMAND_SNAPSHOTS_KEY,
   loadOptionsFromStorage
 } = globalThis.AblesciWatcherStorage;
 const {
@@ -126,7 +125,6 @@ function validateOptions(opts) {
   }
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
   if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
-  if (!normalizeWatcherListUrls([opts.watcherDemandObserveUrl]).length) throw new Error('需求采样 URL 必须是 Ablesci HTTPS 链接。');
   if (String(opts.watcherJournalAccessRules || '').trim()) {
     try {
       const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
@@ -183,14 +181,14 @@ async function save() {
   opts.watcherJournalAccessConfigPath = String(opts.watcherJournalAccessConfigPath || '').trim();
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
-  opts.watcherAdvancedSchedulerEnabled = opts.watcherSchedulerMode === 'advanced';
+  opts.watcherAdvancedSchedulerEnabled = false;
   opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
-  opts.watcherObserveMode = opts.watcherObserveMode === 'observe_only' ? 'observe_only' : 'assist';
-  opts.watcherObserveOnly = opts.watcherObserveMode === 'observe_only';
-  opts.watcherDemandObserveUrl = normalizeWatcherListUrls([opts.watcherDemandObserveUrl])[0] || DEFAULT_OPTIONS.watcherDemandObserveUrl;
-  opts.watcherObserveTimes = String(opts.watcherObserveTimes || DEFAULT_OPTIONS.watcherObserveTimes).trim();
-  opts.watcherObserveIntervalMinutes = clampNumber(opts.watcherObserveIntervalMinutes, DEFAULT_OPTIONS.watcherObserveIntervalMinutes, 1, 60);
-  opts.watcherObserveFallbackMinutes = clampNumber(opts.watcherObserveFallbackMinutes, DEFAULT_OPTIONS.watcherObserveFallbackMinutes, 30, 720);
+  opts.watcherObserveMode = 'assist';
+  opts.watcherObserveOnly = false;
+  opts.watcherDemandObserveUrl = DEFAULT_OPTIONS.watcherDemandObserveUrl;
+  opts.watcherObserveTimes = DEFAULT_OPTIONS.watcherObserveTimes;
+  opts.watcherObserveIntervalMinutes = DEFAULT_OPTIONS.watcherObserveIntervalMinutes;
+  opts.watcherObserveFallbackMinutes = DEFAULT_OPTIONS.watcherObserveFallbackMinutes;
   opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
   opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
   opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);
@@ -246,7 +244,6 @@ const {
   copyRecentSageTrace,
   clearJournalAccessStats,
   runAutoWatcherNow,
-  observeDemandNow,
   testWatcherNotification,
   clearAutoWatcherState,
   clearAutoWatcherLogs,
@@ -261,7 +258,6 @@ const {
   autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
   autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
   autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
-  demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
   journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
   journalAccessLookupKey: JOURNAL_ACCESS_LOOKUP_KEY,
   loadOptions,
@@ -301,7 +297,6 @@ el('testNative').addEventListener('click', testNative);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
 el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
-el('observeDemandNow')?.addEventListener('click', observeDemandNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('copyRecentSageTrace')?.addEventListener('click', copyRecentSageTrace);

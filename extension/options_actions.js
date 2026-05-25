@@ -10,7 +10,6 @@
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
-      demandSnapshotsKey,
       lastSageTraceKey,
       journalAccessStatsKey,
       journalAccessLookupKey,
@@ -124,14 +123,12 @@
         autoWatcherStateKey,
         autoWatcherLogKey,
         autoWatcherTraceKey,
-        demandSnapshotsKey,
         lastDiagnosticKey,
         journalAccessStatsKey,
         journalAccessLookupKey
       ]);
       const logs = Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [];
       const traceLogs = Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [];
-      const demandSnapshots = Array.isArray(stored[demandSnapshotsKey]) ? stored[demandSnapshotsKey] : [];
       const state = stored[autoWatcherStateKey] || {};
       const processed = state.processed || {};
       const diagnostic = stored[lastDiagnosticKey] || null;
@@ -160,14 +157,10 @@
           nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
           nextAssistGuardMode: state.nextAssistGuardMode || '',
           nextAssistGuardApplied: state.nextAssistGuardApplied === true,
-          nextAssistGuardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
-          nextAssistGuardWeight: state.nextAssistGuardWeight || '',
           nextAssistPlan: state.nextAssistPlan || null,
           nextAssistPlannedAt: state.nextAssistPlannedAt || '',
-          nextAssistPlanningData: state.nextAssistPlanningData || null,
           targetPreview: state.targetPreview || null,
           targetPreviewAt: state.targetPreviewAt || '',
-          marketDataAffects: state.marketDataAffects || '',
           chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
           lastAttempt: state.lastAttempt || null,
           lastAssistStrategy: state.lastAssistStrategy || '',
@@ -179,7 +172,6 @@
           lastRunResult: state.lastRunResult || null,
           runStats: state.runStats || {},
           schedulerModelMode: state.schedulerModelMode || '',
-          marketRegime: state.marketRegime || state.marketData?.marketRegime || '',
           workTimeProgressRatio: state.workTimeProgressRatio || 0,
           activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
           availabilityFactor: state.availabilityFactor || 1,
@@ -191,9 +183,7 @@
           rateMultiplier: state.rateMultiplier || 1,
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
-          recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
           currentSession: state.currentSession || null,
-          banditTopPublishers: state.banditTopPublishers || [],
           journalAccessStatsCount: Object.keys(journalAccessStats || {}).length,
           journalAccessLookupIndexSize: Object.keys(journalAccessLookup?.index || {}).length,
           journalAccessNoAccessCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'no_access').length,
@@ -206,8 +196,7 @@
           }))
         },
         latestWatcherLog: logs[0] || null,
-        latestTraceLogs: traceLogs.slice(0, 80),
-        latestDemandSnapshot: demandSnapshots[0] || null,
+        latestTraceLogs: traceLogs.slice(0, 30),
         latestDiagnostic: diagnostic ? {
           time: diagnostic.time || '',
           stage: diagnostic.stage || '',
@@ -263,17 +252,6 @@
       showPill('watcherRunStatus', '检查中');
       const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
       showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
-    }
-
-    async function observeDemandNow() {
-      const saved = await save();
-      if (!saved) {
-        showPill('watcherRunStatus', '保存失败，未执行采样', true);
-        return;
-      }
-      showPill('watcherRunStatus', '采样中');
-      const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
-      showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : formatActionFailure(res.reason), !res.ok);
     }
 
     async function testWatcherNotification() {
@@ -339,7 +317,6 @@
       clearJournalAccessStats,
       copyTextToClipboard,
       runAutoWatcherNow,
-      observeDemandNow,
       testWatcherNotification,
       clearAutoWatcherState,
       clearAutoWatcherLogs,
