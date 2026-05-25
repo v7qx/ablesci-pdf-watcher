@@ -571,7 +571,7 @@
     flushWatcherTrace
   });
 
-  const { initPrivateAutoWatcher } = createWatcherEntryApi({
+  const { initAutoWatcher } = createWatcherEntryApi({
     chromeApi: chrome,
     depsRef,
     setDeps(nextDeps) { deps = nextDeps; },
@@ -598,5 +598,5 @@
     stateRef
   });
 
-  globalThis.initPrivateAutoWatcher = initPrivateAutoWatcher;
+  globalThis.initAutoWatcher = initAutoWatcher;
 })();

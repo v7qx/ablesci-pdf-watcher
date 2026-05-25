@@ -2,7 +2,7 @@
 
 (function () {
   const DEFAULT_OPTIONS = {
-    nativeHostName: 'com.ablesci.pdf_watcher_private',
+    nativeHostName: 'com.ablesci.pdf_watcher',
     downloadSubdir: '',
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',

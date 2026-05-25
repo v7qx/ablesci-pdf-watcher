@@ -30,7 +30,7 @@
       stateRef
     } = config;
 
-    function initPrivateAutoWatcher(nextDeps) {
+    function initAutoWatcher(nextDeps) {
       setDeps(nextDeps);
       startBadgeRefreshLoop();
 
@@ -129,7 +129,7 @@
       refreshAutoWatcherAlarm(true, 'init').catch(() => {});
     }
 
-    return { initPrivateAutoWatcher };
+    return { initAutoWatcher };
   }
 
   globalThis.AblesciWatcherEntryModule = {

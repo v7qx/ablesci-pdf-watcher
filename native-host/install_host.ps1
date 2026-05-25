@@ -1,22 +1,125 @@
 param(
-  [Parameter(Mandatory=$true)]
-  [string]$ExtensionId,
+  [string]$ExtensionId = "",
 
   [ValidateSet("Chrome", "Edge", "All")]
   [string]$Browser = "Chrome",
 
-  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcherPrivate"
+  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcher",
+
+  [string]$ProfileDir = "",
+
+  [string]$ExtensionDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-$HostName = "com.ablesci.pdf_watcher_private"
+$HostName = "com.ablesci.pdf_watcher"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $PrebuiltExe = Join-Path $RepoRoot "native-helper\bin\windows-amd64\ablesci_pdf_helper.exe"
 $SourceGoDir = Join-Path $RepoRoot "native-helper"
-$MarkerFileName = ".ablesci_pdf_watcher_private.install.json"
+$MarkerFileName = ".ablesci_pdf_watcher.install.json"
+if ([string]::IsNullOrWhiteSpace($ExtensionDir)) {
+  $ExtensionDir = Join-Path $RepoRoot "extension"
+}
+$ExtensionDir = [System.IO.Path]::GetFullPath($ExtensionDir)
+
+function Get-DefaultUserDataDir([string]$BrowserName) {
+  if ($BrowserName -eq "Edge") {
+    return "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
+  }
+  return "$env:LOCALAPPDATA\Google\Chrome\User Data"
+}
+
+function Get-PreferencePaths([string]$BrowserName, [string]$UserDataDir) {
+  $paths = @()
+  if (![string]::IsNullOrWhiteSpace($UserDataDir)) {
+    $root = [System.IO.Path]::GetFullPath($UserDataDir)
+    $paths += Join-Path $root "Default\Preferences"
+    if (Test-Path -LiteralPath $root) {
+      Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Profile *" } |
+        ForEach-Object { $paths += Join-Path $_.FullName "Preferences" }
+    }
+  } else {
+    $paths += Get-PreferencePaths $BrowserName (Get-DefaultUserDataDir $BrowserName)
+  }
+  return $paths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+}
+
+function Test-SamePath([string]$A, [string]$B) {
+  if ([string]::IsNullOrWhiteSpace($A) -or [string]::IsNullOrWhiteSpace($B)) { return $false }
+  try {
+    $pa = [System.IO.Path]::GetFullPath($A).TrimEnd('\')
+    $pb = [System.IO.Path]::GetFullPath($B).TrimEnd('\')
+    return [string]::Equals($pa, $pb, [System.StringComparison]::OrdinalIgnoreCase)
+  } catch {
+    return $false
+  }
+}
+
+function Find-ExtensionIdInPreferences([string]$BrowserName, [string]$UserDataDir, [string]$TargetExtensionDir) {
+  $matches = @()
+  foreach ($prefPath in (Get-PreferencePaths $BrowserName $UserDataDir)) {
+    try {
+      $prefs = Get-Content -LiteralPath $prefPath -Raw | ConvertFrom-Json
+      $settings = $prefs.extensions.settings
+      if ($null -eq $settings) { continue }
+      foreach ($entry in $settings.PSObject.Properties) {
+        $id = $entry.Name
+        $value = $entry.Value
+        $path = if ($null -ne $value.path) { [string]$value.path } else { "" }
+        $manifestName = if ($null -ne $value.manifest -and $null -ne $value.manifest.name) { [string]$value.manifest.name } else { "" }
+        $manifestDesc = if ($null -ne $value.manifest -and $null -ne $value.manifest.description) { [string]$value.manifest.description } else { "" }
+        $pathMatched = Test-SamePath $path $TargetExtensionDir
+        $nameMatched = $manifestName -like "Ablesci PDF Watcher*"
+        $descMatched = $manifestDesc -like "*Ablesci PDF*"
+        if ($pathMatched -or $nameMatched -or $descMatched) {
+          $matches += [pscustomobject]@{
+            Id = $id
+            PreferencePath = $prefPath
+            ExtensionPath = $path
+            ManifestName = $manifestName
+            ExactPath = $pathMatched
+          }
+        }
+      }
+    } catch {
+      Write-Warning "Could not inspect browser preferences: $prefPath"
+    }
+  }
+  $exact = @($matches | Where-Object { $_.ExactPath })
+  if ($exact.Count -eq 1) { return $exact[0] }
+  if ($matches.Count -eq 1) { return $matches[0] }
+  if ($exact.Count -gt 1) {
+    throw "Multiple matching extensions were found by path. Pass -ExtensionId explicitly."
+  }
+  if ($matches.Count -gt 1) {
+    throw "Multiple Ablesci PDF Watcher extensions were found. Pass -ExtensionId explicitly."
+  }
+  return $null
+}
+
+if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
+  if ($Browser -eq "All") {
+    throw "Automatic ExtensionId detection is only supported for one browser at a time. Use -Browser Chrome or -Browser Edge, or pass -ExtensionId explicitly."
+  }
+  $detected = Find-ExtensionIdInPreferences $Browser $ProfileDir $ExtensionDir
+  if ($null -eq $detected) {
+    throw "Could not detect the extension ID. Load the unpacked extension first, then rerun this script with -ProfileDir, or pass -ExtensionId explicitly."
+  }
+  $ExtensionId = $detected.Id
+  Write-Host "Detected extension ID: $ExtensionId"
+  Write-Host "  Preferences : $($detected.PreferencePath)"
+  if ($detected.ExtensionPath) {
+    Write-Host "  Extension   : $($detected.ExtensionPath)"
+  }
+}
+
+if ($ExtensionId -notmatch '^[a-p]{32}$') {
+  throw "ExtensionId looks invalid: $ExtensionId"
+}
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
@@ -58,7 +161,7 @@ $AllowedOrigins = @($ExistingOrigins + $AllowedOrigin | Where-Object { $_ } | So
 
 $manifest = [ordered]@{
   name = $HostName
-  description = "Ablesci PDF Watcher Private Native Helper"
+  description = "Ablesci PDF Watcher Native Helper"
   path = $TargetExe
   type = "stdio"
   allowed_origins = $AllowedOrigins
@@ -185,10 +288,10 @@ public static class ShortcutManager {
 }
 "@
 
-$AppIdForShortcut = "AblesciPDFUploader"
-$ShortcutName = "Ablesci PDF Uploader"
+$AppIdForShortcut = "AblesciPDFWatcher"
+$ShortcutName = "Ablesci PDF Watcher"
 $StartMenuPrograms = [Environment]::GetFolderPath('StartMenu') + "\Programs"
-$ShortcutDir = Join-Path $StartMenuPrograms "Ablesci PDF Uploader"
+$ShortcutDir = Join-Path $StartMenuPrograms "Ablesci PDF Watcher"
 $ShortcutPath = Join-Path $ShortcutDir "$ShortcutName.lnk"
 $ShortcutIcon = if (Test-Path $IcoDst) { $IcoDst } else { $TargetExe + ",0" }
 

@@ -301,9 +301,9 @@ chrome.runtime.onInstalled.addListener(() => {
   cleanupOrphanPublisherTabs('runtime_installed').catch(() => {});
 });
 
-// PRIVATE_WATCHER_ONLY
+// AUTO_WATCHER
   importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/demand.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');
-globalThis.initPrivateAutoWatcher({
+globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,
   sendNativeMessage,

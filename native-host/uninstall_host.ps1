@@ -2,7 +2,7 @@ param(
   [ValidateSet("Chrome", "Edge", "All")]
   [string]$Browser = "All",
 
-  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcherPrivate",
+  [string]$InstallDir = "$env:LOCALAPPDATA\AblesciPdfWatcher",
 
   [switch]$RemoveFiles,
 
@@ -10,19 +10,19 @@ param(
 )
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
-$HostName = "com.ablesci.pdf_watcher_private"
+$HostName = "com.ablesci.pdf_watcher"
 $Browsers = if ($Browser -eq "All") { @("Chrome", "Edge") } else { @($Browser) }
 $StartMenuPrograms = [Environment]::GetFolderPath('StartMenu') + "\Programs"
-$ShortcutDir = Join-Path $StartMenuPrograms "Ablesci PDF Uploader"
-$ShortcutPath = Join-Path $ShortcutDir "Ablesci PDF Uploader.lnk"
-$MarkerPath = Join-Path $InstallDir ".ablesci_pdf_watcher_private.install.json"
+$ShortcutDir = Join-Path $StartMenuPrograms "Ablesci PDF Watcher"
+$ShortcutPath = Join-Path $ShortcutDir "Ablesci PDF Watcher.lnk"
+$MarkerPath = Join-Path $InstallDir ".ablesci_pdf_watcher.install.json"
 $ManifestPath = Join-Path $InstallDir "$HostName.json"
 $ExpectedFiles = @(
   "ablesci_pdf_helper.exe",
   "$HostName.json",
   "icon48.png",
   "icon.ico",
-  ".ablesci_pdf_watcher_private.install.json"
+  ".ablesci_pdf_watcher.install.json"
 )
 
 function Remove-IfExists {
