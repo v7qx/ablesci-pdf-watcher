@@ -95,9 +95,7 @@
       #${BTN_ID}.warn { background:#e5e7eb !important; border-color:#cbd5e1 !important; color:#334155 !important; }
       #${BTN_ID}.warn:hover { color:#334155 !important; }
       #${BTN_ID}.err { background:#a94442 !important; border-color:#a94442 !important; }
-      #${LOG_ID} { display:inline-block; margin-left:8px; color:#777; font-size:12px; vertical-align:middle; max-width:520px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      #ablesci-journal-access-hint,
-      .ablesci-journal-access-hint { display:inline-block; margin-left:8px; color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:3px; padding:1px 6px; font-size:12px; line-height:20px; vertical-align:middle; }
+      #${LOG_ID} { display:none !important; }
       .ablesci-native-layer-shade { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 2147483000; }
       .ablesci-native-layer { position: fixed; left: 50%; top: 12%; transform: translateX(-50%); width: min(680px, calc(100vw - 48px)); background: #fff; border-radius: 2px; box-shadow: 1px 1px 50px rgba(0,0,0,.3); z-index: 2147483001; font-size: 14px; color: #222; }
       .ablesci-native-layer-content { padding: 20px 28px; max-height: 62vh; overflow: auto; line-height: 1.65; }
@@ -143,6 +141,18 @@
 
   function idleButtonText() {
     return pageOptions.buttonLabel || DEFAULT_PAGE_OPTIONS.buttonLabel;
+  }
+
+  function defaultButtonTitle() {
+    return '下载 PDF、校验并上传；处理中可再次点击取消';
+  }
+
+  function setButtonTitle(btn, titleText = '') {
+    if (!btn) return;
+    const statusTitle = String(titleText || btn.dataset.ablesciStatusTitle || defaultButtonTitle()).trim();
+    btn.dataset.ablesciStatusTitle = statusTitle;
+    const journalHint = String(btn.dataset.ablesciJournalHint || '').trim();
+    btn.title = [statusTitle, journalHint].filter(Boolean).join('\n');
   }
 
   function applyButtonAppearance(btn) {
@@ -206,7 +216,7 @@
               ? '上传失败'
               : idleButtonText();
       if (!type) applyButtonAppearance(btn);
-      btn.title = titleText || '一键下载并上传 PDF';
+      setButtonTitle(btn, titleText || defaultButtonTitle());
     }
     if (log) log.textContent = logText || '';
     console.log('[Ablesci Native PDF Uploader]', msg);
@@ -461,18 +471,16 @@
     const journalName = extractJournalName();
     const hint = await getJournalAccessHint(journalName);
     const existing = document.getElementById('ablesci-journal-access-hint');
+    existing?.remove();
     if (!hint) {
-      existing?.remove();
+      delete anchorEl.dataset.ablesciJournalHint;
+      setButtonTitle(anchorEl);
       return;
     }
-    if (existing) return;
-
-    const span = document.createElement('span');
-    span.id = 'ablesci-journal-access-hint';
-    span.className = 'ablesci-journal-access-hint';
-    span.textContent = hint.level === 'info' ? '该期刊部分有权限' : '该期刊连续失败较多';
-    span.title = hint.text;
-    anchorEl.insertAdjacentElement('afterend', span);
+    anchorEl.dataset.ablesciJournalHint = hint.level === 'info'
+      ? '期刊权限：部分有权限'
+      : '期刊权限：连续失败较多';
+    setButtonTitle(anchorEl);
   }
 
   function collectPayload() {
@@ -602,7 +610,7 @@
     btn.href = 'javascript:void(0);';
     btn.className = 'layui-btn layui-btn-xs';
     btn.textContent = idleButtonText();
-    btn.title = 'Chrome 插件 + Native Helper：下载 PDF、算 MD5、上传 OSS；处理中可再次点击取消';
+    setButtonTitle(btn, defaultButtonTitle());
     applyButtonAppearance(btn);
     btn.addEventListener('click', e => {
       e.preventDefault();

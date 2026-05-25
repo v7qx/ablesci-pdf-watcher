@@ -1208,7 +1208,7 @@
 
       const hadActiveOrQueued = !!activeTask || taskQueue.length > 0;
       if (hadActiveOrQueued) {
-        post(port, 'progress', `已有 PDF 上传任务正在处理（${activeTask?.label || '队列中'}），当前任务已进入队列。为避免多个页面下载错配，插件会按点击顺序逐个处理。关闭本 Ablesci 页面会自动取消该任务。`);
+        post(port, 'progress', '已排队：等待当前 PDF 任务完成；关闭本页可取消。');
       }
 
       port.onDisconnect.addListener(() => {

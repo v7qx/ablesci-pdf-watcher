@@ -113,6 +113,42 @@
       flex-basis: 420px;
     }
 
+    .watcher-action-row {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .watcher-action-control {
+      display: block;
+      min-width: 0;
+      flex: 1 1 auto;
+      width: 100%;
+    }
+
+    .watcher-action-buttons,
+    .watcher-action-status {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .watcher-action-buttons button {
+      white-space: nowrap;
+      padding: 0 12px;
+    }
+
+    .watcher-action-status {
+      margin-top: 8px;
+    }
+
+    .watcher-action-status .pill {
+      max-width: 120px;
+      padding: 0 8px;
+    }
+
     input[type="text"],
     input[type="number"],
     textarea,
@@ -1103,19 +1139,23 @@
       </div>
       </details>
       </details>
-      <div class="setting-row">
+      <div class="setting-row watcher-action-row">
         <div class="setting-copy">
           <strong>值守操作</strong>
           <span>手动触发、采样和复制排查配置；清理类操作放在更多设置中。</span>
         </div>
-        <div class="setting-control">
-          <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
-          <button id="observeDemandNow" class="secondary" type="button">立即采样</button>
-          <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
-          <button id="copyRecentSageTrace" class="secondary" type="button">复制最近 Trace</button>
-          <span id="watcherRunStatus" class="pill">未检查</span>
-          <span id="watcherConfigStatus" class="pill">未复制</span>
-          <span id="watcherTraceStatus" class="pill">未复制</span>
+        <div class="setting-control watcher-action-control">
+          <div class="watcher-action-buttons">
+            <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
+            <button id="observeDemandNow" class="secondary" type="button">立即采样</button>
+            <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
+            <button id="copyRecentSageTrace" class="secondary" type="button">复制最近 Trace</button>
+          </div>
+          <div class="watcher-action-status">
+            <span id="watcherRunStatus" class="pill">未检查</span>
+            <span id="watcherConfigStatus" class="pill">未复制</span>
+            <span id="watcherTraceStatus" class="pill">未复制</span>
+          </div>
         </div>
       </div>
     </section>
