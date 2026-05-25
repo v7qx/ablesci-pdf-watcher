@@ -73,6 +73,7 @@ edge://settings/content/pdfDocuments
 ```
 
 如果使用了第 1 步脚本，这些设置已经写入专用 Profile；这里只需要打开浏览器设置页确认。
+如果浏览器已经打开，再运行脚本修改配置后，请关闭并重新打开专用浏览器，Chrome / Edge 才会重新读取这些下载设置。
 
 ### 第 4 步：安装 Native Helper（仅自动上传所必需）
 
@@ -101,7 +102,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\install_host.ps1 -Browser Edge -ProfileDir "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile"
 ```
 
-安装脚本会从专用 Profile 中自动识别已加载扩展的 ID。
+安装脚本会从专用 Profile 中自动识别已加载扩展的 ID，并再次确认该 Profile 已设置为 PDF 直接下载。
 如果你没有使用第 1 步脚本，或者自动识别失败，可以在扩展管理页复制扩展 ID 后手动指定：
 
 ```powershell

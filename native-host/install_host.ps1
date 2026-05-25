@@ -8,6 +8,8 @@ param(
 
   [string]$ProfileDir = "",
 
+  [string]$DownloadDir = "$env:USERPROFILE\Downloads\AblesciPdfWatcher",
+
   [string]$ExtensionDir = ""
 )
 
@@ -99,6 +101,84 @@ function Find-ExtensionIdInPreferences([string]$BrowserName, [string]$UserDataDi
     throw "Multiple Ablesci PDF Watcher extensions were found. Pass -ExtensionId explicitly."
   }
   return $null
+}
+
+function Read-JsonObject([string]$Path) {
+  if (!(Test-Path -LiteralPath $Path)) {
+    return [pscustomobject]@{}
+  }
+  $raw = Get-Content -LiteralPath $Path -Raw
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return [pscustomobject]@{}
+  }
+  return $raw | ConvertFrom-Json
+}
+
+function Ensure-ObjectProperty($Object, [string]$Name) {
+  if ($null -eq $Object.$Name) {
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue ([pscustomobject]@{}) -Force
+  }
+  return $Object.$Name
+}
+
+function Set-ObjectProperty($Object, [string]$Name, $Value) {
+  $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
+function Ensure-BrowserProfileDownloadPrefs([string]$UserDataDir, [string]$DownloadDir) {
+  if ([string]::IsNullOrWhiteSpace($UserDataDir)) {
+    return
+  }
+  $profileRoot = [System.IO.Path]::GetFullPath($UserDataDir)
+  $downloadRoot = if ([string]::IsNullOrWhiteSpace($DownloadDir)) {
+    Join-Path $profileRoot "Downloads"
+  } else {
+    [System.IO.Path]::GetFullPath($DownloadDir)
+  }
+  $defaultProfileDir = Join-Path $profileRoot "Default"
+  $preferencesPath = Join-Path $defaultProfileDir "Preferences"
+  $localStatePath = Join-Path $profileRoot "Local State"
+  $firstRunPath = Join-Path $profileRoot "First Run"
+
+  New-Item -ItemType Directory -Force -Path $defaultProfileDir | Out-Null
+  New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+  if (!(Test-Path -LiteralPath $firstRunPath)) {
+    New-Item -ItemType File -Force -Path $firstRunPath | Out-Null
+  }
+
+  $localState = Read-JsonObject $localStatePath
+  $browserState = Ensure-ObjectProperty $localState "browser"
+  Set-ObjectProperty $browserState "has_seen_welcome_page" $true
+  $localState | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $localStatePath -Encoding UTF8
+
+  $prefs = Read-JsonObject $preferencesPath
+  $download = Ensure-ObjectProperty $prefs "download"
+  Set-ObjectProperty $download "default_directory" $downloadRoot
+  Set-ObjectProperty $download "directory_upgrade" $true
+  Set-ObjectProperty $download "prompt_for_download" $false
+
+  $plugins = Ensure-ObjectProperty $prefs "plugins"
+  Set-ObjectProperty $plugins "always_open_pdf_externally" $true
+
+  $browserPrefs = Ensure-ObjectProperty $prefs "browser"
+  Set-ObjectProperty $browserPrefs "has_seen_welcome_page" $true
+
+  $profile = Ensure-ObjectProperty $prefs "profile"
+  Set-ObjectProperty $profile "exited_cleanly" $true
+  Set-ObjectProperty $profile "exit_type" "Normal"
+  $contentSettings = Ensure-ObjectProperty $profile "default_content_setting_values"
+  Set-ObjectProperty $contentSettings "automatic_downloads" 1
+
+  $prefs | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $preferencesPath -Encoding UTF8
+
+  Write-Host "Browser profile preferences ensured:"
+  Write-Host "  Profile dir : $profileRoot"
+  Write-Host "  Download dir: $downloadRoot"
+  Write-Host "  PDF direct  : enabled"
+}
+
+if (![string]::IsNullOrWhiteSpace($ProfileDir)) {
+  Ensure-BrowserProfileDownloadPrefs $ProfileDir $DownloadDir
 }
 
 if ([string]::IsNullOrWhiteSpace($ExtensionId)) {

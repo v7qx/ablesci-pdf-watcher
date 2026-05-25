@@ -64,9 +64,19 @@ $ProfileDir = [System.IO.Path]::GetFullPath($ProfileDir)
 $DownloadDir = [System.IO.Path]::GetFullPath($DownloadDir)
 $DefaultProfileDir = Join-Path $ProfileDir "Default"
 $PreferencesPath = Join-Path $DefaultProfileDir "Preferences"
+$LocalStatePath = Join-Path $ProfileDir "Local State"
+$FirstRunPath = Join-Path $ProfileDir "First Run"
 
 New-Item -ItemType Directory -Force -Path $DefaultProfileDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
+if (!(Test-Path -LiteralPath $FirstRunPath)) {
+  New-Item -ItemType File -Force -Path $FirstRunPath | Out-Null
+}
+
+$localState = Read-JsonObject $LocalStatePath
+$browserState = Ensure-ObjectProperty $localState "browser"
+Set-ObjectProperty $browserState "has_seen_welcome_page" $true
+$localState | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $LocalStatePath -Encoding UTF8
 
 $prefs = Read-JsonObject $PreferencesPath
 $download = Ensure-ObjectProperty $prefs "download"
@@ -77,7 +87,12 @@ Set-ObjectProperty $download "prompt_for_download" $false
 $plugins = Ensure-ObjectProperty $prefs "plugins"
 Set-ObjectProperty $plugins "always_open_pdf_externally" $true
 
+$browserPrefs = Ensure-ObjectProperty $prefs "browser"
+Set-ObjectProperty $browserPrefs "has_seen_welcome_page" $true
+
 $profile = Ensure-ObjectProperty $prefs "profile"
+Set-ObjectProperty $profile "exited_cleanly" $true
+Set-ObjectProperty $profile "exit_type" "Normal"
 $contentSettings = Ensure-ObjectProperty $profile "default_content_setting_values"
 Set-ObjectProperty $contentSettings "automatic_downloads" 1
 
@@ -104,6 +119,7 @@ Write-Host "Browser exe  : $BrowserExe"
 Write-Host "Profile dir  : $ProfileDir"
 Write-Host "Download dir : $DownloadDir"
 Write-Host "Preferences : $PreferencesPath"
+Write-Host "Local State : $LocalStatePath"
 Write-Host "Shortcut    : $ShortcutPath"
 Write-Host ""
 Write-Host "Next steps:"
