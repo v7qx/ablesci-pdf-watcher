@@ -113,7 +113,7 @@ function validateOptions(opts) {
   if (opts.watcherMinIntervalMinutes < 1 || opts.watcherMaxIntervalMinutes > 1440 || opts.watcherMinIntervalMinutes > opts.watcherMaxIntervalMinutes) {
     throw new Error('随机应助间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
   }
-  if (opts.watcherDailyLimit < 0) throw new Error('每日上传上限不能小于 0。');
+  if (opts.watcherDailyLimit < 0) throw new Error('每日应助上限不能小于 0。');
   if (opts.watcherMinNonSdSeekingCount < 0) throw new Error('非 SD 最低求助量不能小于 0。');
   if (opts.watcherMaxPerSession < 1 || opts.watcherMaxPerSession > 10) {
     throw new Error('每会话最多候选必须在 1–10 之间。');

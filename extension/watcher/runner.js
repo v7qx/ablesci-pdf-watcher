@@ -199,6 +199,29 @@
     }
 
     function makeWatcherPort(context) {
+      function isNativeHostMissingMessage(message) {
+        return /specified native messaging host not found|native messaging host|communicating with the native messaging host|未连上 Native Helper|Native Helper/i.test(String(message || ''));
+      }
+
+      function isInfrastructureUploadFailure(message) {
+        return isNativeHostMissingMessage(message) || /upload-request|OSS|Aliyun|阿里云|Native Helper|upload_oss/i.test(String(message || ''));
+      }
+
+      async function pauseWatcherForInfrastructureFailure(message) {
+        if (!isInfrastructureUploadFailure(message)) return false;
+        const reason = isNativeHostMissingMessage(message) ? 'native_helper_unavailable' : 'upload_infrastructure_error';
+        await appendWatcherTrace('watcher_paused_after_download_failure', {
+          reason,
+          error: String(message || '').slice(0, 240),
+          detailUrl: context.detailUrl,
+          sessionId: context.sessionId || '',
+          assistId: context.key
+        }).catch(() => {});
+        await chromeApi.storage.local.set({ watcherEnabled: false }).catch(() => {});
+        await notifyWatcherNeedsAttention('自动值守已暂停：PDF 已下载但上传链路异常，请检查 Native Helper / OSS 配置后再开启。').catch(() => {});
+        return true;
+      }
+
       function settle(result) {
         if (!context || context.settled) return;
         context.settled = true;
@@ -206,16 +229,18 @@
       }
       return {
         name: 'ablesci-auto-watcher',
-        postMessage(msg) {
+        async postMessage(msg) {
           if (!msg || !context) return;
           if (msg.type === 'error') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
+            const paused = await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
             appendWatcherTrace('queue_message_error', {
               reason: msg.message || 'upload_failed',
               detailUrl: context.detailUrl,
               sessionId: context.sessionId || '',
               assistId: context.key,
-              durationMs
+              durationMs,
+              paused
             }).catch(() => {});
             updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
             incrementDaily('failed').catch(() => {});
@@ -229,7 +254,7 @@
               status: 'failed',
               reason: msg.message || 'upload_failed'
             }).then(writeDailyReports).catch(() => {});
-            settle({ ok: false, reason: msg.message || 'upload_failed', durationMs });
+            settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
           }
           if (msg.type === 'done' && msg.blocked) {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
@@ -252,9 +277,12 @@
               status: 'failed',
               reason: msg.message || 'blocked'
             }).then(writeDailyReports).catch(() => {});
-            settle({ ok: false, reason: msg.message || 'blocked', durationMs });
+            settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: true, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
+            if (context.opts?.watcherAutoUpload && !context.opts?.watcherUploadConfirmRequired && context.payload?.downloadOnly !== true) {
+              incrementDaily('uploaded').catch(() => {});
+            }
             appendWatcherTrace('queue_message_done', {
               reason: msg.message || 'done',
               detailUrl: context.detailUrl,
@@ -361,7 +389,6 @@
       });
       deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
       await incrementDaily('downloaded');
-      if (opts.watcherAutoUpload && !opts.watcherUploadConfirmRequired) await incrementDaily('uploaded');
       await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
       await appendWatcherLog({
         ...payload,
@@ -378,9 +405,12 @@
         if (!payload.downloadOnly) {
           await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         }
-        return result.ok;
+        if (!result.ok) {
+          return { handled: true, stopRun: true, reason: result.reason || 'upload_failed', paused: result.paused === true };
+        }
+        return { handled: true, stopRun: false, reason: result.reason || 'done' };
       }
-      return true;
+      return { handled: true, stopRun: false, reason: 'queued' };
     }
 
     return {

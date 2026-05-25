@@ -252,9 +252,20 @@
             await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
             await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, trigger, status: 'skipped', reason: detailAllowed.reason });
           } else {
-            const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session, trigger);
+            const handledResult = await handleAllowedPayload(candidate, payload, opts, detail.tabId, session, trigger);
+            const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
             if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
             if (handled) handledCount += 1;
+            if (handledResult?.stopRun === true) {
+              await appendWatcherTrace('session_stopped_after_candidate_failure', {
+                reason: handledResult.reason || 'upload_failed_stop_run',
+                sessionId: session.id,
+                detailUrl: candidate.detailUrl,
+                handledCount,
+                paused: handledResult.paused === true
+              });
+              break;
+            }
           }
         }
 

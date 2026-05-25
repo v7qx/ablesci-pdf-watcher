@@ -420,11 +420,25 @@
               continue;
             }
 
-            const handled = await handleAllowedPayload(candidate, payload, opts, detail.tabId, null, trigger);
+            const handledResult = await handleAllowedPayload(candidate, payload, opts, detail.tabId, null, trigger);
+            const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
             if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
             if (handled) {
               handledCount += 1;
-              await appendWatcherTrace('candidate_handled', { reason: 'handled', trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key, handledCount, targetSessionSize });
+              await appendWatcherTrace('candidate_handled', {
+                reason: handledResult?.reason || 'handled',
+                trigger,
+                detailUrl: candidate.detailUrl,
+                tabId: detail.tabId,
+                assistId: key,
+                handledCount,
+                targetSessionSize,
+                stopRun: handledResult?.stopRun === true,
+                paused: handledResult?.paused === true
+              });
+              if (handledResult?.stopRun === true) {
+                return finish({ ok: false, reason: handledResult.reason || 'upload_failed_stop_run' });
+              }
               if (handledCount >= targetSessionSize || depsRef.hasActiveTask()) {
                 return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
               }

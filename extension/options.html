@@ -697,6 +697,15 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>每日应助上限</strong>
+          <span>按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。</span>
+        </div>
+        <div class="setting-control">
+          <input id="watcherDailyLimit" type="number" min="0" max="500" step="1" value="10" aria-label="每日应助上限">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>诊断信息</strong>
           <span>复制最近一次脱敏诊断信息。</span>
         </div>
@@ -1013,15 +1022,6 @@
             <input id="watcherUploadConfirmRequired" type="checkbox">
             <span></span>
           </label>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>每日上传上限</strong>
-          <span>0 表示不限制。默认 10，最高 500。</span>
-        </div>
-        <div class="setting-control">
-          <input id="watcherDailyLimit" type="number" min="0" max="500" step="1" value="10" aria-label="每日上传上限">
         </div>
       </div>
       <div class="setting-row">
