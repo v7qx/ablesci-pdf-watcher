@@ -215,6 +215,7 @@ async function save() {
 function showPill(id, msg, isErr) {
   const node = el(id);
   node.textContent = msg;
+  node.title = msg || '';
   node.classList.toggle('ok', !isErr);
   node.classList.toggle('error', !!isErr);
 }

@@ -218,7 +218,7 @@
           assistId: context.key
         }).catch(() => {});
         await chromeApi.storage.local.set({ watcherEnabled: false }).catch(() => {});
-        await notifyWatcherNeedsAttention('自动值守已暂停：PDF 已下载但上传链路异常，请检查 Native Helper / OSS 配置后再开启。').catch(() => {});
+        await notifyWatcherNeedsAttention('自动值守已暂停：PDF 已下载但上传链路异常，请检查 Ablesci 登录状态、Native Helper 和 OSS 配置后再开启。').catch(() => {});
         return true;
       }
 

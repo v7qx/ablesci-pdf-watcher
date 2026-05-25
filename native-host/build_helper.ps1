@@ -19,7 +19,7 @@ if ($Output -eq "") {
 $Output = [System.IO.Path]::GetFullPath($Output)
 
 if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "Go was not found. Install Go first, then rerun build_helper.ps1."
+  throw "未找到 Go，无法从源码编译 Helper。请先准备 Go 环境，或使用已预编译的 native-helper\\bin\\windows-amd64\\ablesci_pdf_helper.exe。"
 }
 
 $OutDir = Split-Path -Parent $Output

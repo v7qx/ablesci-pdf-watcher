@@ -86,7 +86,22 @@ edge://settings/content/pdfDocuments
 - 本地日报写入
 - 读取 / 写入 `journal-access.json`、`telegram.json`
 
-直接运行安装脚本即可。**如果仓库里已有预编译的 helper，脚本会直接复制；只有没有预编译文件时才需要 Go。**
+先确认 helper 可执行文件是否存在：
+
+```powershell
+Test-Path .\native-helper\bin\windows-amd64\ablesci_pdf_helper.exe
+```
+
+如果返回 `False`，先编译 helper：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
+```
+
+如果提示未找到 Go，说明当前环境还不能从源码编译 helper；请先准备 Go 环境，或使用已经预编译好的 `native-helper\bin\windows-amd64\ablesci_pdf_helper.exe`。
+
+然后安装 Native Host。安装脚本需要从专用 Profile 中识别扩展 ID，所以请先完成第 1 步：打开专用浏览器、进入 `chrome://extensions/` 或 `edge://extensions/`、开启开发者模式、加载本仓库 `extension` 目录。加载后建议关闭一次专用浏览器，再执行下面命令。
 
 Chrome：
 
@@ -103,7 +118,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 安装脚本会从专用 Profile 中自动识别已加载扩展的 ID，并再次确认该 Profile 已设置为 PDF 直接下载。
-如果你没有使用第 1 步脚本，或者自动识别失败，可以在扩展管理页复制扩展 ID 后手动指定：
+如果你没有使用第 1 步脚本、扩展还没有加载到这个 Profile，或者自动识别失败，可以在扩展管理页复制扩展 ID 后手动指定：
 
 ```powershell
 .\native-host\install_host.ps1 -Browser Chrome -ExtensionId <扩展ID>

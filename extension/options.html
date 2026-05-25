@@ -372,6 +372,29 @@
       display: flex;
     }
 
+    #nativeStatus,
+    #watcherRunStatus,
+    #watcherNotifyStatus,
+    #watcherConfigStatus,
+    #watcherTraceStatus,
+    #diagnosticStatus,
+    #journalAccessConfigStatus {
+      max-width: 100%;
+    }
+
+    #nativeStatus,
+    #watcherRunStatus {
+      align-items: flex-start;
+      height: auto;
+      min-height: 24px;
+      line-height: 1.35;
+      padding-top: 4px;
+      padding-bottom: 4px;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+    }
+
     .pill.ok {
       background: #dcfce7;
       color: var(--ok);

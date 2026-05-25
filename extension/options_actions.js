@@ -42,6 +42,14 @@
       });
     }
 
+    function formatActionFailure(reason) {
+      const text = String(reason || '未知错误');
+      if (/native messaging host|communicating with the native messaging host|specified native messaging host not found/i.test(text)) {
+        return nativeFailureHelp(text);
+      }
+      return '失败：' + text;
+    }
+
     async function copyTextToClipboard(text) {
       try {
         await navigator.clipboard.writeText(text);
@@ -254,7 +262,7 @@
       }
       showPill('watcherRunStatus', '检查中');
       const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
-      showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : ('失败：' + (res.reason || '未知错误')), !res.ok);
+      showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
     }
 
     async function observeDemandNow() {
@@ -265,7 +273,7 @@
       }
       showPill('watcherRunStatus', '采样中');
       const res = await sendRuntimeMessage({ type: 'ablesciObserveDemandNow' });
-      showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : ('失败：' + (res.reason || '未知错误')), !res.ok);
+      showPill('watcherRunStatus', res.ok ? (res.reason || '已采样') : formatActionFailure(res.reason), !res.ok);
     }
 
     async function testWatcherNotification() {

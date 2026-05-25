@@ -39,10 +39,14 @@ function Get-PreferencePaths([string]$BrowserName, [string]$UserDataDir) {
   if (![string]::IsNullOrWhiteSpace($UserDataDir)) {
     $root = [System.IO.Path]::GetFullPath($UserDataDir)
     $paths += Join-Path $root "Default\Preferences"
+    $paths += Join-Path $root "Default\Secure Preferences"
     if (Test-Path -LiteralPath $root) {
       Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -like "Profile *" } |
-        ForEach-Object { $paths += Join-Path $_.FullName "Preferences" }
+        ForEach-Object {
+          $paths += Join-Path $_.FullName "Preferences"
+          $paths += Join-Path $_.FullName "Secure Preferences"
+        }
     }
   } else {
     $paths += Get-PreferencePaths $BrowserName (Get-DefaultUserDataDir $BrowserName)
@@ -187,7 +191,28 @@ if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
   }
   $detected = Find-ExtensionIdInPreferences $Browser $ProfileDir $ExtensionDir
   if ($null -eq $detected) {
-    throw "Could not detect the extension ID. Load the unpacked extension first, then rerun this script with -ProfileDir, or pass -ExtensionId explicitly."
+    $profileHint = if ([string]::IsNullOrWhiteSpace($ProfileDir)) { "(未指定，正在检查默认浏览器 Profile)" } else { [System.IO.Path]::GetFullPath($ProfileDir) }
+    $hint = @"
+无法自动识别扩展 ID。
+
+这通常不是 Helper 是否预编译的问题，而是安装脚本没有在指定浏览器 Profile 中找到已加载的扩展。
+
+请按顺序确认：
+1. 已用专用浏览器 Profile 打开 chrome://extensions/
+2. 已开启开发者模式，并加载本仓库的 extension 目录
+3. 加载后关闭专用浏览器，让 Chrome / Edge 写入 Profile 配置
+4. 重新运行本脚本
+
+如果仍失败，请在扩展管理页复制扩展 ID 后显式传入：
+.\native-host\install_host.ps1 -Browser $Browser -ExtensionId <扩展ID>
+
+当前检查的 Profile：
+$profileHint
+
+当前期望的扩展目录：
+$ExtensionDir
+"@
+    throw $hint
   }
   $ExtensionId = $detected.Id
   Write-Host "Detected extension ID: $ExtensionId"
@@ -210,7 +235,7 @@ if (Test-Path $PrebuiltExe) {
   Copy-Item $PrebuiltExe $TargetExe -Force
 } else {
   if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-    throw "Go was not found. Install Go first, then rerun install_host.ps1."
+    throw "未找到 Go，且仓库中没有预编译 Helper：$PrebuiltExe。请先准备 Go 环境或放入预编译 Helper，然后重新运行 native-host\build_helper.ps1 或 native-host\install_host.ps1。"
   }
   Push-Location $SourceGoDir
   try {
