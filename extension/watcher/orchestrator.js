@@ -158,9 +158,45 @@
         frontHit: false,
         alpha: ''
       };
+      let manualScheduleSnapshot = null;
       function finish(result) {
         runResult = result;
         return result;
+      }
+      function snapshotScheduleFields(state = {}) {
+        const keys = [
+          'nextAssistRunAt',
+          'nextAssistReason',
+          'nextAssistStrategy',
+          'nextAssistDelayMinutes',
+          'nextAssistModelDelayMinutes',
+          'nextAssistGuardMinutes',
+          'nextAssistGuardApplied',
+          'nextAssistGuardLiftMinutes',
+          'nextAssistGuardWeight',
+          'nextAssistGuardMode',
+          'nextAssistPlannedAt',
+          'nextAssistPlanningData',
+          'nextAssistPlan',
+          'nextScheduledAt',
+          'chromeAlarmScheduledAt'
+        ];
+        return Object.fromEntries(keys.map(key => {
+          if (state[key] !== undefined) return [key, state[key]];
+          return [key, key === 'nextAssistPlanningData' || key === 'nextAssistPlan' ? null : ''];
+        }));
+      }
+      async function restoreManualScheduleSnapshot() {
+        if (!manualScheduleSnapshot) return;
+        const state = await getWatcherState();
+        Object.assign(state, manualScheduleSnapshot);
+        await saveWatcherState(state);
+        await appendWatcherTrace('manual_run_schedule_preserved', {
+          reason: 'manual_run_does_not_replan_auto_schedule',
+          nextAssistRunAt: state.nextAssistRunAt || '',
+          chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
+          nextScheduledAt: state.nextScheduledAt || ''
+        });
       }
       try {
         await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
@@ -169,6 +205,9 @@
         currentRunOpts = opts;
         await recordRunStart(trigger, opts);
         const initialState = await getWatcherState();
+        if (trigger === 'manual' || trigger === 'manual-observe') {
+          manualScheduleSnapshot = snapshotScheduleFields(initialState);
+        }
         attempt.nextAssistBefore = initialState.nextAssistRunAt || '';
         Object.assign(attempt, Object.fromEntries(Object.entries(dailyCounterSnapshot(initialState)).map(([key, value]) => [`${key}Before`, value])));
         if (!opts.watcherEnabled && trigger !== 'manual') {
@@ -515,6 +554,7 @@
         await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
         if (currentRunOpts) await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
         if (currentRunOpts) await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
+        await restoreManualScheduleSnapshot().catch(() => {});
         await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
         try { await writeDailyReports(); } catch (_) {}
         await flushWatcherLogs().catch(() => {});

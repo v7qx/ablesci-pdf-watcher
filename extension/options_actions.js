@@ -226,11 +226,6 @@
     }
 
     async function runAutoWatcherNow() {
-      const saved = await save({ suppressWatcherReplan: true });
-      if (!saved) {
-        showPill('watcherRunStatus', '保存失败，未执行检查', true);
-        return;
-      }
       showPill('watcherRunStatus', '检查中');
       const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
       showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
