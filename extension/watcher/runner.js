@@ -199,6 +199,9 @@
     }
 
     function makeWatcherPort(context) {
+      const disconnectListeners = new Set();
+      let disconnected = false;
+
       function isNativeHostMissingMessage(message) {
         return /specified native messaging host not found|native messaging host|communicating with the native messaging host|未连上 Native Helper|Native Helper/i.test(String(message || ''));
       }
@@ -227,6 +230,16 @@
         context.settled = true;
         if (context.resolve) context.resolve(result);
       }
+
+      function disconnect(reason = 'detail_tab_closed') {
+        if (disconnected) return;
+        disconnected = true;
+        for (const listener of Array.from(disconnectListeners)) {
+          try { listener(); } catch (err) { console.warn('[Ablesci PDF Watcher] synthetic port disconnect listener failed', err); }
+        }
+        settle({ ok: false, reason, stopRun: true, paused: false });
+      }
+
       return {
         name: 'ablesci-auto-watcher',
         async postMessage(msg) {
@@ -296,22 +309,46 @@
           }
         },
         onDisconnect: {
-          addListener() {}
-        }
+          addListener(listener) {
+            if (typeof listener === 'function') disconnectListeners.add(listener);
+          },
+          removeListener(listener) {
+            disconnectListeners.delete(listener);
+          }
+        },
+        disconnect
       };
     }
 
     function makeSessionPortContext(context) {
       let timer = null;
+      let tabRemovedListener = null;
+      let port = null;
       const result = new Promise(resolve => {
         context.resolve = value => {
           if (timer) clearTimeout(timer);
+          if (tabRemovedListener) chromeApi.tabs.onRemoved.removeListener(tabRemovedListener);
           resolve(value);
         };
         const timeoutMs = Math.max(60 * 1000, (Number(context.opts?.watcherTaskTimeoutMinutes || 10) + 1) * 60 * 1000);
-        timer = setTimeout(() => resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs }), timeoutMs);
+        timer = setTimeout(() => context.resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs }), timeoutMs);
       });
-      return { port: makeWatcherPort(context), result };
+      port = makeWatcherPort(context);
+      if (Number.isInteger(context.detailTabId)) {
+        tabRemovedListener = tabId => {
+          if (tabId !== context.detailTabId) return;
+          appendWatcherTrace('detail_tab_closed_cancel_task', {
+            reason: 'detail_tab_closed',
+            detailUrl: context.detailUrl,
+            tabId,
+            sessionId: context.sessionId || '',
+            assistId: context.key
+          }).catch(() => {});
+          port.disconnect('detail_tab_closed');
+        };
+        chromeApi.tabs.onRemoved.addListener(tabRemovedListener);
+      }
+      return { port, result };
     }
 
     async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null, trigger = '') {
@@ -370,6 +407,7 @@
         key,
         payload,
         detailUrl: candidate.detailUrl,
+        detailTabId,
         opts,
         source,
         sessionId: session?.id || '',
