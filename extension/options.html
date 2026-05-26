@@ -867,22 +867,23 @@
         </div>
         <div class="setting-control setting-control-wide">
           <div class="metric-grid">
-            <div class="metric-field"><label>时段</label><span id="watcherWorkStatus" class="pill">-</span></div>
-            <div class="metric-field"><label>窗口进度</label><span id="advancedWorkProgress" class="pill">-</span></div>
-            <div class="metric-field"><label>有效进度</label><span id="advancedActiveProgress" class="pill">-</span></div>
-            <div class="metric-field"><label>可用率</label><span id="advancedAvailability" class="pill">-</span></div>
-            <div class="metric-field"><label>Expected / Actual</label><span id="advancedExpectedActual" class="pill">-</span></div>
-            <div class="metric-field"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
-            <div class="metric-field"><label>Rate</label><span id="advancedRateMultiplier" class="pill">-</span></div>
-            <div class="metric-field"><label>风险预算</label><span id="advancedRiskBudget" class="pill">-</span></div>
-            <div class="metric-field"><label>Session</label><span id="advancedSessionStatus" class="pill">-</span></div>
-            <div class="metric-field"><label>Logic</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
-            <div class="metric-field"><label>Next Wake</label><span id="watcherNextRunAt" class="pill">-</span></div>
-            <div class="metric-field"><label>Next Assist Attempt</label><span id="watcherNextAssistAt" class="pill">-</span></div>
-            <div class="metric-field"><label>Assist Countdown</label><span id="watcherAssistCountdown" class="pill">-</span></div>
-            <div class="metric-field"><label>Wake Countdown</label><span id="watcherWakeCountdown" class="pill">-</span></div>
-            <div class="metric-field"><label>Runs</label><span id="watcherRunCounts" class="pill">-</span></div>
-            <div class="metric-field"><label>工作日</label><span id="watcherSavedWorkdays" class="pill">-</span></div>
+            <div class="metric-field" title="当前是否在允许的值守时间窗口内"><label>时段</label><span id="watcherWorkStatus" class="pill">-</span></div>
+            <div class="metric-field" title="本月已流逝的工作窗口时间占比"><label>窗口进度</label><span id="advancedWorkProgress" class="pill">-</span></div>
+            <div class="metric-field" title="本月实际有效值守时间占比"><label>有效进度</label><span id="advancedActiveProgress" class="pill">-</span></div>
+            <div class="metric-field" title="浏览器实际唤醒次数 / 预期唤醒次数。若可用率低，说明浏览器休眠或挂起较多。"><label>可用率</label><span id="advancedAvailability" class="pill">-</span></div>
+            <div class="metric-field" title="预计：截至当前当月应达到的应助量；实际：以网页首次同步为基准计算的当月累计实际完成应助量。"><label>预计 / 实际</label><span id="advancedExpectedActual" class="pill">-</span></div>
+            <div class="metric-field" title="从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。"><label>网页总应助</label><span id="watcherWebTotalAssists" class="pill">-</span></div>
+            <div class="metric-field" title="本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
+            <div class="metric-field" title="自适应频率调节系数。落后于进度时大于1（最高3.0，使间隔变短），超前时小于1（使间隔变长）。"><label>速率倍数</label><span id="advancedRateMultiplier" class="pill">-</span></div>
+            <div class="metric-field" title="今日已发生的风险事件数 / 日上限。遇到出版商风控、Cloudflare挑战或下载错误时会消耗预算。"><label>风险预算</label><span id="advancedRiskBudget" class="pill">-</span></div>
+            <div class="metric-field" title="最近一次值守会话的执行结果。'-'表示尚未运行会话。"><label>会话状态</label><span id="advancedSessionStatus" class="pill">-</span></div>
+            <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
+            <div class="metric-field" title="插件下一次被后台Alarm唤醒以检查进度的具体北京时间。"><label>下次唤醒</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field" title="预计下一次尝试拉取列表并执行应助的具体北京时间（可能会被速率控制自动延后）。"><label>下次应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
+            <div class="metric-field" title="距离下一次应助尝试的剩余时间（最核心倒计时）。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="距离下一次后台唤醒检查的剩余时间。"><label>唤醒倒计时</label><span id="watcherWakeCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="今日累计唤醒检查的次数（自动定时唤醒 / 手动触发检查）。"><label>运行计数</label><span id="watcherRunCounts" class="pill">-</span></div>
+            <div class="metric-field" title="当前配置的允许值守的工作日范围。"><label>工作日</label><span id="watcherSavedWorkdays" class="pill">-</span></div>
           </div>
         </div>
       </div>

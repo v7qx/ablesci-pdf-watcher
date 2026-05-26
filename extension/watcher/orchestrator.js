@@ -78,6 +78,22 @@
         if (match) {
           const totalCount = parseInt(match[1], 10);
           const currentMonth = todayKey().slice(0, 7);
+          state.firstSyncTotalAssists = state.firstSyncTotalAssists || {};
+          state.firstSyncProgressRatio = state.firstSyncProgressRatio || {};
+          if (state.firstSyncTotalAssists[currentMonth] === undefined) {
+            state.firstSyncTotalAssists[currentMonth] = totalCount;
+            // Calculate progress ratio at first sync
+            let ratio = 0;
+            const year = new Date(now).getFullYear();
+            const month = new Date(now).getMonth();
+            const startOfMonth = new Date(year, month, 1).getTime();
+            const startOfNextMonth = new Date(year, month + 1, 1).getTime();
+            const totalMonthMs = startOfNextMonth - startOfMonth;
+            const currentMs = now - startOfMonth;
+            ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
+            state.firstSyncProgressRatio[currentMonth] = ratio;
+          }
+
           state.monthlyInitialAssists = state.monthlyInitialAssists || {};
           if (state.monthlyInitialAssists[currentMonth] === undefined) {
             let expectedDone = 0;
@@ -92,7 +108,7 @@
               const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
               expectedDone = Math.round(monthlyTarget * ratio);
             } else {
-              expectedDone = monthDone(state);
+              expectedDone = monthDone(state, opts);
             }
             state.monthlyInitialAssists[currentMonth] = totalCount - expectedDone;
           }
@@ -102,6 +118,8 @@
           await appendWatcherTrace('sync_web_assist_count', {
             totalCount,
             currentMonth,
+            firstSyncTotal: state.firstSyncTotalAssists[currentMonth],
+            firstSyncRatio: state.firstSyncProgressRatio[currentMonth],
             initialCount: state.monthlyInitialAssists[currentMonth]
           });
         }

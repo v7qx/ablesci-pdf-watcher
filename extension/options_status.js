@@ -43,6 +43,14 @@
       setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
       setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
+      
+      let syncText = '-';
+      if (Number.isFinite(state.actualTotalAssists)) {
+        const syncTime = state.lastAssistCountSyncedAt ? formatBeijingDateTime(state.lastAssistCountSyncedAt).slice(6) : '-';
+        syncText = `${state.actualTotalAssists} (同步: ${syncTime})`;
+      }
+      setText('watcherWebTotalAssists', syncText);
+
       setText('advancedError', String(Number(state.targetError || state.lag || 0)));
       setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
       setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
@@ -52,7 +60,7 @@
       setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
       setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
       setText('watcherWakeCountdown', countdownText(state.chromeAlarmScheduledAt || state.nextScheduledAt));
-      setText('watcherRunCounts', `A:${Number(daily.autoRuns || 0)} M:${Number(daily.manualRuns || 0)} O:${Number(daily.manualObserveRuns || 0)}`);
+      setText('watcherRunCounts', `自动: ${Number(daily.autoRuns || 0)} / 手动: ${Number(daily.manualRuns || 0)}`);
       setText('watcherSavedWorkdays', String(stored.watcherWorkdays || defaultOptions.watcherWorkdays));
     }
 
