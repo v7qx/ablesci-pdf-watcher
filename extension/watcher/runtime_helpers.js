@@ -80,11 +80,13 @@
     }
 
     function isInWorkSchedule(opts, date = new Date()) {
+      if (opts?.watcherUseCalendarProgress) return true;
       if (!opts.watcherQuantSchedulerEnabled) return true;
       return isInWorkScheduleBySet(opts.watcherWorkdays, opts.watcherWorkWindows, date);
     }
 
     function nextWorkDelayMinutes(opts, date = new Date()) {
+      if (opts?.watcherUseCalendarProgress) return null;
       if (!opts.watcherQuantSchedulerEnabled || isInWorkSchedule(opts, date)) return null;
       const nowMinute = beijingMinutesNow(date);
       const todayStart = opts.watcherWorkWindows.map(w => w.start).filter(start => start > nowMinute).sort((a, b) => a - b)[0];
@@ -149,7 +151,7 @@
     function quotaResetDelayMinutes(opts, date = new Date()) {
       const nowMinute = beijingMinutesNow(date);
       const minutesUntilMidnight = 24 * 60 - nowMinute;
-      if (!opts?.watcherQuantSchedulerEnabled) return Math.max(1, minutesUntilMidnight + Math.random() * 5);
+      if (opts?.watcherUseCalendarProgress || !opts?.watcherQuantSchedulerEnabled) return Math.max(1, minutesUntilMidnight + Math.random() * 5);
       for (let d = 1; d <= 8; d += 1) {
         const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
         if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;

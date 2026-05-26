@@ -810,6 +810,18 @@
         <summary>调度规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>自适应日历进度</strong>
+          <span>启用后，无视工作日与工作窗口限制，纯按当月时间进度自适应调节应助速率。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="使用自适应日历进度">
+            <input id="watcherUseCalendarProgress" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row" id="watcherWorkTimeRow">
+        <div class="setting-copy">
           <strong>工作日与窗口</strong>
           <span>工作日用 1–7 表示周一到周日；窗口外不打开详情、不下载。</span>
         </div>
