@@ -129,11 +129,23 @@
       const u = new URL(url);
       const isAblesci = /(^|\.)ablesci\.com$/i.test(u.hostname);
       const isAssistList = /\/assist\/index$/i.test(u.pathname);
-      const publisher = String(u.searchParams.get('publisher') || '').toLowerCase();
-      const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
-      if (!isAblesci || !isAssistList || u.searchParams.get('status') !== 'waiting' || !range) {
+      if (!isAblesci || !isAssistList || u.searchParams.get('status') !== 'waiting') {
         return null;
       }
+      const publisher = String(u.searchParams.get('publisher') || '').toLowerCase();
+
+      // Respect explicit page_min / page_max from the URL, falling back to
+      // the built-in publisher curve.
+      const customMin = u.searchParams.get('page_min');
+      const customMax = u.searchParams.get('page_max');
+      if (customMin !== null || customMax !== null) {
+        const min = clampInt(parseInt(customMin, 10) || 1, 1, 9999);
+        const max = clampInt(parseInt(customMax, 10) || min, min, 9999);
+        return { publisher: publisher || 'custom', range: { min, max, curve: 'uniform' } };
+      }
+
+      const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
+      if (!range) return null;
       return { publisher, range };
     } catch (_) {
       return null;

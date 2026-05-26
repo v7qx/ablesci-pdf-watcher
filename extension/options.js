@@ -271,15 +271,6 @@ document.addEventListener('copy', handleDocumentCopy);
 document.addEventListener('DOMContentLoaded', () => {
   load().then(() => {
     startAdvancedCountdownTimer();
-    const calendarProgressInput = el('watcherUseCalendarProgress');
-    const workTimeRow = el('watcherWorkTimeRow');
-    if (calendarProgressInput && workTimeRow) {
-      const updateVisibility = () => {
-        workTimeRow.style.display = calendarProgressInput.checked ? 'none' : '';
-      };
-      calendarProgressInput.addEventListener('change', updateVisibility);
-      updateVisibility();
-    }
   });
 
   // 防止快速双击/连击 summary 展开/收起时导致页面文本被全选或选中

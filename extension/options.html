@@ -541,7 +541,7 @@
         <div class="setting-copy">
           <strong>浏览器下载设置</strong>
           <span>
-            请手动关闭“下载前询问保存位置”，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。
+            请手动关闭"下载前询问保存位置"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。
           </span>
         </div>
       </div>
@@ -789,7 +789,6 @@
               <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
             </div>
           </div>
-          <div class="setting-hint">每日真实硬上限只看“每日应助上限”。会话内部固定按单次 1 条处理，避免并发下载错配。</div>
         </div>
       </div>
       </details>
@@ -797,32 +796,11 @@
         <summary>低频值守更多设置</summary>
       <details class="setting-details nested-setting-details">
         <summary>调度规则</summary>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>自适应日历进度</strong>
-          <span>启用后，无视工作日与工作窗口限制，纯按当月时间进度自适应调节应助速率。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="使用自适应日历进度">
-            <input id="watcherUseCalendarProgress" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-      </div>
-      <div class="setting-row" id="watcherWorkTimeRow">
-        <div class="setting-copy">
-          <strong>工作日与窗口</strong>
-          <span>工作日用 1–7 表示周一到周日；窗口外不打开详情、不下载。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <input id="watcherWorkdays" type="text" placeholder="1,2,3,4,5">
-          <textarea id="watcherWorkWindows" spellcheck="false"></textarea>
-        </div>
-      </div>
+
 
       </details>
       <details class="setting-details nested-setting-details">
-        <summary>高级排查</summary>
+        <summary>运行信息</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>值守状态</strong>
@@ -835,7 +813,7 @@
             <div class="metric-field" title="本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
             <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
             <div class="metric-field" title="下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
-            <div class="metric-field" title="与“下次应助”保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
+            <div class="metric-field" title="与"下次应助"保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
             <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
             <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
             <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
@@ -848,7 +826,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
-          <span>每行一个，可自定义其他 Ablesci 求助列表链接。Elsevier 运行时按后排优先曲线随机第 3-200 页，RSC 运行时随机第 1-5 页；未内置曲线的其他链接会按你配置的原始 URL 直接使用。</span>
+          <span>每行一个，可自定义其他 Ablesci 求助列表链接。Elsevier 运行时按后排优先曲线随机第 3-200 页，RSC 随机第 1-5 页。URL 中可加 `&page_min=N&page_max=M` 自定义范围；未配置 publisher 的链接按原始 URL 直接使用。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherListUrls" spellcheck="false"></textarea>
@@ -857,7 +835,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>每次最多候选</strong>
-          <span>保留兼容字段；量化调度使用“每会话最多候选”。</span>
+          <span>保留兼容字段；量化调度使用"每会话最多候选"。</span>
         </div>
         <div class="setting-control">
           <input id="watcherMaxCandidatesPerRun" type="number" min="1" max="1" step="1" value="1" disabled>
@@ -875,7 +853,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>候选筛选</strong>
-          <span>统一控制候选跳过条件。列表页先筛一次，详情页再按备注、文献类型、风险提示二次确认。</span>
+          <span>控制哪些求助在列表页和详情页被跳过。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <label class="toggle-option" title="只处理有 DOI 的求助">
@@ -910,7 +888,6 @@
             <span class="toggle"><input id="watcherSkipRiskText" type="checkbox"><span></span></span>
             <span class="toggle-text">异常文本</span>
           </label>
-          <div class="setting-hint">跳过原因会在 watcher 日志和日报里显示为“代码 + 中文说明”，例如 `detail_remark - 详情页存在备注，已按设置跳过`。</div>
         </div>
       </div>
       <div class="setting-row">
@@ -928,7 +905,7 @@
           <button id="openWatcherConfigDir" class="secondary" type="button">打开配置目录</button>
           <button id="reloadJournalAccessConfig" class="secondary" type="button">重载名单</button>
           <span id="journalAccessConfigStatus" class="pill">未读取</span>
-          <div class="setting-hint">点击“打开配置目录”会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub；旧版 `config.local` 目录仅保留兼容回退读取。</div>
+          <div class="setting-hint">点击"打开配置目录"会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub；旧版 `config.local` 目录仅保留兼容回退读取。</div>
         </div>
       </div>
       <div class="setting-row">
@@ -959,10 +936,10 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>验证页处理</strong>
-          <span>遇到 Cloudflare 或真人验证时跳过本轮；连续达到阈值后暂停低频值守。</span>
+          <span>遇到验证页时跳过本轮；连续达到阈值后自动暂停值守，避免反复触发。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle" title="遇到验证页停止">
+          <label class="toggle" title="单次：遇到验证页立即跳过本轮">
             <input id="watcherStopOnCfChallenge" type="checkbox">
             <span></span>
           </label>
@@ -970,7 +947,7 @@
             <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>
             <span class="toggle-text">CF 提醒</span>
           </label>
-          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="3" aria-label="连续 CF 暂停阈值">
+          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="3" aria-label="连续 N 次后暂停值守">
         </div>
       </div>
       <div class="setting-row">
