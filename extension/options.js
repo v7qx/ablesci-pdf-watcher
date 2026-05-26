@@ -15,7 +15,6 @@ const {
 const {
   OPTION_IDS: ids,
   LAST_DIAGNOSTIC_KEY,
-  LAST_SAGE_TRACE_KEY = 'lastSageTrace',
   JOURNAL_ACCESS_STATS_KEY,
   JOURNAL_ACCESS_LOOKUP_KEY,
   AUTO_WATCHER_STATE_KEY,
@@ -241,7 +240,6 @@ const {
   reloadJournalAccessConfig,
   openConfigDir,
   copyAutoWatcherConfig,
-  copyRecentSageTrace,
   clearJournalAccessStats,
   runAutoWatcherNow,
   testWatcherNotification,
@@ -254,7 +252,6 @@ const {
   el,
   defaultOptions: DEFAULT_OPTIONS,
   lastDiagnosticKey: LAST_DIAGNOSTIC_KEY,
-  lastSageTraceKey: LAST_SAGE_TRACE_KEY,
   autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
   autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
   autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
@@ -299,7 +296,6 @@ el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
-el('copyRecentSageTrace')?.addEventListener('click', copyRecentSageTrace);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
 el('openWatcherConfigDir')?.addEventListener('click', openConfigDir);

@@ -26,15 +26,10 @@
     return /:\/\/pubs\.rsc\.org\//i.test(String(url || ''));
   }
 
-  function isSageUrl(url) {
-    return /:\/\/(?:journals\.sagepub\.com|sage\.cnpereading\.com)\//i.test(String(url || ''));
-  }
-
   function publisherForUrl(url) {
     if (isScienceDirectUrl(url)) return 'sciencedirect';
     if (isNatureUrl(url)) return 'nature';
     if (isRscUrl(url)) return 'rsc';
-    if (isSageUrl(url)) return 'sage';
     return '';
   }
 
@@ -80,18 +75,8 @@
     return `https://www.sciencedirect.com/science/article/pii/${pii}`;
   }
 
-  function sageArticleUrlFromPdfUrl(url) {
-    const s = String(url || '');
-    const doiMatch = s.match(/10\.\d{4,9}\/[\S"'<>]+/i);
-    if (!doiMatch) return '';
-    let doi = doiMatch[0].split('#')[0].split('?')[0];
-    doi = doi.replace(/\/(?:pdf|epdf|full)$/i, '');
-    doi = doi.replace(/\.pdf$/i, '');
-    return `https://doi.org/${doi}`;
-  }
-
   function publisherArticleUrlFromPdfUrl(url) {
-    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || sageArticleUrlFromPdfUrl(url) || '';
+    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || '';
   }
 
   function looksLikePdfDownloadUrl(url) {
@@ -128,7 +113,6 @@
     if (publisher === 'sciencedirect') return isScienceDirectUrl(url) || isScienceDirectAssetPdfUrl(url);
     if (publisher === 'nature') return isNatureUrl(url);
     if (publisher === 'rsc') return isRscUrl(url);
-    if (publisher === 'sage') return isSageUrl(url);
     return false;
   }
 
@@ -139,7 +123,6 @@
     isNatureUrl,
     isRscDirectPdfUrl,
     isRscUrl,
-    isSageUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,
     isDoiUrl,
@@ -148,7 +131,6 @@
     natureArticleUrlFromPdfUrl,
     rscArticleUrlFromPdfUrl,
     scienceDirectArticleUrlFromPdfUrl,
-    sageArticleUrlFromPdfUrl,
     publisherArticleUrlFromPdfUrl,
     looksLikePdfDownloadUrl,
     isLikelyTargetDownload,

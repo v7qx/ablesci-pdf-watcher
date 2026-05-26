@@ -4,7 +4,6 @@
 (function initBackgroundUpload(globalThis) {
   const ACCESS_ENV_ANOMALY_KEY = 'watcherAccessEnvironmentAnomaly';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
-  const LAST_SAGE_TRACE_KEY = 'lastSageTrace';
   const ACCESS_ENV_WINDOW_MS = 15 * 60 * 1000;
   const ACCESS_ENV_THRESHOLD = 3;
   const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 3;
@@ -30,7 +29,6 @@
       isNatureUrl,
       isRscDirectPdfUrl,
       isRscUrl,
-      isSageUrl,
       publisherForUrl,
       isDoiUrl,
       isScienceDirectAssetPdfUrl,
@@ -70,49 +68,6 @@
     let taskQueue = [];
     let activeTask = null;
     let nextTaskId = 1;
-
-    function shouldTraceSagePending(pending) {
-      if (!pending) return false;
-      return pending.publisher === 'sage' ||
-        isSageUrl(pending.articleUrl || '') ||
-        isSageUrl(pending.pdfUrl || '');
-    }
-
-    function sanitizeTraceUrl(value) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        return {
-          host: String(value.host || ''),
-          path: String(value.path || '')
-        };
-      }
-      return urlHostPath(value || '');
-    }
-
-    function isSageJournalDownloadUrl(value) {
-      try {
-        const u = new URL(value || '');
-        return u.hostname === 'sage.cnpereading.com' && /\/website\/journal\/download/i.test(u.pathname);
-      } catch (_) {
-        return false;
-      }
-    }
-
-    async function appendSageTrace(step, details = {}) {
-      try {
-        const stored = await chromeApi.storage.local.get(LAST_SAGE_TRACE_KEY);
-        const current = Array.isArray(stored[LAST_SAGE_TRACE_KEY]) ? stored[LAST_SAGE_TRACE_KEY] : [];
-        current.unshift({
-          time: new Date().toISOString(),
-          step,
-          details
-        });
-        await chromeApi.storage.local.set({
-          [LAST_SAGE_TRACE_KEY]: current.slice(0, 120)
-        });
-      } catch (err) {
-        console.warn('[Ablesci PDF Watcher] appendSageTrace failed', err);
-      }
-    }
 
     function payloadJournalKey(payload = {}) {
       return String(payload?.journalName || '').trim().toLowerCase();
@@ -449,9 +404,6 @@
           if (abortListener && signal) signal.removeEventListener('abort', abortListener);
           chromeApi.downloads.onCreated.removeListener(onCreated);
           if (tabId !== null) {
-            const pending = pendingPublisherTabs.get(tabId);
-            if (pending?.cleanupSageWebRequestCapture) pending.cleanupSageWebRequestCapture();
-            if (pending?.sageDirectDownloadFallbackTimer) clearTimeout(pending.sageDirectDownloadFallbackTimer);
             pendingPublisherTabs.delete(tabId);
             unregisterPublisherTab(tabId).catch(() => {});
             if (closeTab) chromeApi.tabs.remove(tabId).catch(() => {});
@@ -504,38 +456,6 @@
           if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) return;
           if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) return;
           seenIds.add(item.id);
-          const currentPending = pendingPublisherTabs.get(tabId);
-          if (currentPending?.publisher === 'sage' && currentPending.sageDownloadCaptured &&
-              (isSageJournalDownloadUrl(item.url) || isSageJournalDownloadUrl(item.finalUrl))) {
-            currentPending.sageNativeDownloadDetected = true;
-            currentPending.sageDownloadHandled = true;
-            if (currentPending.sageDirectDownloadFallbackTimer) {
-              clearTimeout(currentPending.sageDirectDownloadFallbackTimer);
-              currentPending.sageDirectDownloadFallbackTimer = null;
-            }
-            void appendSageTrace('native_sage_download_detected', {
-              downloadId: item.id,
-              url: sanitizeTraceUrl(item.url || ''),
-              finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-              matchSource: source
-            });
-            void appendSageTrace('duplicate_sage_download_prevented', {
-              downloadId: item.id,
-              reason: 'native_download_detected_before_direct_fallback'
-            });
-          }
-          if (shouldTraceSagePending(currentPending)) {
-            void appendSageTrace('download_created', {
-              downloadId: item.id,
-              url: sanitizeTraceUrl(item.url || ''),
-              finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-              filename: item.filename || '',
-              mime: item.mime || '',
-              state: item.state || '',
-              error: item.error || '',
-              matchSource: source
-            });
-          }
           downloadId = item.id;
           if (noDownloadTimer) {
             clearTimeout(noDownloadTimer);
@@ -547,53 +467,9 @@
               item._ablesciCreatedByPlugin = true;
               item._ablesciPublisherTabId = tabId;
               item._ablesciMatchSource = source;
-              if (shouldTraceSagePending(pendingPublisherTabs.get(tabId))) {
-                void appendSageTrace('download_changed', {
-                  downloadId: item.id,
-                  url: sanitizeTraceUrl(item.url || ''),
-                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-                  filename: item.filename || '',
-                  mime: item.mime || '',
-                  state: item.state || '',
-                  error: item.error || '',
-                  matchSource: source
-                });
-                void appendSageTrace('download_complete', {
-                  downloadId: item.id,
-                  url: sanitizeTraceUrl(item.url || ''),
-                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-                  filename: item.filename || '',
-                  mime: item.mime || '',
-                  state: item.state || '',
-                  error: item.error || '',
-                  matchSource: source
-                });
-              }
               finishOk(item);
             })
             .catch(err => {
-              if (shouldTraceSagePending(pendingPublisherTabs.get(tabId))) {
-                void appendSageTrace('download_changed', {
-                  downloadId: item.id,
-                  url: sanitizeTraceUrl(item.url || ''),
-                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-                  filename: item.filename || '',
-                  mime: item.mime || '',
-                  state: item.state || '',
-                  error: err?.message || String(err),
-                  matchSource: source
-                });
-                void appendSageTrace('download_error', {
-                  downloadId: item.id,
-                  url: sanitizeTraceUrl(item.url || ''),
-                  finalUrl: sanitizeTraceUrl(item.finalUrl || ''),
-                  filename: item.filename || '',
-                  mime: item.mime || '',
-                  state: item.state || '',
-                  error: err?.message || String(err),
-                  matchSource: source
-                });
-              }
               finishError(err);
             });
         }
@@ -635,11 +511,6 @@
             },
             publisher: publisherForUrl(articleUrl),
             lastNativePdfUrl: '',
-            sageManualCaptureEnabled: options.sageDebugManualCapture === true,
-            sageDownloadCaptured: false,
-            sageDownloadHandled: false,
-            sageNativeDownloadDetected: false,
-            sageDirectDownloadFallbackTimer: null,
             extendNoDownloadTimeout(timeoutMs, message) {
               armNoDownloadTimer(timeoutMs, message);
             },
@@ -656,12 +527,6 @@
               if (looksLikePdfDownloadUrl(sourceUrlForMatching)) downloadArmed = true;
             }
           });
-          if (publisherForUrl(articleUrl) === 'sage' || /sage/i.test(String(options.payload?.journalName || ''))) {
-            void appendSageTrace('opened_sage_tab', {
-              tabId,
-              initialUrl: sanitizeTraceUrl(articleUrl)
-            });
-          }
           registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
 
           if (active) {
@@ -850,9 +715,6 @@
       throwIfAborted(signal);
       const opts = optsOverride || await getOptions();
       const diag = makeDiagnosticBase(payload, opts);
-      const traceSage = isSageUrl(payload?.pickedUrl || '') ||
-        isSageUrl(payload?.pdfUrl || '') ||
-        /sage/i.test(String(payload?.journalName || ''));
 
       if (!payload?.pdfUrl) {
         await saveDiagnostic({ ...diag, stage: 'skipped-missing-pdf-url', error: '缺少 pdfUrl，已按信息不全跳过' });
@@ -876,14 +738,6 @@
 
       await saveDiagnostic({ ...diag, stage: 'picked' });
       post(port, 'progress', 'PDF URL：' + payload.pdfUrl);
-      if (traceSage) {
-        await appendSageTrace('upload_started', {
-          filename: payload.suggestedFilename || '',
-          error: '',
-          pdfUrl: sanitizeTraceUrl(payload.pdfUrl || ''),
-          pickedUrl: sanitizeTraceUrl(payload.pickedUrl || '')
-        });
-      }
       const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', { ...opts, payloadContext: payload }, port, signal);
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
@@ -978,12 +832,6 @@
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
-        if (traceSage) {
-          await appendSageTrace('upload_success', {
-            filename: stat.filename || '',
-            error: ''
-          });
-        }
         postDoneFromSiteResponse(port, permit, '上传成功');
         return;
       }
@@ -1028,24 +876,12 @@
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
-        if (traceSage) {
-          await appendSageTrace('upload_success', {
-            filename: stat.filename || '',
-            error: ''
-          });
-        }
         postDoneFromSiteResponse(port, parsed, '上传成功');
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
-        if (traceSage) {
-          await appendSageTrace('upload_success', {
-            filename: stat.filename || '',
-            error: ''
-          });
-        }
         post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
           html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
           recomend: false,
@@ -1102,15 +938,6 @@
           }, taskTimeoutMs);
           await handleUpload(port, payload, abortController.signal, opts);
         } catch (err) {
-          const traceSage = isSageUrl(payload?.pickedUrl || '') ||
-            isSageUrl(payload?.pdfUrl || '') ||
-            /sage/i.test(String(payload?.journalName || ''));
-          if (traceSage) {
-            await appendSageTrace('upload_failed', {
-              filename: payload?.suggestedFilename || '',
-              error: err?.message || String(err)
-            });
-          }
           let failureReason = classifyJournalAccessFailureReason(err);
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
@@ -1225,20 +1052,13 @@
       if (!pending) return;
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
-      if (shouldTraceSagePending(pending) || isSageUrl(url)) {
-        void appendSageTrace('sage_tab_updated', {
-          tabId,
-          url: sanitizeTraceUrl(url),
-          status: changeInfo.status || tab?.status || ''
-        });
-      }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url) || isSageUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url))) {
         pending.articleUrl = url;
         pending.publisher = isScienceDirectUrl(url)
           ? 'sciencedirect'
-          : (isNatureUrl(url) ? 'nature' : (isRscUrl(url) ? 'rsc' : 'sage'));
+          : (isNatureUrl(url) ? 'nature' : 'rsc');
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -1255,250 +1075,9 @@
       }
     }
 
-    function prepareSageWebRequestCapture(tabId, pending, pageUrl) {
-      if (!Number.isInteger(tabId) || !pending) {
-        throw new Error('no pending Sage publisher task');
-      }
-      if (!chromeApi.webRequest?.onBeforeRequest) {
-        throw new Error('chrome.webRequest.onBeforeRequest unavailable');
-      }
-      if (pending.cleanupSageWebRequestCapture) {
-        pending.cleanupSageWebRequestCapture();
-      }
-
-      let settled = false;
-      let timeout = null;
-      let activeListener = null;
-      let debugRequestCount = 0;
-      const manifest = chromeApi.runtime.getManifest?.() || {};
-      const permissions = Array.isArray(manifest.permissions) ? manifest.permissions : [];
-      const hostPermissions = Array.isArray(manifest.host_permissions) ? manifest.host_permissions : [];
-      const requestFilter = {
-        urls: ['https://sage.cnpereading.com/*'],
-        tabId
-      };
-
-      function cleanup() {
-        if (timeout) {
-          clearTimeout(timeout);
-          timeout = null;
-        }
-        if (activeListener) {
-          try {
-            chromeApi.webRequest.onBeforeRequest.removeListener(activeListener);
-          } catch (_) {}
-          activeListener = null;
-        }
-        if (pending.cleanupSageWebRequestCapture === cleanup) {
-          pending.cleanupSageWebRequestCapture = null;
-        }
-      }
-
-      function startDirectDownload(capturedUrl) {
-        if (pending.sageDownloadHandled) return;
-        pending.sageDownloadHandled = true;
-        pending.publisher = 'sage';
-        pending.setExpectedDownloadUrl?.(capturedUrl);
-        pending.armDownloadCapture?.(capturedUrl);
-        chromeApi.downloads.download({
-          url: capturedUrl,
-          conflictAction: 'uniquify',
-          saveAs: false
-        }).then(downloadId => {
-          void appendSageTrace('direct_download_fallback_started', {
-            tabId,
-            downloadId,
-            url: sanitizeTraceUrl(capturedUrl)
-          });
-        }).catch(err => {
-          const message = err?.message || String(err);
-          void appendSageTrace('direct_download_fallback_started', {
-            tabId,
-            url: sanitizeTraceUrl(capturedUrl),
-            error: message
-          });
-          pending.finishError?.(new Error(message));
-        });
-      }
-
-      function captureIfDownload(details) {
-        if (settled) return;
-        if (details.tabId !== tabId) return;
-        const capturedUrl = String(details.url || '');
-        if (!/\/website\/journal\/download/i.test(capturedUrl)) return;
-
-        settled = true;
-        cleanup();
-        pending.publisher = 'sage';
-        pending.lastNativePdfUrl = capturedUrl;
-        pending.sageDownloadCaptured = true;
-        pending.sageCapturedDownloadUrl = capturedUrl;
-        pending.setExpectedDownloadUrl?.(capturedUrl);
-        pending.armDownloadCapture?.(capturedUrl);
-        void appendSageTrace('captured_sage_download_webrequest_url', {
-          tabId,
-          url: sanitizeTraceUrl(capturedUrl)
-        });
-        void appendSageTrace('auto_click_capture_success', {
-          tabId,
-          url: sanitizeTraceUrl(capturedUrl)
-        });
-        void appendSageTrace('waiting_for_native_sage_download', {
-          tabId,
-          url: sanitizeTraceUrl(capturedUrl)
-        });
-        pending.sageDirectDownloadFallbackTimer = setTimeout(() => {
-          if (pending.sageNativeDownloadDetected || pending.sageDownloadHandled) return;
-          startDirectDownload(capturedUrl);
-        }, 6500);
-      }
-
-      function listener(details) {
-        if (details.tabId !== tabId) return;
-        if (pending.sageManualCaptureEnabled && debugRequestCount < 40) {
-          debugRequestCount += 1;
-          void appendSageTrace('sage_tab_request', {
-            tabId,
-            url: sanitizeTraceUrl(details.url || ''),
-            method: details.method || '',
-            type: details.type || '',
-            frameId: Number.isInteger(details.frameId) ? details.frameId : null,
-            initiator: details.initiator || ''
-          });
-        }
-        captureIfDownload(details);
-      }
-
-      void appendSageTrace('sage_auto_mode_enabled', {
-        tabId,
-        manualCaptureEnabled: pending.sageManualCaptureEnabled === true
-      });
-      if (!pending.sageManualCaptureEnabled) {
-        void appendSageTrace('manual_capture_disabled', { tabId });
-      }
-      void appendSageTrace('sage_webrequest_capture_installing', {
-        tabId,
-        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
-        hasWebRequestApi: !!chromeApi.webRequest?.onBeforeRequest,
-        hasWebRequestPermission: permissions.includes('webRequest'),
-        hasSageHostPermission: hostPermissions.includes('https://sage.cnpereading.com/*'),
-        listenerFilter: requestFilter
-      });
-      activeListener = listener;
-      chromeApi.webRequest.onBeforeRequest.addListener(listener, requestFilter);
-      pending.cleanupSageWebRequestCapture = cleanup;
-      timeout = setTimeout(() => {
-        if (settled) return;
-        void appendSageTrace('timeout_if_no_webrequest_captured', {
-          tabId,
-          selector: 'button[data-id="article-toolbar-pdf"]',
-          currentUrl: sanitizeTraceUrl(pageUrl || pending.articleUrl || '')
-        });
-        if (pending.sageManualCaptureEnabled) {
-          pending.extendNoDownloadTimeout?.(
-            70 * 1000,
-            'SAGE 手动捕获等待超时；自动点击可能没有触发网站下载逻辑，请复制最近 Sage trace。'
-          );
-          pending.revealPublisherTab?.('SAGE 自动点击没有触发下载请求；请在打开的页面上手动点击 PDF，插件会继续捕获下载。');
-          post(pending.port, 'progress', 'SAGE 自动点击未产生下载请求，已进入手动捕获测试：请在出版商页面手动点击 PDF。');
-          void appendSageTrace('sage_manual_capture_waiting', {
-            tabId,
-            url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
-            listenerFilter: requestFilter
-          });
-          timeout = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            pending.finishError?.(new Error('SAGE 手动捕获等待超时：timeout_if_no_webrequest_captured'));
-          }, 60 * 1000);
-          return;
-        }
-        settled = true;
-        cleanup();
-        pending.finishError?.(new Error('SAGE 自动点击重试后仍未捕获下载请求：timeout_if_no_webrequest_captured_after_retries'));
-      }, 22000);
-      void appendSageTrace('sage_webrequest_capture_installed', {
-        tabId,
-        url: sanitizeTraceUrl(pageUrl || pending.articleUrl || ''),
-        hasWebRequestApi: !!chromeApi.webRequest?.onBeforeRequest,
-        hasWebRequestPermission: permissions.includes('webRequest'),
-        hasSageHostPermission: hostPermissions.includes('https://sage.cnpereading.com/*'),
-        listenerFilter: requestFilter
-      });
-    }
-
     function handlePublisherRuntimeMessage(msg, sender, sendResponse) {
       const tabId = sender.tab && sender.tab.id;
       const pending = tabId != null ? pendingPublisherTabs.get(tabId) : null;
-
-      if (msg?.type === 'ablesciPrepareSageWebRequestCapture') {
-        if (!pending) {
-          sendResponse({ ok: false, error: 'no pending publisher task' });
-          return false;
-        }
-        if (!isExpectedPublisherPage(pending, msg.pageUrl || sender.tab?.url || '')) {
-          sendResponse({ ok: false, error: 'publisher page mismatch' });
-          return false;
-        }
-        try {
-          prepareSageWebRequestCapture(tabId, pending, msg.pageUrl || sender.tab?.url || '');
-          sendResponse({ ok: true });
-        } catch (err) {
-          const message = err?.message || String(err);
-          void appendSageTrace('sage_webrequest_capture_installed', {
-            tabId: Number.isInteger(tabId) ? tabId : null,
-            url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || ''),
-            action: 'install_failed',
-            runtimeLastError: message
-          });
-          sendResponse({ ok: false, error: message });
-        }
-        return false;
-      }
-
-      if (msg?.type === 'ablesciSageCaptureStatus') {
-        sendResponse({
-          ok: !!pending,
-          captured: pending?.sageDownloadCaptured === true,
-          handled: pending?.sageDownloadHandled === true,
-          nativeDownloadDetected: pending?.sageNativeDownloadDetected === true
-        });
-        return false;
-      }
-
-      if (msg?.type === 'ablesciSageAutoCaptureFailed') {
-        if (pending && !pending.sageDownloadCaptured) {
-          void appendSageTrace('timeout_if_no_webrequest_captured_after_retries', {
-            tabId: Number.isInteger(tabId) ? tabId : null,
-            selector: msg.selector || '',
-            currentUrl: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || '')
-          });
-          if (!pending.sageManualCaptureEnabled) {
-            if (pending.cleanupSageWebRequestCapture) pending.cleanupSageWebRequestCapture();
-            pending.finishError?.(new Error('SAGE 自动点击 3 次后仍未捕获下载请求。'));
-          }
-        }
-        sendResponse({ ok: true });
-        return false;
-      }
-
-      if (msg?.type === 'ablesciSageTrace') {
-        void appendSageTrace(msg.step || 'sage_trace', {
-          tabId: Number.isInteger(tabId) ? tabId : null,
-          url: sanitizeTraceUrl(msg.url || sender.tab?.url || ''),
-          status: msg.status || '',
-          selector: msg.selector || '',
-          buttonText: msg.buttonText || '',
-          candidateCount: Number(msg.candidateCount || 0),
-          foundDataIdButton: msg.foundDataIdButton === true,
-          foundAriaPdfButton: msg.foundAriaPdfButton === true,
-          runtimeLastError: msg.runtimeLastError || '',
-          action: msg.action || ''
-        });
-        sendResponse({ ok: true });
-        return false;
-      }
 
       if (msg?.type === 'ablesciPublisherCanControl') {
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
@@ -1511,13 +1090,6 @@
       if (!pending) {
         sendResponse({ ok: false, ignored: true, reason: 'no pending publisher task' });
         return false;
-      }
-      if (msg.publisher === 'sage') {
-        void appendSageTrace('content_script_ready', {
-          tabId: Number.isInteger(tabId) ? tabId : null,
-          url: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || ''),
-          action: msg.source || ''
-        });
       }
       if (!isExpectedPublisherPage(pending, msg.pageUrl || '')) {
         sendResponse({ ok: false, ignored: true, reason: 'publisher page mismatch' });
@@ -1627,47 +1199,6 @@
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }
-      if (msg.publisher === 'sage' && msg.clicked && !msg.pdfUrl) {
-        pending.publisher = 'sage';
-        pending.armDownloadCapture?.(pending.articleUrl || pending.pdfUrl || '');
-        void appendSageTrace('clicked_sage_pdf_button', {
-          tabId: Number.isInteger(tabId) ? tabId : null,
-          selector: msg.selector || '',
-          buttonText: msg.buttonText || '',
-          attempt: Number(msg.attempt || 0),
-          currentUrl: sanitizeTraceUrl(msg.pageUrl || sender.tab?.url || '')
-        });
-        post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 按钮，继续监听浏览器下载。');
-        sendResponse({ ok: true, action: 'clicked_sage_pdf_button' });
-        return false;
-      }
-      if (msg.publisher === 'sage' && msg.pdfUrl) {
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
-          sendResponse({ ok: true, ignored: true, reason: 'same sage pdf url already handled' });
-          return false;
-        }
-        pending.lastNativePdfUrl = msg.pdfUrl;
-        if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
-        pending.publisher = 'sage';
-        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
-        if (msg.source === 'sage_download_endpoint' || /\/website\/journal\/download\?articleId=/i.test(String(msg.pdfUrl || ''))) {
-          pending.armDownloadCapture?.(msg.pdfUrl);
-        }
-        if (msg.clicked) {
-          pending.armDownloadCapture?.(msg.pdfUrl);
-          post(pending.port, 'progress', '已在 SAGE 文章页触发正文 PDF 下载入口，继续监听浏览器下载。');
-          sendResponse({ ok: true, action: 'clicked_sage_pdf', pdfUrl: msg.pdfUrl });
-          return false;
-        }
-        post(pending.port, 'progress', msg.source === 'sage_download_endpoint'
-          ? '已从 SAGE 页面解析到站内下载接口，正在打开下载接口。'
-          : '已从 SAGE 文章页取得正文 PDF 下载链接，正在打开下载链接。');
-        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
-          .then(() => sendResponse({ ok: true, action: 'navigate_to_sage_pdf', pdfUrl: msg.pdfUrl }))
-          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
-        return true;
-      }
-
       sendResponse({ ok: false, ignored: true, reason: 'unsupported publisher' });
       return false;
     }
