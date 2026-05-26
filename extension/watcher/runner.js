@@ -247,64 +247,68 @@
           if (msg.type === 'error') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             const paused = await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
-            appendWatcherTrace('queue_message_error', {
+            await Promise.allSettled([
+              appendWatcherTrace('queue_message_error', {
               reason: msg.message || 'upload_failed',
               detailUrl: context.detailUrl,
               sessionId: context.sessionId || '',
               assistId: context.key,
               durationMs,
               paused
-            }).catch(() => {});
-            updateProcessed(context.key, 'failed', msg.message || 'upload_failed').catch(() => {});
-            incrementDaily('failed').catch(() => {});
-            recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed').catch(() => {});
-            recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed').catch(() => {});
-            appendWatcherLog({
-              ...context.payload,
-              detailUrl: context.detailUrl,
-              sessionId: context.sessionId || '',
-              trigger: context.trigger || '',
-              status: 'failed',
-              reason: msg.message || 'upload_failed'
-            }).then(writeDailyReports).catch(() => {});
+              }),
+              updateProcessed(context.key, 'failed', msg.message || 'upload_failed'),
+              incrementDaily('failed'),
+              recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
+              recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed'),
+              appendWatcherLog({
+                ...context.payload,
+                detailUrl: context.detailUrl,
+                sessionId: context.sessionId || '',
+                trigger: context.trigger || '',
+                status: 'failed',
+                reason: msg.message || 'upload_failed'
+              }).then(writeDailyReports)
+            ]);
             settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
           }
           if (msg.type === 'done' && msg.blocked) {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
-            appendWatcherTrace('queue_message_blocked', {
-              reason: msg.message || 'blocked',
-              detailUrl: context.detailUrl,
-              sessionId: context.sessionId || '',
-              assistId: context.key,
-              durationMs
-            }).catch(() => {});
-            updateProcessed(context.key, 'failed', msg.message || 'blocked').catch(() => {});
-            incrementDaily('failed').catch(() => {});
-            recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked').catch(() => {});
-            recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked').catch(() => {});
-            appendWatcherLog({
-              ...context.payload,
-              detailUrl: context.detailUrl,
-              sessionId: context.sessionId || '',
-              trigger: context.trigger || '',
-              status: 'failed',
-              reason: msg.message || 'blocked'
-            }).then(writeDailyReports).catch(() => {});
+            await Promise.allSettled([
+              appendWatcherTrace('queue_message_blocked', {
+                reason: msg.message || 'blocked',
+                detailUrl: context.detailUrl,
+                sessionId: context.sessionId || '',
+                assistId: context.key,
+                durationMs
+              }),
+              updateProcessed(context.key, 'failed', msg.message || 'blocked'),
+              incrementDaily('failed'),
+              recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked'),
+              recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked'),
+              appendWatcherLog({
+                ...context.payload,
+                detailUrl: context.detailUrl,
+                sessionId: context.sessionId || '',
+                trigger: context.trigger || '',
+                status: 'failed',
+                reason: msg.message || 'blocked'
+              }).then(writeDailyReports)
+            ]);
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: true, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
-            if (context.payload?.downloadOnly !== true) {
-              incrementDaily('uploaded').catch(() => {});
-            }
-            appendWatcherTrace('queue_message_done', {
-              reason: msg.message || 'done',
-              detailUrl: context.detailUrl,
-              sessionId: context.sessionId || '',
-              assistId: context.key,
-              durationMs
-            }).catch(() => {});
-            recordRiskEvent(context.opts || {}, msg.message || 'success', 'success').catch(() => {});
-            recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success').catch(() => {});
+            await Promise.allSettled([
+              context.payload?.downloadOnly !== true ? incrementDaily('uploaded') : Promise.resolve(),
+              appendWatcherTrace('queue_message_done', {
+                reason: msg.message || 'done',
+                detailUrl: context.detailUrl,
+                sessionId: context.sessionId || '',
+                assistId: context.key,
+                durationMs
+              }),
+              recordRiskEvent(context.opts || {}, msg.message || 'success', 'success'),
+              recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success')
+            ]);
             settle({ ok: true, reason: msg.message || 'done', durationMs });
           }
         },

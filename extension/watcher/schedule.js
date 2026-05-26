@@ -50,6 +50,24 @@
       return Math.min(max, Math.max(min, Number(minutes) || min));
     }
 
+    function sampleAssistDelayMinutes(opts, speedMode) {
+      const modeName = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
+      const mode = sessionModes[modeName] || sessionModes.normal;
+      const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
+      const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
+      if (max <= min) return min;
+      const modeMin = Math.max(min, Number(mode.min || min));
+      const modeMax = Math.min(max, Number(mode.max || max));
+      if (modeMax > modeMin && Number(mode.median || 0) >= modeMin && Number(mode.median || 0) <= modeMax) {
+        return logNormalMinutes(Number(mode.median), modeMin, modeMax);
+      }
+
+      const span = max - min;
+      const medianRatio = modeName === 'slow' ? 0.75 : (modeName === 'fast' ? 0.45 : 0.6);
+      const median = min + span * medianRatio;
+      return logNormalMinutes(median, min, max);
+    }
+
     function applySoftAssistGuard(modelDelay, guardMinutes) {
       const model = Math.max(0, Number(modelDelay) || 0);
       const guard = Math.max(0, Number(guardMinutes) || 0);
@@ -129,8 +147,8 @@
           }
         }
       }
-      const mode = sessionModes[state?.speedMode || 'normal'] || sessionModes.normal;
-      const rawModelDelay = clampAssistDelayMinutes(opts, logNormalMinutes(mode.median, mode.min, mode.max));
+      const speedMode = state?.speedMode || 'normal';
+      const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode);
       const targetError = Number(state.targetError ?? state.lag ?? 0);
       const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
       const thresholds = lagThresholds(monthlyTarget);
@@ -147,7 +165,7 @@
         ...guarded,
         reason,
         strategy: 'calendar_target_lognormal',
-        speedMode: state.speedMode || 'normal',
+        speedMode,
         rateMultiplier: 1,
         targetError,
         marketRegime: '',
