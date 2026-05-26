@@ -133,12 +133,10 @@
   }
 
   function normalizeWatcherIntervals(opts) {
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 1, 1, 1440);
-    const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
     return {
-      watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 10, min, max),
-      watcherMinIntervalMinutes: min,
-      watcherMaxIntervalMinutes: max
+      watcherIntervalMinutes: 10,
+      watcherMinIntervalMinutes: 1,
+      watcherMaxIntervalMinutes: 30
     };
   }
 
