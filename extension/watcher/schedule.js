@@ -52,7 +52,7 @@
     }
 
     function sampleAssistDelayMinutes(opts, speedMode) {
-      const modeName = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
+      const modeName = ['normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
       const mode = sessionModes[modeName] || sessionModes.normal;
       const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
       const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
@@ -64,7 +64,7 @@
       }
 
       const span = max - min;
-      const medianRatio = modeName === 'slow' ? 0.75 : (modeName === 'fast' ? 0.45 : 0.6);
+      const medianRatio = modeName === 'fast' ? 0.45 : 0.6;
       const median = min + span * medianRatio;
       return logNormalMinutes(median, min, max);
     }

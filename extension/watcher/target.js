@@ -358,13 +358,11 @@
     }
 
     function speedModeFromTarget({ error, monthlyTarget, demandRegime = 'normal', riskExhausted = false, rateMultiplier = 1 }) {
-      if (riskExhausted) return 'slow';
+      if (riskExhausted) return 'normal';
       const thresholds = lagThresholds(monthlyTarget);
       if (error >= thresholds.severe || rateMultiplier >= 1.55) return 'fast';
       if (error >= thresholds.medium) return demandRegime === 'very_busy' ? 'fast' : 'normal';
-      if (error <= -thresholds.ahead) return 'slow';
       if (demandRegime === 'very_busy') return 'fast';
-      if (demandRegime === 'quiet' && rateMultiplier < 1.2) return 'slow';
       return 'normal';
     }
 
@@ -386,7 +384,7 @@
           monthDone: done,
           expectedDone: 0,
           lag: 0,
-          speedMode: 'slow',
+          speedMode: 'normal',
           workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
           activeTimeProgressRatio: availability.activeTimeProgressRatio,
           availabilityFactor: availability.availabilityFactor,

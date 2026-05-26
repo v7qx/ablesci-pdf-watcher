@@ -38,9 +38,8 @@
     Unknown: 0.4
   };
   const SESSION_MODES = {
-    slow: { median: 28, min: 15, max: 60, sizeWeights: [0, 1] },
-    normal: { median: 15, min: 8, max: 35, sizeWeights: [0, 1] },
-    fast: { median: 10, min: 6, max: 25, sizeWeights: [0, 1] }
+    normal: { median: 10, min: 6, max: 25, sizeWeights: [0, 1] },
+    fast: { median: 6, min: 4, max: 15, sizeWeights: [0, 1] }
   };
   const ADVANCED_ITEM_GAP = { median: 3, min: 1, max: 8 };
   const ADVANCED_COOLDOWN = { median: 18, min: 6, max: 90 };
