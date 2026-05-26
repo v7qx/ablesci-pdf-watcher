@@ -82,15 +82,18 @@
           state.firstSyncProgressRatio = state.firstSyncProgressRatio || {};
           if (state.firstSyncTotalAssists[currentMonth] === undefined) {
             state.firstSyncTotalAssists[currentMonth] = totalCount;
-            // Calculate progress ratio at first sync
+            // Calculate progress ratio at first sync (no calendar-progress truncation in the first week)
             let ratio = 0;
-            const year = new Date(now).getFullYear();
-            const month = new Date(now).getMonth();
-            const startOfMonth = new Date(year, month, 1).getTime();
-            const startOfNextMonth = new Date(year, month + 1, 1).getTime();
-            const totalMonthMs = startOfNextMonth - startOfMonth;
-            const currentMs = now - startOfMonth;
-            ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
+            const dayOfMonth = parseInt(todayKey().slice(8, 10), 10);
+            if (dayOfMonth > 7) {
+              const year = new Date(now).getFullYear();
+              const month = new Date(now).getMonth();
+              const startOfMonth = new Date(year, month, 1).getTime();
+              const startOfNextMonth = new Date(year, month + 1, 1).getTime();
+              const totalMonthMs = startOfNextMonth - startOfMonth;
+              const currentMs = now - startOfMonth;
+              ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
+            }
             state.firstSyncProgressRatio[currentMonth] = ratio;
           }
 
