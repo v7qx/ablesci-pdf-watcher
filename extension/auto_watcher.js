@@ -38,9 +38,9 @@
     Unknown: 0.4
   };
   const SESSION_MODES = {
-    slow: { median: 28, min: 15, max: 60, sizeWeights: [0.14, 0.48, 0.25, 0.10, 0.03, 0, 0, 0, 0, 0, 0] },
-    normal: { median: 15, min: 8, max: 35, sizeWeights: [0.05, 0.20, 0.34, 0.24, 0.11, 0.04, 0.02, 0, 0, 0, 0] },
-    fast: { median: 10, min: 6, max: 25, sizeWeights: [0.02, 0.08, 0.22, 0.27, 0.20, 0.11, 0.06, 0.025, 0.01, 0.004, 0.001] }
+    slow: { median: 18, min: 10, max: 35, sizeWeights: [0.14, 0.48, 0.25, 0.10, 0.03, 0, 0, 0, 0, 0, 0] },
+    normal: { median: 10, min: 5, max: 20, sizeWeights: [0.05, 0.20, 0.34, 0.24, 0.11, 0.04, 0.02, 0, 0, 0, 0] },
+    fast: { median: 6, min: 4, max: 15, sizeWeights: [0.02, 0.08, 0.22, 0.27, 0.20, 0.11, 0.06, 0.025, 0.01, 0.004, 0.001] }
   };
   const ADVANCED_ITEM_GAP = { median: 3, min: 1, max: 8 };
   const ADVANCED_COOLDOWN = { median: 18, min: 6, max: 90 };
@@ -523,6 +523,8 @@
     getWatcherState,
     saveWatcherState,
     dailyCounterSnapshot,
+    todayKey,
+    monthDone,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     collectDemandIfDue,
     recordCfChallenge,

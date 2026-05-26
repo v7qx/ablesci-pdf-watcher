@@ -12,6 +12,8 @@
       getWatcherState,
       saveWatcherState,
       dailyCounterSnapshot,
+      todayKey,
+      monthDone,
       appendWatcherTrace,
       collectDemandIfDue,
       recordCfChallenge,
@@ -61,6 +63,33 @@
       flushWatcherLogs,
       flushWatcherTrace
     } = config;
+
+    async function syncActualAssistCount(state) {
+      try {
+        const res = await fetch('https://www.ablesci.com/my/home');
+        if (!res.ok) return;
+        const html = await res.text();
+        const match = html.match(/最近应助[^\d]*(\d+)/);
+        if (match) {
+          const totalCount = parseInt(match[1], 10);
+          const currentMonth = todayKey().slice(0, 7);
+          state.monthlyInitialAssists = state.monthlyInitialAssists || {};
+          if (state.monthlyInitialAssists[currentMonth] === undefined) {
+            const localDone = monthDone(state);
+            state.monthlyInitialAssists[currentMonth] = totalCount - localDone;
+          }
+          state.actualTotalAssists = totalCount;
+          await saveWatcherStateSafe(state);
+          await appendWatcherTrace('sync_web_assist_count', {
+            totalCount,
+            currentMonth,
+            initialCount: state.monthlyInitialAssists[currentMonth]
+          });
+        }
+      } catch (err) {
+        console.warn('[Ablesci Watcher] Failed to sync actual assist count:', err);
+      }
+    }
 
     async function runAutoWatcherOnce(trigger = 'alarm') {
       if (stateRef.autoWatcherRunning) {
@@ -146,6 +175,7 @@
         const stateForTargets = await getWatcherState();
         stateForTargets.optionsSnapshot = opts;
         await hydrateJournalAccessStatsIndex(stateForTargets);
+        await syncActualAssistCount(stateForTargets);
         if (trigger !== 'manual') {
           const rateLimit = checkShortTermRateLimit(stateForTargets);
           if (rateLimit.limited) {

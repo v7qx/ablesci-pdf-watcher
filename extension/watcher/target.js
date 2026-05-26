@@ -53,7 +53,11 @@
     }
 
     function monthDone(state) {
-      const prefix = monthKey() + '-';
+      const currentMonth = monthKey();
+      if (state.monthlyInitialAssists && state.monthlyInitialAssists[currentMonth] !== undefined && state.actualTotalAssists !== undefined) {
+        return Math.max(0, state.actualTotalAssists - state.monthlyInitialAssists[currentMonth]);
+      }
+      const prefix = currentMonth + '-';
       return Object.entries(state.daily || {})
         .filter(([key]) => key.startsWith(prefix))
         .reduce((sum, [, value]) => sum + Number(value.downloaded || 0), 0);
