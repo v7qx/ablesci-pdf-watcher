@@ -264,7 +264,8 @@
     quotaResetDelayMinutes,
     isAssistDue,
     targetStateSnapshot,
-    mergeFrozenTargetState
+    mergeFrozenTargetState,
+    checkShortTermRateLimit
   } = createWatcherRuntimeHelpersApi({
     depsRef,
     maxSessionCandidatesConst: MAX_SESSION_CANDIDATES,
@@ -530,6 +531,7 @@
     resetCfChallengeStreak,
     hydrateJournalAccessStatsIndex,
     isAssistDue,
+    checkShortTermRateLimit,
     refreshPublisherModelFromSnapshots,
     calculateAdvancedTargetState,
     calculateTargetState,

@@ -24,9 +24,9 @@
     buttonPosition: 'end',
     watcherEnabled: false,
     watcherSchedulerMode: 'quant',
-    watcherIntervalMinutes: 30,
-    watcherMinIntervalMinutes: 10,
-    watcherMaxIntervalMinutes: 60,
+    watcherIntervalMinutes: 10,
+    watcherMinIntervalMinutes: 4,
+    watcherMaxIntervalMinutes: 30,
     watcherMaxCandidatesPerRun: 1,
     watcherMinNonSdSeekingCount: 200,
     watcherListUrls: [
@@ -80,7 +80,8 @@
     watcherMinDailyTarget: 5,
     watcherMaxDailyTarget: 40,
     watcherMaxPerSession: 1,
-    watcherAllowZeroSession: false
+    watcherAllowZeroSession: false,
+    watcherUseCalendarProgress: true
   };
 
   const WATCHER_DAILY_LIMIT_MAX = 500;
@@ -115,10 +116,10 @@
   }
 
   function normalizeWatcherIntervals(opts) {
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
-    const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
+    const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
     return {
-      watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 30, min, max),
+      watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 10, min, max),
       watcherMinIntervalMinutes: min,
       watcherMaxIntervalMinutes: max
     };
@@ -230,7 +231,8 @@
       watcherMinDailyTarget: clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500),
       watcherMaxDailyTarget: clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500),
       watcherMaxPerSession: clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10),
-      watcherAllowZeroSession: opts.watcherAllowZeroSession === true
+      watcherAllowZeroSession: opts.watcherAllowZeroSession === true,
+      watcherUseCalendarProgress: opts.watcherUseCalendarProgress !== false
     };
   }
 

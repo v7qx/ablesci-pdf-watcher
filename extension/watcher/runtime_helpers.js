@@ -204,6 +204,30 @@
       };
     }
 
+    function checkShortTermRateLimit(state) {
+      const recent = Array.isArray(state?.recentDownloads) ? state.recentDownloads : [];
+      const now = Date.now();
+      const cutoff = now - 30 * 60 * 1000;
+      const valid = recent.filter(t => t >= cutoff && t <= now);
+      
+      const count1m = valid.filter(t => t >= now - 1 * 60 * 1000).length;
+      if (count1m >= 1) {
+        return { limited: true, window: '1m', count: count1m, limit: 1 };
+      }
+      
+      const count5m = valid.filter(t => t >= now - 5 * 60 * 1000).length;
+      if (count5m >= 2) {
+        return { limited: true, window: '5m', count: count5m, limit: 2 };
+      }
+      
+      const count30m = valid.filter(t => t >= now - 30 * 60 * 1000).length;
+      if (count30m >= 7) {
+        return { limited: true, window: '30m', count: count30m, limit: 7 };
+      }
+      
+      return { limited: false };
+    }
+
     return {
       normalizeOptions,
       hydrateJournalAccessRulesFromConfig,
@@ -221,7 +245,8 @@
       quotaResetDelayMinutes,
       isAssistDue,
       targetStateSnapshot,
-      mergeFrozenTargetState
+      mergeFrozenTargetState,
+      checkShortTermRateLimit
     };
   }
 

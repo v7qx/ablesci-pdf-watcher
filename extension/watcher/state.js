@@ -87,6 +87,12 @@
         state.daily = state.daily || {};
         state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
         state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
+        if (field === 'downloaded') {
+          state.recentDownloads = state.recentDownloads || [];
+          state.recentDownloads.push(Date.now());
+          const cutOff = Date.now() - 30 * 60 * 1000;
+          state.recentDownloads = state.recentDownloads.filter(t => t >= cutOff);
+        }
       });
     }
 

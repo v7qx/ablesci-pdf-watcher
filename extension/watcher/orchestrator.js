@@ -20,6 +20,7 @@
       resetCfChallengeStreak,
       hydrateJournalAccessStatsIndex,
       isAssistDue,
+      checkShortTermRateLimit,
       refreshPublisherModelFromSnapshots,
       calculateAdvancedTargetState,
       calculateTargetState,
@@ -145,6 +146,20 @@
         const stateForTargets = await getWatcherState();
         stateForTargets.optionsSnapshot = opts;
         await hydrateJournalAccessStatsIndex(stateForTargets);
+        if (trigger !== 'manual') {
+          const rateLimit = checkShortTermRateLimit(stateForTargets);
+          if (rateLimit.limited) {
+            const reason = `rate_limited_${rateLimit.window}`;
+            await appendWatcherTrace('run_skip_rate_limit', {
+              reason,
+              window: rateLimit.window,
+              count: rateLimit.count,
+              limit: rateLimit.limit,
+              trigger
+            });
+            return finish({ ok: false, reason });
+          }
+        }
         if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
           await appendWatcherTrace('run_skip_assist_not_due', {
             reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',

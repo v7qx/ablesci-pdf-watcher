@@ -381,6 +381,30 @@
     async function refreshAlarmAfterRun(opts, result, attempt, trigger) {
       if (trigger !== 'alarm') return null;
       const reason = String(result?.reason || '');
+      if (reason.startsWith('rate_limited_')) {
+        const state = await getWatcherState();
+        const delay = 2;
+        state.nextScheduledAt = Date.now() + delay * 60 * 1000;
+        state.currentSchedulerMode = opts.watcherSchedulerMode;
+        state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+        state.lastAlarmRefreshReason = 'rate_limited_retry';
+        await saveWatcherState(state);
+        await chromeApi.alarms.clear(alarmName);
+        await chromeApi.alarms.create(alarmName, { delayInMinutes: delay });
+        const alarm = await chromeApi.alarms.get(alarmName).catch(() => null);
+        if (alarm?.scheduledTime) {
+          state.chromeAlarmScheduledAt = new Date(alarm.scheduledTime).toISOString();
+          state.nextScheduledAt = alarm.scheduledTime;
+          await saveWatcherState(state);
+        }
+        updateActionBadge(state).catch(() => {});
+        await appendWatcherTrace('alarm_scheduled_rate_limited_retry', {
+          reason: 'rate_limited_retry',
+          delayMinutes: delay,
+          nextScheduledAt: new Date(state.nextScheduledAt).toISOString()
+        });
+        return delay;
+      }
       if (reason === 'active_task' && attempt?.nextAssistBefore) {
         const state = await getWatcherState();
         if (!state.nextAssistRunAt) {

@@ -195,6 +195,7 @@ async function save() {
   opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
   opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
+  opts.watcherUseCalendarProgress = opts.watcherUseCalendarProgress !== false;
   opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || '').trim();
   Object.assign(opts, normalizeOptions(opts, { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition }));
 

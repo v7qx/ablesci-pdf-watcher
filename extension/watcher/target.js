@@ -254,6 +254,19 @@
       };
     }
 
+    function calendarProgressDetails(date = new Date()) {
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const startOfMonth = new Date(year, month, 1);
+      const startOfNextMonth = new Date(year, month + 1, 1);
+      const totalMonthMs = startOfNextMonth.getTime() - startOfMonth.getTime();
+      const currentMs = date.getTime() - startOfMonth.getTime();
+      const ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
+      const totalMinutes = Math.round(totalMonthMs / (60 * 1000));
+      const elapsedMinutes = Math.round(currentMs / (60 * 1000));
+      return { ratio, elapsedMinutes, totalMinutes };
+    }
+
     function workMinutesForDay(opts) {
       return opts.watcherWorkWindows.reduce((sum, win) => sum + Math.max(0, win.end - win.start), 0);
     }
@@ -338,7 +351,7 @@
       const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
       const model = state.publisherModel || { ready: false };
       const modelMode = model.ready ? 'advanced' : 'simple';
-      const progress = workTimeProgressDetails(opts);
+      const progress = opts?.watcherUseCalendarProgress ? calendarProgressDetails() : workTimeProgressDetails(opts);
       const availability = availabilitySnapshot(state, opts, progress);
       const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
       const expectedDone = Math.round(monthlyTarget * Math.min(1, effectiveProgress));
@@ -391,7 +404,7 @@
     function calculateAdvancedTargetState(state, opts, market) {
       const actualDone = monthDone(state);
       const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
-      const progress = workTimeProgressDetails(opts);
+      const progress = opts?.watcherUseCalendarProgress ? calendarProgressDetails() : workTimeProgressDetails(opts);
       const availability = availabilitySnapshot(state, opts, progress);
       const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
       const expectedDone = Math.round(monthlyTarget * Math.min(1, effectiveProgress));
@@ -574,6 +587,7 @@
       sameSlotPercentile,
       buildMarketDataModel,
       workMinutesForDay,
+      calendarProgressDetails,
       workTimeProgressDetails,
       workTimeProgressRatio,
       monthRunCount,
