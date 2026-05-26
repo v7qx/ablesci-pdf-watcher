@@ -272,6 +272,15 @@ document.addEventListener('copy', handleDocumentCopy);
 
 document.addEventListener('DOMContentLoaded', () => {
   load().then(startAdvancedCountdownTimer);
+
+  // 防止快速双击/连击 summary 展开/收起时导致页面文本被全选或选中
+  document.querySelectorAll('summary').forEach(summary => {
+    summary.addEventListener('mousedown', e => {
+      if (e.detail > 1) {
+        e.preventDefault();
+      }
+    });
+  });
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
