@@ -113,9 +113,6 @@ function validateOptions(opts) {
   }
   if (opts.watcherDailyLimit < 0) throw new Error('每日应助上限不能小于 0。');
   if (opts.watcherMinNonSdSeekingCount < 0) throw new Error('非 SD 最低求助量不能小于 0。');
-  if (opts.watcherMaxPerSession < 1 || opts.watcherMaxPerSession > 10) {
-    throw new Error('每会话最多候选必须在 1–10 之间。');
-  }
   if (opts.watcherNoDownloadTimeoutMinutes <= 0 || opts.watcherDownloadTimeoutMinutes <= 0 || opts.watcherTaskTimeoutMinutes <= 0) {
     throw new Error('任务超时时间必须大于 0。');
   }
@@ -123,7 +120,6 @@ function validateOptions(opts) {
     throw new Error('任务最长时间不能小于未触发下载或下载中超时时间。');
   }
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
-  if (opts.watcherMinDailyTarget > opts.watcherMaxDailyTarget) throw new Error('最小日目标不能大于最大日目标。');
   if (String(opts.watcherJournalAccessRules || '').trim()) {
     try {
       const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
@@ -191,9 +187,9 @@ async function save() {
   opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
   opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
   opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);
-  opts.watcherMinDailyTarget = clampNumber(opts.watcherMinDailyTarget, DEFAULT_OPTIONS.watcherMinDailyTarget, 0, 500);
-  opts.watcherMaxDailyTarget = clampNumber(opts.watcherMaxDailyTarget, DEFAULT_OPTIONS.watcherMaxDailyTarget, 1, 500);
-  opts.watcherMaxPerSession = clampNumber(opts.watcherMaxPerSession, DEFAULT_OPTIONS.watcherMaxPerSession, 1, 10);
+  opts.watcherMinDailyTarget = 0;
+  opts.watcherMaxDailyTarget = WATCHER_DAILY_LIMIT_MAX;
+  opts.watcherMaxPerSession = 1;
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
   opts.watcherUseCalendarProgress = opts.watcherUseCalendarProgress !== false;
   opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || '').trim();

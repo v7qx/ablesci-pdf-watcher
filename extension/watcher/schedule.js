@@ -37,18 +37,6 @@
           dailyLimit: Number(opts.watcherDailyLimit || 0)
         };
       }
-      if (Number(state?.todayTarget || 0) > 0 && downloaded >= Number(state.todayTarget || 0)) {
-        const minutes = quotaResetDelayMinutes(opts);
-        return {
-          minutes,
-          modelDelayMinutes: minutes,
-          guardMinutes: 0,
-          reason: 'today_target_reached',
-          strategy: 'target_hold',
-          dailyDownloaded: downloaded,
-          todayTarget: Number(state.todayTarget || 0)
-        };
-      }
       return null;
     }
 
@@ -142,18 +130,7 @@
       const thresholds = lagThresholds(monthlyTarget);
       const severeLag = targetError >= thresholds.severe;
       const mediumLag = targetError >= thresholds.medium;
-      const lagBoost = targetError > 0 ? Math.min(2.2, 1 + Math.min(1, targetError / monthlyTarget) * 3.2) : 1;
-      const rateMultiplier = Number(state.rateMultiplier || 1);
-      const demandFactor = Number(state.demandFactor || 1);
-      const trendFactor = Number(state.trendFactor || 1);
-      const h1Delta = Number(state.recentH1DemandDelta || state.marketData?.h1Delta || 0);
-      const marketRegime = state.marketRegime || state.demandRegime || state.marketData?.marketRegime || 'normal';
-      const marketBoost = marketRegime === 'very_busy' ? 1.25 : (marketRegime === 'quiet' ? (mediumLag ? 0.95 : 0.8) : 1);
-      const trendBoost = h1Delta > 20 ? 1.15 : (h1Delta < -20 ? (severeLag ? 0.97 : 0.9) : 1);
-      const risk = riskSnapshot(state, opts);
-      const riskPenalty = risk.nearLimit ? 0.55 : 1;
-      const combined = Math.max(0.25, Math.min(3.5, rateMultiplier * demandFactor * trendFactor * lagBoost * marketBoost * trendBoost * riskPenalty));
-      const modelDelay = rawModelDelay / combined;
+      const modelDelay = rawModelDelay;
       const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
       return {
         minutes: guarded.minutes,
@@ -162,15 +139,15 @@
         guardMinutes,
         ...guarded,
         reason,
-        strategy: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : 'quant_target_market',
+        strategy: 'calendar_target_lognormal',
         speedMode: state.speedMode || 'normal',
-        rateMultiplier,
+        rateMultiplier: 1,
         targetError,
-        marketRegime,
-        h1Delta,
+        marketRegime: '',
+        h1Delta: 0,
         severeLag,
         mediumLag,
-        combinedMultiplier: combined
+        combinedMultiplier: 1
       };
     }
 

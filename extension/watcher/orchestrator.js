@@ -227,11 +227,10 @@
           });
           return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
         }
-        if (opts.watcherAdvancedSchedulerEnabled && stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
+        if (stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
           await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
           return finish({ ok: false, reason: 'risk_budget_paused' });
         }
-        if (opts.watcherQuantSchedulerEnabled) await refreshPublisherModelFromSnapshots(stateForTargets);
         const liveTargetState = !opts.watcherQuantSchedulerEnabled
           ? {
               schedulerModelMode: 'fixed',
@@ -239,19 +238,20 @@
               todayTarget: 0,
               demandFactor: 1,
               trendFactor: 1,
+              actualDone: 0,
+              expectedDone: 0,
+              targetError: 0,
               rateMultiplier: 1,
               sessionIntensity: 0
             }
-          : opts.watcherAdvancedSchedulerEnabled
-          ? calculateAdvancedTargetState(stateForTargets, opts, stateForTargets.marketData || {})
-          : calculateTargetState(stateForTargets, opts, stateForTargets.demandRegime || 'normal');
+          : calculateTargetState(stateForTargets, opts);
         const frozenTargetState = trigger === 'alarm' && stateForTargets.nextAssistPlanningData?.targetState
           ? stateForTargets.nextAssistPlanningData.targetState
           : null;
         const targetState = mergeFrozenTargetState(liveTargetState, frozenTargetState);
         Object.assign(stateForTargets, targetState);
         stateForTargets.lastAssistDecisionModelData = frozenTargetState ? 'frozen_pending_assist_plan' : 'live_market_data';
-        stateForTargets.lastAssistStrategy = opts.watcherAdvancedSchedulerEnabled ? 'advanced_target_market_risk' : (opts.watcherQuantSchedulerEnabled ? 'quant_target_market' : 'fixed_interval');
+        stateForTargets.lastAssistStrategy = opts.watcherQuantSchedulerEnabled ? 'calendar_target_lognormal' : 'fixed_interval';
         stateForTargets.lastAssistDecisionAt = new Date().toISOString();
         stateForTargets.lastAssistDecision = {
           trigger,
@@ -260,56 +260,49 @@
           frozenPlanAt: stateForTargets.nextAssistPlanningData?.plannedAt || '',
           frozenMarketDataAt: stateForTargets.nextAssistPlanningData?.marketDataAt || '',
           speedMode: targetState.speedMode,
-          todayTarget: targetState.todayTarget || 0,
-          hourTarget: targetState.hourTarget || 0,
-          rateMultiplier: targetState.rateMultiplier || 1,
+          todayTarget: 0,
+          hourTarget: 0,
+          rateMultiplier: 1,
           targetError: targetState.targetError ?? targetState.lag ?? 0,
           workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
           activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
           availabilityFactor: targetState.availabilityFactor || 1,
           availabilityActualWakeCount: targetState.availabilityActualWakeCount || 0,
           availabilityExpectedWakeCount: targetState.availabilityExpectedWakeCount || 0,
-          marketRegime: targetState.marketRegime || stateForTargets.demandRegime || '',
-          recentH1DemandDelta: targetState.recentH1DemandDelta || 0,
+          marketRegime: '',
+          recentH1DemandDelta: 0,
           riskUsed: targetState.riskUsed || 0,
           riskLimit: targetState.riskLimit || 0,
           dailyLimit: opts.watcherDailyLimit || 0
         };
         await saveWatcherStateSafe(stateForTargets);
         await appendWatcherTrace('run_target_state', {
-          reason: opts.watcherAdvancedSchedulerEnabled ? 'advanced_target' : (opts.watcherQuantSchedulerEnabled ? 'quant_target' : 'fixed_interval'),
+          reason: opts.watcherQuantSchedulerEnabled ? 'calendar_target' : 'fixed_interval',
           trigger,
           modelData: stateForTargets.lastAssistDecisionModelData,
           speedMode: targetState.speedMode,
-          todayTarget: targetState.todayTarget,
-          hourTarget: targetState.hourTarget || '',
-          rateMultiplier: targetState.rateMultiplier || '',
+          todayTarget: '',
+          hourTarget: '',
+          rateMultiplier: '',
           targetError: targetState.targetError || targetState.lag || '',
           workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
           activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
           availabilityFactor: targetState.availabilityFactor || 1
         });
-        if (targetState.todayTarget > 0 && await getDailyCount('downloaded') >= targetState.todayTarget) {
-          await appendWatcherTrace('run_skip_today_target_reached', { reason: 'today_target_reached', trigger, todayTarget: targetState.todayTarget });
-          return finish({ ok: false, reason: 'today_target_reached' });
-        }
         if (opts.watcherDailyLimit > 0 && await getDailyCount('downloaded') >= opts.watcherDailyLimit) {
           await appendWatcherTrace('run_skip_daily_limit', { reason: 'daily_limit', trigger, dailyLimit: opts.watcherDailyLimit });
           return finish({ ok: false, reason: 'daily_limit' });
         }
 
         let handledCount = 0;
-        const sessionCap = sessionExecutionCap(opts, stateForTargets, opts.watcherQuantSchedulerEnabled !== false);
+        const sessionCap = sessionExecutionCap(opts, stateForTargets, false);
         const riskForSizing = riskSnapshot(stateForTargets, opts);
-        let targetSessionSize = opts.watcherAdvancedSchedulerEnabled
-          ? advancedSessionSize(opts, stateForTargets)
-          : (opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : 1);
+        let targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : Math.min(1, sessionCap);
         const zeroForcedToOne = !opts.watcherAllowZeroSession
           && trigger === 'alarm'
           && opts.watcherObserveMode !== 'observe_only'
           && targetSessionSize <= 0
           && sessionCap > 0
-          && (Number(targetState.todayTarget || 0) <= 0 || dailyDownloadedFromState(stateForTargets) < Number(targetState.todayTarget || 0))
           && (Number(opts.watcherDailyLimit || 0) <= 0 || dailyDownloadedFromState(stateForTargets) < Number(opts.watcherDailyLimit || 0));
         if (zeroForcedToOne) {
           targetSessionSize = 1;
@@ -338,15 +331,12 @@
           maxPerSession: maxSessionCandidates(opts),
           sessionCap,
           dailyDownloaded: dailyDownloadedFromState(stateForTargets),
-          todayTarget: stateForTargets.todayTarget || 0,
+          todayTarget: '',
           dailyLimit: opts.watcherDailyLimit || 0,
           riskRemaining: riskForSizing.remaining,
-          advanced: opts.watcherAdvancedSchedulerEnabled
+          advanced: false
         });
         if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero', observeSnapshot: observeResult?.snapshot ? true : false });
-        if (opts.watcherAdvancedSchedulerEnabled) {
-          return finish(await runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger));
-        }
 
         const runListUrls = listUrlsForRun(opts);
         await appendWatcherTrace('run_source_order', {

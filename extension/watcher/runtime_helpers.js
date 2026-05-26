@@ -24,14 +24,6 @@
       dailyCounterSnapshot
     } = config;
 
-    function normalizeObserveTimes(value) {
-      const raw = Array.isArray(value) ? value : String(value || '09:30\n11:30\n14:00\n16:30\n18:00').split(/\r?\n|,/);
-      const values = raw
-        .map(item => String(item || '').trim())
-        .filter(item => /^([01]\d|2[0-3]):[0-5]\d$/.test(item));
-      return Array.from(new Set(values)).sort();
-    }
-
     function normalizeWorkdays(value) {
       return normalizeWorkdaysSet(value);
     }
@@ -47,10 +39,10 @@
         watcherEnabled: shared.watcherEnabled === true,
         watcherListUrls: normalizeListUrls(shared.watcherListUrls, depsRef.defaultListUrls),
         watcherJournalAccessRules: String(shared.watcherJournalAccessRules || '').trim(),
-        watcherObserveTimes: normalizeObserveTimes(shared.watcherObserveTimes),
         watcherWorkdays: normalizeWorkdays(shared.watcherWorkdays),
         watcherWorkWindows: normalizeWorkWindows(shared.watcherWorkWindows),
-        watcherMaxPerSession: clampNumber(shared.watcherMaxPerSession, 1, 1, maxSessionCandidatesConst)
+        watcherObserveTimes: [],
+        watcherMaxPerSession: 1
       };
     }
 
@@ -129,21 +121,18 @@
     }
 
     function maxSessionCandidates(opts) {
-      return Math.round(clampNumber(opts?.watcherMaxPerSession, 1, 1, maxSessionCandidatesConst));
+      return 1;
     }
 
     function dailyDownloadedFromState(state) {
       return Number(state?.daily?.[todayKey()]?.downloaded || 0);
     }
 
-    function sessionExecutionCap(opts, state, respectTodayTarget = true) {
-      let cap = maxSessionCandidates(opts);
+    function sessionExecutionCap(opts, state) {
+      let cap = 1;
       const downloaded = dailyDownloadedFromState(state);
       if (Number(opts?.watcherDailyLimit || 0) > 0) {
         cap = Math.min(cap, Math.max(0, Number(opts.watcherDailyLimit || 0) - downloaded));
-      }
-      if (respectTodayTarget && Number(state?.todayTarget || 0) > 0) {
-        cap = Math.min(cap, Math.max(0, Number(state.todayTarget || 0) - downloaded));
       }
       return Math.max(0, Math.floor(cap));
     }
@@ -170,9 +159,9 @@
       return {
         schedulerModelMode: state.schedulerModelMode || '',
         speedMode: state.speedMode || '',
-        todayTarget: state.todayTarget || 0,
-        hourTarget: state.hourTarget || 0,
-        rateMultiplier: state.rateMultiplier || 1,
+        todayTarget: 0,
+        hourTarget: 0,
+        rateMultiplier: 1,
         targetError: state.targetError ?? state.lag ?? 0,
         lag: state.lag ?? state.targetError ?? 0,
         workTimeProgressRatio: state.workTimeProgressRatio || 0,
@@ -180,11 +169,11 @@
         availabilityFactor: state.availabilityFactor || 1,
         availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
         availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
-        demandFactor: state.demandFactor || 1,
-        trendFactor: state.trendFactor || 1,
-        marketRegime: state.marketRegime || state.marketData?.marketRegime || state.demandRegime || '',
-        recentH1DemandDelta: state.recentH1DemandDelta || state.marketData?.h1Delta || 0,
-        recentD1DemandDelta: state.recentD1DemandDelta || state.marketData?.d1Delta || 0,
+        demandFactor: 1,
+        trendFactor: 1,
+        marketRegime: '',
+        recentH1DemandDelta: 0,
+        recentD1DemandDelta: 0,
         riskUsed: state.riskUsed || 0,
         riskLimit: state.riskLimit || 0,
         riskRemaining: state.riskRemaining || 0,
@@ -202,6 +191,14 @@
         monthDone: liveTarget.monthDone,
         targetError: liveTarget.targetError ?? liveTarget.lag ?? frozenTarget.targetError ?? frozenTarget.lag ?? 0,
         lag: liveTarget.lag ?? liveTarget.targetError ?? frozenTarget.lag ?? frozenTarget.targetError ?? 0,
+        todayTarget: 0,
+        hourTarget: 0,
+        rateMultiplier: 1,
+        demandFactor: 1,
+        trendFactor: 1,
+        marketRegime: '',
+        recentH1DemandDelta: 0,
+        recentD1DemandDelta: 0,
         riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed,
         riskLimit: liveTarget.riskLimit ?? frozenTarget.riskLimit,
         riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining,
@@ -236,7 +233,6 @@
     return {
       normalizeOptions,
       hydrateJournalAccessRulesFromConfig,
-      normalizeObserveTimes,
       normalizeWorkdays,
       normalizeWorkWindows,
       isInWorkSchedule,

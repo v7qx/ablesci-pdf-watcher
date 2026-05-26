@@ -38,55 +38,26 @@
     } = config;
 
     function sessionSize(opts, state) {
-      const mode = sessionModes[state?.speedMode || 'normal'] || sessionModes.normal;
-      const decision = weightedPickIndexWithDebug(mode.sizeWeights);
-      const picked = decision.index;
-      const cap = sessionExecutionCap(opts, state, opts?.watcherQuantSchedulerEnabled !== false);
-      const finalSize = Math.min(cap, Math.max(0, picked));
+      const cap = sessionExecutionCap(opts, state, false);
+      const picked = cap > 0 ? 1 : 0;
+      const finalSize = picked;
       if (state) {
         state.lastSessionSizeDecision = {
           mode: state.speedMode || 'normal',
           picked,
           cap,
           finalSize,
-          random: Number(decision.random.toFixed(6)),
-          total: Number(decision.total.toFixed(6)),
-          weights: decision.weights,
-          allowZero: opts?.watcherAllowZeroSession === true
+          random: 0,
+          total: 1,
+          weights: [0, 1],
+          allowZero: false
         };
       }
       return finalSize;
     }
 
     function advancedSessionSize(opts, state) {
-      const risk = riskSnapshot(state, opts);
-      if (risk.exhausted) return 0;
-      const cap = Math.min(sessionExecutionCap(opts, state, true), risk.remaining);
-      if (cap <= 0) return 0;
-      const mode = sessionModes[state?.speedMode || 'normal'] || sessionModes.normal;
-      const decision = weightedPickIndexWithDebug(mode.sizeWeights);
-      const modeSize = decision.index;
-      const multiplier = Number(state.rateMultiplier || 1);
-      const intensity = Number(state.sessionIntensity || 0.4);
-      const parentOrderSize = Math.ceil(maxSessionCandidates(opts) * Math.max(0.12, intensity) * 0.75);
-      const boost = multiplier > 2.0 ? 2 : (multiplier > 1.45 ? 1 : 0);
-      const desired = Math.max(modeSize, parentOrderSize) + boost;
-      const finalSize = Math.max(0, Math.min(cap, desired));
-      if (state) {
-        state.lastSessionSizeDecision = {
-          mode: state.speedMode || 'normal',
-          picked: modeSize,
-          cap,
-          finalSize,
-          random: Number(decision.random.toFixed(6)),
-          total: Number(decision.total.toFixed(6)),
-          weights: decision.weights,
-          allowZero: opts?.watcherAllowZeroSession === true,
-          parentOrderSize,
-          boost
-        };
-      }
-      return finalSize;
+      return sessionSize(opts, state);
     }
 
     async function runAdvancedSchedulerSession(opts, stateForTargets, targetSessionSize, observeResult, trigger = '') {
