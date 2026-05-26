@@ -133,7 +133,7 @@ function validateOptions(opts) {
   }
 }
 
-async function save() {
+async function save(saveOptions = {}) {
   const opts = await loadOptions();
   for (const id of ids) {
     const node = el(id);
@@ -197,6 +197,9 @@ async function save() {
 
   try {
     validateOptions(opts);
+    if (saveOptions.suppressWatcherReplan) {
+      opts.ablesciSuppressWatcherReplanUntil = Date.now() + 30 * 1000;
+    }
     await chrome.storage.local.set(opts);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
     return true;

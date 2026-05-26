@@ -64,6 +64,14 @@
           const changedKeys = watcherKeys.slice(0, 12).join(',');
           updateActionBadge().catch(() => {});
           if (watcherKeys.some(key => key !== 'watcherBadgeCountdownEnabled')) {
+            const suppressUntil = Number(changes.ablesciSuppressWatcherReplanUntil?.newValue || 0);
+            if (Number.isFinite(suppressUntil) && suppressUntil > Date.now()) {
+              appendWatcherTrace('alarm_refresh_suppressed', {
+                reason: 'manual_run_preserve_existing_schedule',
+                changedKeys
+              }).catch(() => {});
+              return;
+            }
             refreshAutoWatcherAlarm(true, `storage_changed:${changedKeys}`).catch(() => {});
           }
         }

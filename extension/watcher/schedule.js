@@ -44,6 +44,12 @@
       return clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
     }
 
+    function clampAssistDelayMinutes(opts, minutes) {
+      const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
+      const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
+      return Math.min(max, Math.max(min, Number(minutes) || min));
+    }
+
     function applySoftAssistGuard(modelDelay, guardMinutes) {
       const model = Math.max(0, Number(modelDelay) || 0);
       const guard = Math.max(0, Number(guardMinutes) || 0);
@@ -124,7 +130,7 @@
         }
       }
       const mode = sessionModes[state?.speedMode || 'normal'] || sessionModes.normal;
-      const rawModelDelay = logNormalMinutes(mode.median, mode.min, mode.max);
+      const rawModelDelay = clampAssistDelayMinutes(opts, logNormalMinutes(mode.median, mode.min, mode.max));
       const targetError = Number(state.targetError ?? state.lag ?? 0);
       const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
       const thresholds = lagThresholds(monthlyTarget);
@@ -132,6 +138,7 @@
       const mediumLag = targetError >= thresholds.medium;
       const modelDelay = rawModelDelay;
       const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
+      guarded.minutes = clampAssistDelayMinutes(opts, guarded.minutes);
       return {
         minutes: guarded.minutes,
         modelDelayMinutes: modelDelay,
