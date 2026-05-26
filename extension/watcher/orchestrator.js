@@ -65,6 +65,11 @@
     } = config;
 
     async function syncActualAssistCount(state) {
+      const now = Date.now();
+      const lastSynced = state.lastAssistCountSyncedAt ? new Date(state.lastAssistCountSyncedAt).getTime() : 0;
+      if (Number.isFinite(lastSynced) && now - lastSynced < 15 * 60 * 1000) {
+        return;
+      }
       try {
         const res = await fetch('https://www.ablesci.com/my/home');
         if (!res.ok) return;
@@ -79,6 +84,7 @@
             state.monthlyInitialAssists[currentMonth] = totalCount - localDone;
           }
           state.actualTotalAssists = totalCount;
+          state.lastAssistCountSyncedAt = new Date().toISOString();
           await saveWatcherStateSafe(state);
           await appendWatcherTrace('sync_web_assist_count', {
             totalCount,

@@ -92,6 +92,9 @@
           state.recentDownloads.push(Date.now());
           const cutOff = Date.now() - 30 * 60 * 1000;
           state.recentDownloads = state.recentDownloads.filter(t => t >= cutOff);
+          if (Number.isFinite(state.actualTotalAssists)) {
+            state.actualTotalAssists += 1;
+          }
         }
       });
     }
