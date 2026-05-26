@@ -61,13 +61,15 @@
     }
 
     function nextDisplaySchedule(state = {}) {
-      const schedulerMode = state.currentSchedulerMode || '';
       const assistAt = state.nextAssistRunAt || '';
       const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
-      if (schedulerMode === 'fixed') {
-        return { nextAssistAt: wakeAt, assistCountdownAt: wakeAt };
-      }
-      return { nextAssistAt: assistAt, assistCountdownAt: assistAt };
+      const nextRunAt = wakeAt || assistAt || '';
+      const nextAssistAt = assistAt || wakeAt || '';
+      return {
+        nextRunAt,
+        nextAssistAt,
+        assistCountdownAt: nextRunAt
+      };
     }
 
     function todayKeyBeijing() {

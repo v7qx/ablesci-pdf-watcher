@@ -35,16 +35,16 @@
     let traceLevelLoadedAt = 0;
 
     function nextDisplaySchedule(state = {}, opts = null) {
-      const schedulerMode = opts?.watcherSchedulerMode || state.currentSchedulerMode || '';
       const assistAt = state.nextAssistRunAt || '';
       const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
-      if (schedulerMode === 'fixed') {
-        return { kind: 'scheduled_check', time: wakeAt, label: '下一次检查' };
-      }
-      if (assistAt) {
-        return { kind: 'assist', time: assistAt, label: '下一次应助尝试' };
-      }
-      return { kind: 'wake', time: wakeAt, label: '下一次唤醒' };
+      const runAt = wakeAt || assistAt || '';
+      const plannedAssistAt = assistAt || wakeAt || '';
+      return {
+        kind: 'run',
+        time: runAt,
+        assistTime: plannedAssistAt,
+        label: '下一次执行'
+      };
     }
 
     async function updateActionBadge(state = null) {
