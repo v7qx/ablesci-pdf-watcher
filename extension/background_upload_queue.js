@@ -133,6 +133,16 @@
                 blocked: true,
                 skipReason: 'no_access'
               });
+            } else if (failureReason === 'doi_not_found' || failureReason === 'doi_resolution_failed') {
+              const message = 'DOI 解析失败或不存在，已跳过本次任务。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: failureReason
+              });
             } else if (isExpectedTimeoutFailure(failureReason)) {
               const message = formatTimeoutDoneMessage(err, failureReason);
               post(port, 'done', message, {
