@@ -64,7 +64,7 @@
       flushWatcherTrace
     } = config;
 
-    async function syncActualAssistCount(state) {
+    async function syncActualAssistCount(state, opts) {
       const now = Date.now();
       const lastSynced = state.lastAssistCountSyncedAt ? new Date(state.lastAssistCountSyncedAt).getTime() : 0;
       if (Number.isFinite(lastSynced) && now - lastSynced < 15 * 60 * 1000) {
@@ -80,8 +80,21 @@
           const currentMonth = todayKey().slice(0, 7);
           state.monthlyInitialAssists = state.monthlyInitialAssists || {};
           if (state.monthlyInitialAssists[currentMonth] === undefined) {
-            const localDone = monthDone(state);
-            state.monthlyInitialAssists[currentMonth] = totalCount - localDone;
+            let expectedDone = 0;
+            if (opts?.watcherUseCalendarProgress) {
+              const year = new Date(now).getFullYear();
+              const month = new Date(now).getMonth();
+              const startOfMonth = new Date(year, month, 1).getTime();
+              const startOfNextMonth = new Date(year, month + 1, 1).getTime();
+              const totalMonthMs = startOfNextMonth - startOfMonth;
+              const currentMs = now - startOfMonth;
+              const ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
+              const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
+              expectedDone = Math.round(monthlyTarget * ratio);
+            } else {
+              expectedDone = monthDone(state);
+            }
+            state.monthlyInitialAssists[currentMonth] = totalCount - expectedDone;
           }
           state.actualTotalAssists = totalCount;
           state.lastAssistCountSyncedAt = new Date().toISOString();
@@ -181,7 +194,7 @@
         const stateForTargets = await getWatcherState();
         stateForTargets.optionsSnapshot = opts;
         await hydrateJournalAccessStatsIndex(stateForTargets);
-        await syncActualAssistCount(stateForTargets);
+        await syncActualAssistCount(stateForTargets, opts);
         if (trigger !== 'manual') {
           const rateLimit = checkShortTermRateLimit(stateForTargets);
           if (rateLimit.limited) {
