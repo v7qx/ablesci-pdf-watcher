@@ -264,7 +264,8 @@
     isAssistDue,
     targetStateSnapshot,
     mergeFrozenTargetState,
-    checkShortTermRateLimit
+    checkShortTermRateLimit,
+    nextRateLimitClearDelayMinutes
   } = createWatcherRuntimeHelpersApi({
     depsRef,
     maxSessionCandidatesConst: MAX_SESSION_CANDIDATES,
@@ -401,7 +402,8 @@
     nextRiskResumeAt,
     riskSnapshot,
     nextWorkDelayMinutes,
-    targetStateSnapshot
+    targetStateSnapshot,
+    nextRateLimitClearDelayMinutes
   });
   const {
     isHighRiskJournal,

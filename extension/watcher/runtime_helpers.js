@@ -218,16 +218,47 @@
       }
       
       const count5m = valid.filter(t => t >= now - 5 * 60 * 1000).length;
-      if (count5m >= 2) {
-        return { limited: true, window: '5m', count: count5m, limit: 2 };
+      if (count5m >= 10) {
+        return { limited: true, window: '5m', count: count5m, limit: 10 };
       }
       
       const count30m = valid.filter(t => t >= now - 30 * 60 * 1000).length;
-      if (count30m >= 7) {
-        return { limited: true, window: '30m', count: count30m, limit: 7 };
+      if (count30m >= 15) {
+        return { limited: true, window: '30m', count: count30m, limit: 15 };
       }
       
       return { limited: false };
+    }
+
+    function nextRateLimitClearDelayMinutes(state) {
+      const recent = Array.isArray(state?.recentDownloads) ? state.recentDownloads : [];
+      const now = Date.now();
+      const cutoff = now - 30 * 60 * 1000;
+      const valid = recent.filter(t => t >= cutoff && t <= now);
+      const sorted = [...valid].sort((a, b) => b - a);
+      
+      let maxDelayMs = 0;
+      
+      const count1m = sorted.filter(t => t >= now - 1 * 60 * 1000).length;
+      if (count1m >= 1) {
+        const delay = (sorted[0] + 1 * 60 * 1000) - now;
+        if (delay > maxDelayMs) maxDelayMs = delay;
+      }
+      
+      const count5m = sorted.filter(t => t >= now - 5 * 60 * 1000).length;
+      if (count5m >= 10) {
+        const delay = (sorted[9] + 5 * 60 * 1000) - now;
+        if (delay > maxDelayMs) maxDelayMs = delay;
+      }
+      
+      const count30m = sorted.filter(t => t >= now - 30 * 60 * 1000).length;
+      if (count30m >= 15) {
+        const delay = (sorted[14] + 30 * 60 * 1000) - now;
+        if (delay > maxDelayMs) maxDelayMs = delay;
+      }
+      
+      if (maxDelayMs <= 0) return 0;
+      return maxDelayMs / 60000;
     }
 
     return {
@@ -247,7 +278,8 @@
       isAssistDue,
       targetStateSnapshot,
       mergeFrozenTargetState,
-      checkShortTermRateLimit
+      checkShortTermRateLimit,
+      nextRateLimitClearDelayMinutes
     };
   }
 

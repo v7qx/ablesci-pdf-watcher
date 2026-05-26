@@ -48,7 +48,12 @@
       setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
       setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
       setText('watcherWakeCountdown', dailyLimit > 0 ? String(dailyLimit) : '-');
-      setText('watcherRunCounts', String(downloaded));
+      const downloadedAuto = Math.max(0, Number(daily.downloadedAuto || 0));
+      let downloadedManual = Math.max(0, Number(daily.downloadedManual || 0));
+      if (downloaded > 0 && downloadedAuto === 0 && downloadedManual === 0) {
+        downloadedManual = downloaded;
+      }
+      setText('watcherRunCounts', `自动: ${downloadedAuto} / 手动: ${downloadedManual}`);
     }
 
     function renderAdvancedWatcherCountdowns() {

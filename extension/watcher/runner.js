@@ -257,7 +257,7 @@
               paused
               }),
               updateProcessed(context.key, 'failed', msg.message || 'upload_failed'),
-              incrementDaily('failed'),
+              incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
               recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed'),
               appendWatcherLog({
@@ -282,7 +282,7 @@
                 durationMs
               }),
               updateProcessed(context.key, 'failed', msg.message || 'blocked'),
-              incrementDaily('failed'),
+              incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked'),
               recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked'),
               appendWatcherLog({
@@ -298,7 +298,7 @@
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             await Promise.allSettled([
-              context.payload?.downloadOnly !== true ? incrementDaily('uploaded') : Promise.resolve(),
+              context.payload?.downloadOnly !== true ? incrementDaily('uploaded', context.trigger) : Promise.resolve(),
               appendWatcherTrace('queue_message_done', {
                 reason: msg.message || 'done',
                 detailUrl: context.detailUrl,
@@ -376,7 +376,7 @@
         await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
         await closeTabQuietly(detailTabId, 'high_risk_journal');
         await updateProcessed(key, 'skipped', 'high_risk_journal');
-        await incrementDaily('skipped');
+        await incrementDaily('skipped', trigger || session?.trigger || '');
         await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
         await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: `本地记录连续失败达到 ${highRiskFailThreshold} 次，暂按无权限跳过` });
         return false;
@@ -385,7 +385,7 @@
       if (deps.hasActiveTask()) {
         await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
         await updateProcessed(key, 'skipped', 'active_task');
-        await incrementDaily('skipped');
+        await incrementDaily('skipped', trigger || session?.trigger || '');
         await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'active_task' });
         return false;
       }
@@ -413,7 +413,7 @@
         downloadOnly: payload.downloadOnly === true
       });
       deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
-      await incrementDaily('downloaded');
+      await incrementDaily('downloaded', trigger || session?.trigger || '');
       await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
       await appendWatcherLog({
         ...payload,
@@ -424,7 +424,7 @@
         reason: payload.downloadOnly ? 'download_only' : 'auto_upload_enabled'
       });
       await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载并校验一个候选。' : '低频值守已排队处理一个候选。');
-      await incrementDaily('notified');
+      await incrementDaily('notified', trigger || session?.trigger || '');
       if (sessionPort) {
         const result = await sessionPort.result;
         if (!payload.downloadOnly) {

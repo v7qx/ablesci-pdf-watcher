@@ -106,10 +106,10 @@
         });
         stateForTargets.lastPickedListUrl = pickedListUrl;
         await saveWatcherState(stateForTargets);
-        await incrementDaily('checked');
+        await incrementDaily('checked', trigger);
         const parsed = await parseListUrl(pickedListUrl);
         if (parsed.cfChallenge) {
-          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
+          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
           return { ok: false, reason: 'cf_challenge' };
         }
         await resetCfChallengeStreak();
@@ -206,7 +206,7 @@
         if (!detail.ok) {
           await closeTabQuietly(detail.tabId, 'detail_extract_failed');
           await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
-          await incrementDaily('failed');
+          await incrementDaily('failed', trigger);
           await recordRiskEvent(opts, detail.reason, 'failed');
           await recordBanditOutcome(candidateSource(candidate), 'failure', 0, detail.reason);
           await appendWatcherLog({ ...candidate, sessionId: session.id, trigger, status: 'failed', reason: detail.reason });
@@ -219,7 +219,7 @@
             await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), sessionId: session.id, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
             await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
             await updateProcessed(key, 'skipped', detailAllowed.reason);
-            await incrementDaily('skipped');
+            await incrementDaily('skipped', trigger);
             await recordBanditOutcome(candidateSource(candidate, payload), 'failure', 0, detailAllowed.reason);
             await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, sessionId: session.id, trigger, status: 'skipped', reason: detailAllowed.reason });
           } else {

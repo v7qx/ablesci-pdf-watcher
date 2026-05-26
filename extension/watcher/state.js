@@ -81,17 +81,32 @@
       });
     }
 
-    async function incrementDaily(field) {
+    async function incrementDaily(field, trigger = '') {
       await updateWatcherState(state => {
         const key = todayKey();
         state.daily = state.daily || {};
-        state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+        state.daily[key] = state.daily[key] || {
+          checked: 0,
+          downloaded: 0,
+          downloadedAuto: 0,
+          downloadedManual: 0,
+          uploaded: 0,
+          skipped: 0,
+          failed: 0,
+          notified: 0
+        };
         state.daily[key][field] = Number(state.daily[key][field] || 0) + 1;
         if (field === 'downloaded') {
-          state.recentDownloads = state.recentDownloads || [];
-          state.recentDownloads.push(Date.now());
-          const cutOff = Date.now() - 30 * 60 * 1000;
-          state.recentDownloads = state.recentDownloads.filter(t => t >= cutOff);
+          const isAuto = trigger === 'alarm';
+          if (isAuto) {
+            state.daily[key].downloadedAuto = Number(state.daily[key].downloadedAuto || 0) + 1;
+            state.recentDownloads = state.recentDownloads || [];
+            state.recentDownloads.push(Date.now());
+            const cutOff = Date.now() - 30 * 60 * 1000;
+            state.recentDownloads = state.recentDownloads.filter(t => t >= cutOff);
+          } else {
+            state.daily[key].downloadedManual = Number(state.daily[key].downloadedManual || 0) + 1;
+          }
           if (Number.isFinite(state.actualTotalAssists)) {
             state.actualTotalAssists += 1;
           }

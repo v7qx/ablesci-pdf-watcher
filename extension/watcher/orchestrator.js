@@ -241,6 +241,17 @@
         stateForTargets.optionsSnapshot = opts;
         await hydrateJournalAccessStatsIndex(stateForTargets);
         await syncActualAssistCount(stateForTargets, opts);
+        if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
+          await appendWatcherTrace('run_skip_assist_not_due', {
+            reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
+            trigger,
+            nextAssistRunAt: stateForTargets.nextAssistRunAt || '',
+            nextAssistRunAtBeijing: stateForTargets.nextAssistRunAt ? formatBeijingDateTime(stateForTargets.nextAssistRunAt) : '',
+            secondsUntilAssist: stateForTargets.nextAssistRunAt ? Math.round((new Date(stateForTargets.nextAssistRunAt).getTime() - Date.now()) / 1000) : '',
+            observeSnapshot: observeResult?.snapshot ? true : false
+          });
+          return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
+        }
         if (trigger !== 'manual') {
           const rateLimit = checkShortTermRateLimit(stateForTargets);
           if (rateLimit.limited) {
@@ -254,17 +265,6 @@
             });
             return finish({ ok: false, reason });
           }
-        }
-        if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
-          await appendWatcherTrace('run_skip_assist_not_due', {
-            reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
-            trigger,
-            nextAssistRunAt: stateForTargets.nextAssistRunAt || '',
-            nextAssistRunAtBeijing: stateForTargets.nextAssistRunAt ? formatBeijingDateTime(stateForTargets.nextAssistRunAt) : '',
-            secondsUntilAssist: stateForTargets.nextAssistRunAt ? Math.round((new Date(stateForTargets.nextAssistRunAt).getTime() - Date.now()) / 1000) : '',
-            observeSnapshot: observeResult?.snapshot ? true : false
-          });
-          return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
         }
         if (stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
           await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
@@ -411,10 +411,10 @@
           });
           stateForTargets.lastPickedListUrl = pickedListUrl;
           await saveWatcherStateSafe(stateForTargets);
-          await incrementDaily('checked');
+          await incrementDaily('checked', trigger);
           const parsed = await parseListUrl(pickedListUrl);
           if (parsed.cfChallenge) {
-            if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl);
+            if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
             return finish({ ok: false, reason: 'cf_challenge' });
           }
           const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
@@ -499,7 +499,7 @@
             if (!detail.ok) {
               await closeTabQuietly(detail.tabId, 'detail_extract_failed');
               await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
-              await incrementDaily('failed');
+              await incrementDaily('failed', trigger);
               await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason });
               continue;
             }
@@ -512,7 +512,7 @@
               await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
               await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
               await updateProcessed(key, 'skipped', detailAllowed.reason);
-              await incrementDaily('skipped');
+              await incrementDaily('skipped', trigger);
               await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason });
               continue;
             }
@@ -546,7 +546,7 @@
         return finish({ ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' });
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
-        await incrementDaily('failed');
+        await incrementDaily('failed', trigger);
         await appendWatcherLog({ trigger, status: 'failed', reason: err?.message || String(err) });
         return finish({ ok: false, reason: err?.message || String(err) });
       } finally {

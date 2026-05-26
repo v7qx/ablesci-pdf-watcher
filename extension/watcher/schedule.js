@@ -20,7 +20,8 @@
       nextRiskResumeAt,
       riskSnapshot,
       nextWorkDelayMinutes,
-      targetStateSnapshot
+      targetStateSnapshot,
+      nextRateLimitClearDelayMinutes
     } = config;
 
     function quotaHoldPlan(opts, state = {}) {
@@ -236,7 +237,7 @@
       if (!opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
       if (trigger === 'manual' || trigger === 'manual-observe') return null;
       const reason = String(result?.reason || '');
-      if (/assist_not_due|observe_only|outside_work_schedule|already_running|active_task|disabled/i.test(reason)) return null;
+      if (/assist_not_due|observe_only|outside_work_schedule|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
       const state = await getWatcherState();
       delete state.nextAssistRunAt;
       delete state.nextAssistReason;
@@ -386,8 +387,17 @@
       const reason = String(result?.reason || '');
       if (reason.startsWith('rate_limited_')) {
         const state = await getWatcherState();
-        const delay = 2;
-        state.nextScheduledAt = Date.now() + delay * 60 * 1000;
+        let delay = nextRateLimitClearDelayMinutes ? nextRateLimitClearDelayMinutes(state) : 0;
+        if (delay <= 0) {
+          delay = 1;
+        } else {
+          delay = delay + 0.05;
+        }
+        const clearTimeMs = Date.now() + delay * 60 * 1000;
+        state.nextAssistRunAt = new Date(clearTimeMs).toISOString();
+        state.nextAssistReason = 'rate_limited_retry';
+        state.nextAssistStrategy = 'rate_limited_retry';
+        state.nextScheduledAt = clearTimeMs;
         state.currentSchedulerMode = opts.watcherSchedulerMode;
         state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
         state.lastAlarmRefreshReason = 'rate_limited_retry';
@@ -403,8 +413,9 @@
         updateActionBadge(state).catch(() => {});
         await appendWatcherTrace('alarm_scheduled_rate_limited_retry', {
           reason: 'rate_limited_retry',
-          delayMinutes: delay,
-          nextScheduledAt: new Date(state.nextScheduledAt).toISOString()
+          delayMinutes: Number(delay.toFixed(2)),
+          nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
+          nextAssistRunAt: state.nextAssistRunAt
         });
         return delay;
       }

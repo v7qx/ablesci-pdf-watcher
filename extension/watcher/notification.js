@@ -190,7 +190,7 @@
       return risk;
     }
 
-    async function recordCfChallenge(opts, listUrl) {
+    async function recordCfChallenge(opts, listUrl, trigger = '') {
       const state = await getWatcherState();
       const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
       state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
@@ -204,7 +204,7 @@
           listUrl,
           { requireInteraction: true, soundKind: 'urgent', priority: 2 }
         );
-        await incrementDaily('notified');
+        await incrementDaily('notified', trigger);
       }
       if (reached) {
         state.pausedByCfChallenge = true;
@@ -212,7 +212,7 @@
         await chromeApi.alarms.clear('ablesciAutoWatcher');
       }
       await saveWatcherState(state);
-      await incrementDaily('failed');
+      await incrementDaily('failed', trigger);
       if (opts.watcherAdvancedSchedulerEnabled) await recordRiskEvent(opts, 'cf_challenge', 'blocked');
       await appendWatcherLog({
         detailUrl: listUrl,
