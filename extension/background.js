@@ -10,6 +10,11 @@ importScripts(
   'background_native.js',
   'background_file_utils.js',
   'background_diagnostics.js',
+  'background_upload_guards.js',
+  'background_download_agent.js',
+  'background_publisher_messages.js',
+  'background_upload_queue.js',
+  'background_upload_client.js',
   'background_upload.js',
   'background_task_snapshot.js',
   'background_tab_registry.js',
@@ -67,6 +72,11 @@ const { createBackgroundPortUtilsApi } = globalThis.AblesciBackgroundPortUtils;
 const { createBackgroundNativeApi } = globalThis.AblesciBackgroundNative;
 const { createBackgroundFileUtilsApi } = globalThis.AblesciBackgroundFileUtils;
 const { createBackgroundDiagnosticsApi } = globalThis.AblesciBackgroundDiagnostics;
+const { createBackgroundUploadGuardsApi } = globalThis.AblesciBackgroundUploadGuards;
+const { createBackgroundDownloadAgentApi } = globalThis.AblesciBackgroundDownloadAgent;
+const { createBackgroundPublisherMessagesApi } = globalThis.AblesciBackgroundPublisherMessages;
+const { createBackgroundUploadQueueApi } = globalThis.AblesciBackgroundUploadQueue;
+const { createBackgroundUploadClientApi } = globalThis.AblesciBackgroundUploadClient;
 const { createBackgroundUploadApi } = globalThis.AblesciBackgroundUpload;
 
 const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
@@ -199,43 +209,79 @@ const {
   saveDiagnostic
 });
 const {
-  enqueueUpload,
-  attachRuntimeListeners,
-  hasActiveTask
-} = createBackgroundUploadApi({
+  pauseWatcherForAccessEnvironment,
+  recordAccessEnvironmentSuccess,
+  recordPublisherCfChallenge,
+  clearPublisherCfChallengeState
+} = createBackgroundUploadGuardsApi({
+  chromeApi: chrome,
+  defaultOptions: DEFAULT_OPTIONS,
+  getOptions,
+  publisherForUrl,
+  urlHostPath
+});
+const { downloadPdf } = createBackgroundDownloadAgentApi({
   chromeApi: chrome,
   pendingPublisherTabs,
   defaultOptions: DEFAULT_OPTIONS,
-  htmlDownloadMessage: HTML_DOWNLOAD_MESSAGE,
-  nativeMessageLongTimeoutMs: NATIVE_MESSAGE_LONG_TIMEOUT_MS,
-  getOptions,
   post,
   makeAbortError,
   abortReason,
   throwIfAborted,
   hostnameOf,
-  urlHostPath,
   isScienceDirectUrl,
-  extractScienceDirectPii,
-  isDoiHost,
+  isDoiUrl,
   isNatureUrl,
   isRscDirectPdfUrl,
   isRscUrl,
   publisherForUrl,
-  isDoiUrl,
-  isScienceDirectAssetPdfUrl,
   publisherArticleUrlFromPdfUrl,
   looksLikePdfDownloadUrl,
   isLikelyTargetDownload,
-  isExpectedPublisherPage,
   registerPublisherTab,
   unregisterPublisherTab,
+  makeDownloadFilename,
+  isHtmlDownloadItem
+});
+const {
+  handlePublisherTabUpdated,
+  handlePublisherRuntimeMessage
+} = createBackgroundPublisherMessagesApi({
+  chromeApi: chrome,
+  pendingPublisherTabs,
+  post,
+  hostnameOf,
+  isScienceDirectUrl,
+  extractScienceDirectPii,
+  isDoiHost,
+  isNatureUrl,
+  isRscUrl,
+  isScienceDirectAssetPdfUrl,
+  isExpectedPublisherPage,
+  recordPublisherCfChallenge
+});
+const {
+  enqueueUpload,
+  attachRuntimeListeners,
+  hasActiveTask
+} = createBackgroundUploadApi({
+  chromeApi: chrome,
+  defaultOptions: DEFAULT_OPTIONS,
+  htmlDownloadMessage: HTML_DOWNLOAD_MESSAGE,
+  nativeMessageLongTimeoutMs: NATIVE_MESSAGE_LONG_TIMEOUT_MS,
+  getOptions,
+  throwIfAborted,
+  isDoiUrl,
   cleanupOrphanPublisherTabs,
+  post,
+  downloadPdf,
+  pauseWatcherForAccessEnvironment,
+  recordAccessEnvironmentSuccess,
+  clearPublisherCfChallengeState,
   recordJournalAccessResult,
   sendNativeMessage,
   formatBytes,
   formatConfiguredSize,
-  makeDownloadFilename,
   basenameOf,
   extensionOf,
   sizeToBytes,
@@ -254,7 +300,11 @@ const {
   isHtmlDownloadItem,
   stopForNonPdfDownload,
   saveUploadTaskSnapshot,
-  clearUploadTaskSnapshot
+  clearUploadTaskSnapshot,
+  createBackgroundUploadQueueApi,
+  createBackgroundUploadClientApi,
+  handlePublisherTabUpdated,
+  handlePublisherRuntimeMessage
 });
 attachRuntimeListeners();
 
