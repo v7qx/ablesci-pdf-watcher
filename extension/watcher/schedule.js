@@ -277,11 +277,12 @@
       if (hold && !opts.watcherQuantSchedulerEnabled) return Math.max(1, hold.minutes);
       if (opts.watcherQuantSchedulerEnabled) {
         const outsideDelay = nextWorkDelayMinutes(opts);
-        const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
         if (outsideDelay !== null) return Math.max(1, outsideDelay);
         const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
         const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : Number(assistPlan?.minutes || Number.POSITIVE_INFINITY);
-        return Math.max(1, Math.min(assistDelay, observeDelay));
+        if (Number.isFinite(assistDelay)) return Math.max(1, assistDelay);
+        const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
+        return Math.max(1, observeDelay);
       }
       const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
       const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);

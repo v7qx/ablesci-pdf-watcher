@@ -878,11 +878,11 @@
             <div class="metric-field" title="今日已发生的风险事件数 / 日上限。遇到出版商风控、Cloudflare挑战或下载错误时会消耗预算。"><label>风险预算</label><span id="advancedRiskBudget" class="pill">-</span></div>
             <div class="metric-field" title="最近一次值守会话的执行结果。'-'表示尚未运行会话。"><label>会话状态</label><span id="advancedSessionStatus" class="pill">-</span></div>
             <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
-            <div class="metric-field" title="插件下一次真正会被后台 Alarm 唤醒并开始执行检查的具体北京时间。"><label>下次执行</label><span id="watcherNextRunAt" class="pill">-</span></div>
-            <div class="metric-field" title="当前调度模型预估的下一次应助时间。它可能会随着月度进度和速率控制变化，但不会提前于“下次执行”。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
-            <div class="metric-field" title="距离下一次真正执行检查的剩余时间。这个倒计时与后台 Alarm 一致，不再单独显示第二个倒计时。"><label>执行倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="当前调度模型预估的计划应助时间点，用于观察节奏；真正触发仍以“下次执行 / 执行倒计时”为准。"><label>计划时点</label><span id="watcherWakeCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="今日已应助计数。这个数字与“每日应助上限 / 最大日目标”使用的是同一套 downloaded 计数；分母取两者中当前生效的更严格限制。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
+            <div class="metric-field" title="下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field" title="与“下次应助”保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
+            <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
             <div class="metric-field" title="当前配置的允许值守的工作日范围。"><label>工作日</label><span id="watcherSavedWorkdays" class="pill">-</span></div>
           </div>
         </div>

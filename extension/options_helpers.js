@@ -61,14 +61,11 @@
     }
 
     function nextDisplaySchedule(state = {}) {
-      const assistAt = state.nextAssistRunAt || '';
-      const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
-      const nextRunAt = wakeAt || assistAt || '';
-      const nextAssistAt = assistAt || wakeAt || '';
+      const assistAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
       return {
-        nextRunAt,
-        nextAssistAt,
-        assistCountdownAt: nextRunAt
+        nextRunAt: assistAt,
+        nextAssistAt: assistAt,
+        assistCountdownAt: assistAt
       };
     }
 

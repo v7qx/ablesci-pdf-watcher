@@ -35,15 +35,12 @@
     let traceLevelLoadedAt = 0;
 
     function nextDisplaySchedule(state = {}, opts = null) {
-      const assistAt = state.nextAssistRunAt || '';
-      const wakeAt = state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
-      const runAt = wakeAt || assistAt || '';
-      const plannedAssistAt = assistAt || wakeAt || '';
+      const unifiedAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
       return {
         kind: 'run',
-        time: runAt,
-        assistTime: plannedAssistAt,
-        label: '下一次执行'
+        time: unifiedAt,
+        assistTime: unifiedAt,
+        label: '下一次应助'
       };
     }
 

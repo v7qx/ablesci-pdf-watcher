@@ -30,11 +30,7 @@
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[todayKeyBeijing()] || {};
       const downloaded = Math.max(0, Number(daily.downloaded || 0));
-      const todayTarget = Math.max(0, Number(state.todayTarget || 0));
       const dailyLimit = Math.max(0, Number(stored.watcherDailyLimit || defaultOptions.watcherDailyLimit || 0));
-      const assistCap = dailyLimit > 0 && todayTarget > 0
-        ? Math.min(dailyLimit, todayTarget)
-        : Math.max(dailyLimit, todayTarget);
       const workdays = normalizeWorkdays(stored.watcherWorkdays || defaultOptions.watcherWorkdays);
       const workWindows = normalizeWorkWindows(stored.watcherWorkWindows || defaultOptions.watcherWorkWindows);
       const pausedUntilMs = state.riskPausedUntil ? new Date(state.riskPausedUntil).getTime() : 0;
@@ -66,8 +62,8 @@
       setText('watcherNextRunAt', formatBeijingDateTime(schedule.nextRunAt));
       setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
       setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
-      setText('watcherWakeCountdown', formatBeijingDateTime(schedule.nextAssistAt));
-      setText('watcherRunCounts', assistCap > 0 ? `${downloaded} / ${assistCap}` : String(downloaded));
+      setText('watcherWakeCountdown', dailyLimit > 0 ? String(dailyLimit) : '-');
+      setText('watcherRunCounts', String(downloaded));
       setText('watcherSavedWorkdays', String(stored.watcherWorkdays || defaultOptions.watcherWorkdays));
     }
 
