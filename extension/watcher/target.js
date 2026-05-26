@@ -367,21 +367,15 @@
     }
 
     function determineSpeedMode(state, opts, calculatedSpeedMode) {
-      const startupTime = Number(state?.lastStartupTime || 0);
-      const isStartupBoost = startupTime > 0 && (Date.now() - startupTime) < 30 * 60 * 1000;
-      const downloadedAuto = Number(state?.daily?.[todayKey()]?.downloadedAuto || 0);
-      const isDailyFirstRun = downloadedAuto < 3;
-
-      if (isStartupBoost || isDailyFirstRun) {
-        return 'fast';
-      }
-
       const configMode = opts?.watcherSpeedMode || 'adaptive';
-      if (configMode !== 'adaptive') {
-        return configMode;
+      if (configMode === 'adaptive') {
+        const downloadedAuto = Number(state?.daily?.[todayKey()]?.downloadedAuto || 0);
+        if (downloadedAuto === 0) {
+          return 'fast';
+        }
+        return calculatedSpeedMode;
       }
-
-      return calculatedSpeedMode;
+      return configMode;
     }
 
     function calculateTargetState(state, opts) {

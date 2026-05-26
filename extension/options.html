@@ -765,18 +765,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>调度模式</strong>
-          <span>固定间隔适合测试；每月预计会按月目标、日目标和工作窗口推算下一次应助。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <select id="watcherSchedulerMode" aria-label="调度模式">
-            <option value="fixed">固定间隔 / 测试</option>
-            <option value="quant">每月预计</option>
-          </select>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>值守速度模式</strong>
           <span>控制自动值守的运行速率。极速与快速模式下将获得更密集的应助响应。</span>
         </div>
@@ -787,6 +775,21 @@
             <option value="normal">快速模式 (中位数 6 分钟)</option>
             <option value="slow">普通慢速 (中位数 10 分钟)</option>
           </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>月目标</strong>
+          <span>按本月时间进度估算当前应完成量，用于智能自适应模式下计算调度间隔。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <div class="metric-grid">
+            <div class="metric-field">
+              <label for="watcherMonthlyTarget">月目标</label>
+              <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
+            </div>
+          </div>
+          <div class="setting-hint">每日真实硬上限只看“每日应助上限”。会话内部固定按单次 1 条处理，避免并发下载错配。</div>
         </div>
       </div>
       </details>
@@ -816,21 +819,7 @@
           <textarea id="watcherWorkWindows" spellcheck="false"></textarea>
         </div>
       </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>月目标</strong>
-          <span>按本月时间进度估算当前应完成量，再根据落后或超前程度切换 normal / fast 两档低感知节奏。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <div class="metric-grid">
-            <div class="metric-field">
-              <label for="watcherMonthlyTarget">月目标</label>
-              <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
-            </div>
-          </div>
-          <div class="setting-hint">每日真实硬上限只看“每日应助上限”。会话内部固定按单次 1 条处理，避免并发下载错配；月目标只用于决定间隔快慢。</div>
-        </div>
-      </div>
+
       </details>
       <details class="setting-details nested-setting-details">
         <summary>高级排查</summary>
