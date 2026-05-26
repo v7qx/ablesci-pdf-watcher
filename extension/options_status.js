@@ -42,7 +42,7 @@
       setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
-      setText('advancedExpectedActual', `${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)}`);
+      setText('advancedExpectedActual', `${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.expectedDone || 0)}`);
       
       let syncText = '-';
       if (Number.isFinite(state.actualTotalAssists)) {

@@ -55,14 +55,9 @@
     function monthDone(state, opts) {
       const currentMonth = monthKey();
       if (state.firstSyncTotalAssists && state.firstSyncTotalAssists[currentMonth] !== undefined &&
-          state.firstSyncProgressRatio && state.firstSyncProgressRatio[currentMonth] !== undefined &&
-          state.actualTotalAssists !== undefined && opts) {
+          state.actualTotalAssists !== undefined) {
         const firstSyncTotal = state.firstSyncTotalAssists[currentMonth];
-        const firstSyncRatio = state.firstSyncProgressRatio[currentMonth];
-        const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
-        const assistsSinceInstall = Math.max(0, state.actualTotalAssists - firstSyncTotal);
-        const estimatedBeforeInstall = Math.round(monthlyTarget * firstSyncRatio);
-        return assistsSinceInstall + estimatedBeforeInstall;
+        return Math.max(0, state.actualTotalAssists - firstSyncTotal);
       }
       if (state.monthlyInitialAssists && state.monthlyInitialAssists[currentMonth] !== undefined && state.actualTotalAssists !== undefined) {
         return Math.max(0, state.actualTotalAssists - state.monthlyInitialAssists[currentMonth]);

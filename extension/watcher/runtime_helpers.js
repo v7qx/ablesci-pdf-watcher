@@ -197,8 +197,11 @@
       return {
         ...liveTarget,
         ...frozenTarget,
+        expectedDone: liveTarget.expectedDone ?? frozenTarget.expectedDone,
         actualDone: liveTarget.actualDone ?? liveTarget.monthDone,
         monthDone: liveTarget.monthDone,
+        targetError: liveTarget.targetError ?? liveTarget.lag ?? frozenTarget.targetError ?? frozenTarget.lag ?? 0,
+        lag: liveTarget.lag ?? liveTarget.targetError ?? frozenTarget.lag ?? frozenTarget.targetError ?? 0,
         riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed,
         riskLimit: liveTarget.riskLimit ?? frozenTarget.riskLimit,
         riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining,

@@ -99,21 +99,7 @@
 
           state.monthlyInitialAssists = state.monthlyInitialAssists || {};
           if (state.monthlyInitialAssists[currentMonth] === undefined) {
-            let expectedDone = 0;
-            if (opts?.watcherUseCalendarProgress) {
-              const year = new Date(now).getFullYear();
-              const month = new Date(now).getMonth();
-              const startOfMonth = new Date(year, month, 1).getTime();
-              const startOfNextMonth = new Date(year, month + 1, 1).getTime();
-              const totalMonthMs = startOfNextMonth - startOfMonth;
-              const currentMs = now - startOfMonth;
-              const ratio = totalMonthMs > 0 ? Math.max(0, Math.min(1, currentMs / totalMonthMs)) : 0;
-              const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
-              expectedDone = Math.round(monthlyTarget * ratio);
-            } else {
-              expectedDone = monthDone(state, opts);
-            }
-            state.monthlyInitialAssists[currentMonth] = totalCount - expectedDone;
+            state.monthlyInitialAssists[currentMonth] = totalCount;
           }
           state.actualTotalAssists = totalCount;
           state.lastAssistCountSyncedAt = new Date().toISOString();
