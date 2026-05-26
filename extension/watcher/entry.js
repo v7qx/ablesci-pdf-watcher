@@ -19,6 +19,7 @@
       refreshAutoWatcherAlarm,
       flushWatcherLogs,
       flushWatcherTrace,
+      appendWatcherTrace,
       applyStorageWatcherTraceLevel,
       runAutoWatcherOnce,
       getWatcherState,

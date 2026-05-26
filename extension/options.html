@@ -561,12 +561,6 @@
       <summary>上传规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>处理方式</strong>
-          <span>默认自动打开详情、下载并校验；上传前仍需人工确认。</span>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>自动上传范围</strong>
           <span>超出范围时只下载和校验。最大值填 0 表示不限制。</span>
         </div>
@@ -954,30 +948,6 @@
           <button id="reloadJournalAccessConfig" class="secondary" type="button">重载名单</button>
           <span id="journalAccessConfigStatus" class="pill">未读取</span>
           <div class="setting-hint">点击“打开配置目录”会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub；旧版 `config.local` 目录仅保留兼容回退读取。</div>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>处理方式</strong>
-          <span>默认自动打开详情、下载并校验；上传前仍需人工确认。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="自动打开详情页">
-            <input id="watcherOpenDetail" type="checkbox">
-            <span></span>
-          </label>
-          <label class="toggle" title="自动下载校验">
-            <input id="watcherAutoDownload" type="checkbox">
-            <span></span>
-          </label>
-          <label class="toggle" title="自动上传">
-            <input id="watcherAutoUpload" type="checkbox">
-            <span></span>
-          </label>
-          <label class="toggle" title="上传前确认">
-            <input id="watcherUploadConfirmRequired" type="checkbox">
-            <span></span>
-          </label>
         </div>
       </div>
       <div class="setting-row">

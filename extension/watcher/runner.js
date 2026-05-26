@@ -293,7 +293,7 @@
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: true, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
-            if (context.opts?.watcherAutoUpload && !context.opts?.watcherUploadConfirmRequired && context.payload?.downloadOnly !== true) {
+            if (context.payload?.downloadOnly !== true) {
               incrementDaily('uploaded').catch(() => {});
             }
             appendWatcherTrace('queue_message_done', {
@@ -363,9 +363,9 @@
         trigger: trigger || session?.trigger || '',
         assistId: key,
         source,
-        autoDownload: opts.watcherAutoDownload,
-        autoUpload: opts.watcherAutoUpload,
-        uploadConfirmRequired: opts.watcherUploadConfirmRequired
+        autoDownload: true,
+        autoUpload: true,
+        uploadConfirmRequired: false
       });
 
       if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
@@ -376,23 +376,6 @@
         await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
         await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: `本地记录连续失败达到 ${highRiskFailThreshold} 次，暂按无权限跳过` });
         return false;
-      }
-
-      if (!opts.watcherAutoDownload) {
-        await appendWatcherTrace('candidate_manual_detail_kept', { reason: 'auto_download_disabled', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-        await notifyWatcherNeedsAttention('低频值守发现候选，已保留求助详情页等待人工处理。', candidate.detailUrl);
-        await incrementDaily('notified');
-        await updateProcessed(key, 'skipped', 'manual_detail_opened');
-        await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'manual_detail_opened' });
-        return true;
-      }
-
-      if (!opts.watcherAutoUpload || opts.watcherUploadConfirmRequired) {
-        payload.downloadOnly = true;
-        payload.riskReasons = [
-          ...(Array.isArray(payload.riskReasons) ? payload.riskReasons : []),
-          '低频值守默认仅下载并校验 PDF，上传需要人工确认。'
-        ];
       }
 
       if (deps.hasActiveTask()) {
@@ -434,9 +417,9 @@
         sessionId: session?.id || '',
         trigger: trigger || session?.trigger || '',
         status: payload.downloadOnly ? 'download_only' : 'queued_upload',
-        reason: payload.downloadOnly ? 'upload_confirmation_required' : 'auto_upload_enabled'
+        reason: payload.downloadOnly ? 'download_only' : 'auto_upload_enabled'
       });
-      await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载校验一个候选，并保留求助详情页等待人工上传确认。' : '低频值守已排队处理一个候选。');
+      await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载并校验一个候选。' : '低频值守已排队处理一个候选。');
       await incrementDaily('notified');
       if (sessionPort) {
         const result = await sessionPort.result;

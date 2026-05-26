@@ -156,6 +156,10 @@ async function save(saveOptions = {}) {
   opts.watcherSchedulerMode = normalizeSchedulerMode(opts);
   Object.assign(opts, normalizeWatcherIntervals(opts));
   opts.watcherMaxCandidatesPerRun = 1;
+  opts.watcherOpenDetail = true;
+  opts.watcherAutoDownload = true;
+  opts.watcherAutoUpload = true;
+  opts.watcherUploadConfirmRequired = false;
   opts.watcherMinNonSdSeekingCount = clampNumber(opts.watcherMinNonSdSeekingCount, DEFAULT_OPTIONS.watcherMinNonSdSeekingCount, 0, 100000);
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
