@@ -76,6 +76,7 @@
   }
 
   function publisherArticleUrlFromPdfUrl(url) {
+    if (isDoiUrl(url)) return url;
     return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || '';
   }
 

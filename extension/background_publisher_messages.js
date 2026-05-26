@@ -24,6 +24,14 @@
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
 
+      if (changeInfo.status === 'complete') {
+        const currentHost = hostnameOf(url);
+        if (isDoiHost(currentHost)) {
+          pending.finishError?.(new Error('DOI未找到或解析失败（DOI Not Found）'));
+          return;
+        }
+      }
+
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
       if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url))) {
         pending.articleUrl = url;
