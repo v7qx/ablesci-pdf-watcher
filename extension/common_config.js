@@ -1,6 +1,8 @@
 'use strict';
 
 (function () {
+  const WATCHER_DAILY_LIMIT_MAX = 500;
+
   const DEFAULT_OPTIONS = {
     nativeHostName: 'com.ablesci.pdf_watcher',
     downloadSubdir: '',
@@ -83,8 +85,6 @@
     watcherAllowZeroSession: false,
     watcherUseCalendarProgress: true
   };
-
-  const WATCHER_DAILY_LIMIT_MAX = 500;
 
   function sanitizePathPart(s) {
     return String(s || '')
