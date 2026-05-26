@@ -43,11 +43,19 @@
 
       chromeApi.runtime.onStartup.addListener(() => {
         recoverStaleWatcherState('runtime_startup').catch(() => {});
+        getWatcherState().then(state => {
+          state.lastStartupTime = Date.now();
+          return saveWatcherState(state);
+        }).catch(() => {});
         refreshAutoWatcherAlarm(true, 'runtime_startup').catch(() => {});
       });
 
       chromeApi.runtime.onInstalled.addListener(() => {
         recoverStaleWatcherState('runtime_installed').catch(() => {});
+        getWatcherState().then(state => {
+          state.lastStartupTime = Date.now();
+          return saveWatcherState(state);
+        }).catch(() => {});
         refreshAutoWatcherAlarm(true, 'runtime_installed').catch(() => {});
       });
 

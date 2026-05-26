@@ -20,6 +20,22 @@
     autoRemoveHtmlDownloads: false,
     smartRecommendPush: true,
     openAssistLinksInCurrentTab: false,
+    nativeHostName: 'com.ablesci.pdf_watcher',
+    downloadSubdir: '',
+    downloadMode: 'auto',
+    scienceDirectTabMode: 'silent_then_visible',
+    moveToDir: '',
+    deleteAfterUpload: false,
+    keepDownloadHistory: true,
+    browserDownloadConfigured: false,
+    minAutoUploadMB: 1,
+    minAutoUploadUnit: 'MB',
+    maxAutoUploadMB: 99,
+    maxAutoUploadUnit: 'MB',
+    debugDownloadOnly: false,
+    autoRemoveHtmlDownloads: false,
+    smartRecommendPush: true,
+    openAssistLinksInCurrentTab: false,
     buttonLabel: '上传PDF',
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
@@ -27,8 +43,9 @@
     watcherEnabled: false,
     watcherSchedulerMode: 'quant',
     watcherIntervalMinutes: 10,
-    watcherMinIntervalMinutes: 4,
+    watcherMinIntervalMinutes: 1,
     watcherMaxIntervalMinutes: 30,
+    watcherSpeedMode: 'adaptive',
     watcherMaxCandidatesPerRun: 1,
     watcherMinNonSdSeekingCount: 200,
     watcherListUrls: [
@@ -116,7 +133,7 @@
   }
 
   function normalizeWatcherIntervals(opts) {
-    const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
+    const min = clampNumber(opts.watcherMinIntervalMinutes, 1, 1, 1440);
     const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
     return {
       watcherIntervalMinutes: clampNumber(opts.watcherIntervalMinutes, 10, min, max),
@@ -172,6 +189,8 @@
       ? uiNormalizers.normalizeButtonPosition
       : value => (value === 'start' ? 'start' : 'end');
 
+    const speedMode = ['adaptive', 'slow', 'normal', 'fast'].includes(raw.watcherSpeedMode) ? raw.watcherSpeedMode : 'adaptive';
+
     return {
       ...opts,
       nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
@@ -186,6 +205,7 @@
       buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
       buttonPosition: normalizeButtonPosition(opts.buttonPosition),
       watcherSchedulerMode: schedulerMode,
+      watcherSpeedMode: speedMode,
       ...intervals,
       watcherMaxCandidatesPerRun: 1,
       watcherMinNonSdSeekingCount: clampNumber(opts.watcherMinNonSdSeekingCount, DEFAULT_OPTIONS.watcherMinNonSdSeekingCount, 0, 100000),

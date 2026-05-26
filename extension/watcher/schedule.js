@@ -52,7 +52,7 @@
     }
 
     function sampleAssistDelayMinutes(opts, speedMode) {
-      const modeName = ['normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
+      const modeName = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
       const mode = sessionModes[modeName] || sessionModes.normal;
       const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
       const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);

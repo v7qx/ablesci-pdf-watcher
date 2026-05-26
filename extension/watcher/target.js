@@ -366,6 +366,24 @@
       return 'normal';
     }
 
+    function determineSpeedMode(state, opts, calculatedSpeedMode) {
+      const startupTime = Number(state?.lastStartupTime || 0);
+      const isStartupBoost = startupTime > 0 && (Date.now() - startupTime) < 30 * 60 * 1000;
+      const downloadedAuto = Number(state?.daily?.[todayKey()]?.downloadedAuto || 0);
+      const isDailyFirstRun = downloadedAuto < 3;
+
+      if (isStartupBoost || isDailyFirstRun) {
+        return 'fast';
+      }
+
+      const configMode = opts?.watcherSpeedMode || 'adaptive';
+      if (configMode !== 'adaptive') {
+        return configMode;
+      }
+
+      return calculatedSpeedMode;
+    }
+
     function calculateTargetState(state, opts) {
       const done = monthDone(state, opts);
       const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
@@ -379,12 +397,14 @@
         : Math.round(monthlyTarget * Math.min(1, effectiveProgress));
       const lag = expectedDone - done;
       if (monthlyTarget <= 0) {
+        const rawSpeedMode = 'normal';
+        const speedMode = determineSpeedMode(state, opts, rawSpeedMode);
         return {
           monthKey: monthKey(),
           monthDone: done,
           expectedDone: 0,
           lag: 0,
-          speedMode: 'normal',
+          speedMode,
           workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
           activeTimeProgressRatio: availability.activeTimeProgressRatio,
           availabilityFactor: availability.availabilityFactor,
@@ -397,7 +417,8 @@
           rateMultiplier: 1
         };
       }
-      const speedMode = speedModeFromTarget({ error: lag, monthlyTarget: effectiveTarget || monthlyTarget });
+      const rawSpeedMode = speedModeFromTarget({ error: lag, monthlyTarget: effectiveTarget || monthlyTarget });
+      const speedMode = determineSpeedMode(state, opts, rawSpeedMode);
       return {
         monthKey: monthKey(),
         monthDone: done,

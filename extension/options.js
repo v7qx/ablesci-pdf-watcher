@@ -105,12 +105,6 @@ function validateOptions(opts) {
   const maxBytes = Math.round(maxValue * unitFactor(opts.maxAutoUploadUnit));
   if (maxBytes > 0 && minBytes > maxBytes) throw new Error('最小体积不能大于最大体积。');
 
-  if (opts.watcherIntervalMinutes < 1 || opts.watcherIntervalMinutes > 1440) {
-    throw new Error('低频值守应助间隔必须在 1–1440 分钟之间。');
-  }
-  if (opts.watcherMinIntervalMinutes < 1 || opts.watcherMaxIntervalMinutes > 1440 || opts.watcherMinIntervalMinutes > opts.watcherMaxIntervalMinutes) {
-    throw new Error('随机应助间隔范围必须在 1–1440 分钟之间，且最小值不能大于最大值。');
-  }
   if (opts.watcherDailyLimit < 0) throw new Error('每日应助上限不能小于 0。');
   if (opts.watcherMinNonSdSeekingCount < 0) throw new Error('非 SD 最低求助量不能小于 0。');
   if (opts.watcherNoDownloadTimeoutMinutes <= 0 || opts.watcherDownloadTimeoutMinutes <= 0 || opts.watcherTaskTimeoutMinutes <= 0) {

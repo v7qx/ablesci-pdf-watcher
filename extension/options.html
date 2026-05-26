@@ -777,24 +777,16 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>应助间隔</strong>
-          <span>固定间隔模式按基准/最小/最大随机应助；每月预计模式用最小值做软防高频。</span>
+          <strong>值守速度模式</strong>
+          <span>控制自动值守的运行速率。极速与快速模式下将获得更密集的应助响应。</span>
         </div>
-        <div class="setting-control setting-control-wide">
-          <div class="metric-grid">
-            <div class="metric-field">
-              <label for="watcherIntervalMinutes">基准</label>
-              <input id="watcherIntervalMinutes" type="number" min="1" max="1440" step="1" value="10" aria-label="应助间隔基准分钟">
-            </div>
-            <div class="metric-field">
-              <label for="watcherMinIntervalMinutes">最小</label>
-              <input id="watcherMinIntervalMinutes" type="number" min="1" max="1440" step="1" value="4" aria-label="最小应助间隔分钟">
-            </div>
-            <div class="metric-field">
-              <label for="watcherMaxIntervalMinutes">最大</label>
-              <input id="watcherMaxIntervalMinutes" type="number" min="1" max="1440" step="1" value="30" aria-label="最大应助间隔分钟">
-            </div>
-          </div>
+        <div class="setting-control">
+          <select id="watcherSpeedMode" aria-label="值守速度模式">
+            <option value="adaptive">智能自适应 (中位数 2~6 分钟)</option>
+            <option value="fast">极速模式 (中位数 2 分钟)</option>
+            <option value="normal">快速模式 (中位数 6 分钟)</option>
+            <option value="slow">普通慢速 (中位数 10 分钟)</option>
+          </select>
         </div>
       </div>
       </details>
