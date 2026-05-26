@@ -273,6 +273,7 @@
           }
           if (msg.type === 'done' && msg.blocked) {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
+            const isDoiFailure = msg.skipReason === 'doi_not_found' || msg.skipReason === 'doi_resolution_failed';
             await Promise.allSettled([
               appendWatcherTrace('queue_message_blocked', {
                 reason: msg.message || 'blocked',
@@ -294,7 +295,7 @@
                 reason: msg.message || 'blocked'
               }).then(writeDailyReports)
             ]);
-            settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: true, paused: false });
+            settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             await Promise.allSettled([
@@ -431,7 +432,7 @@
           await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         }
         if (!result.ok) {
-          return { handled: true, stopRun: true, reason: result.reason || 'upload_failed', paused: result.paused === true };
+          return { handled: true, stopRun: result.stopRun !== false, reason: result.reason || 'upload_failed', paused: result.paused === true };
         }
         return { handled: true, stopRun: false, reason: result.reason || 'done' };
       }
