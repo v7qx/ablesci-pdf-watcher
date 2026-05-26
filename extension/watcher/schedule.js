@@ -388,7 +388,7 @@
         if (!state.nextAssistRunAt) {
           state.nextAssistRunAt = attempt.nextAssistBefore;
           state.nextAssistReason = state.nextAssistReason || 'preserved_after_active_task';
-          state.nextAssistStrategy = state.nextAssistStrategy || 'quant_target_market';
+          state.nextAssistStrategy = state.nextAssistStrategy || 'calendar_target_lognormal';
         }
         const delay = await scheduleWakeForExistingAssist(opts, state, 'retry_after_active_task', 1);
         if (delay !== null) return delay;
@@ -400,7 +400,7 @@
         if (Number.isFinite(beforeMs) && beforeMs > 0 && (!Number.isFinite(currentMs) || currentMs <= 0 || currentMs > beforeMs)) {
           state.nextAssistRunAt = attempt.nextAssistBefore;
           state.nextAssistReason = state.nextAssistReason || 'preserved_after_observe';
-          state.nextAssistStrategy = state.nextAssistStrategy || 'quant_target_market';
+          state.nextAssistStrategy = state.nextAssistStrategy || 'calendar_target_lognormal';
         }
         const delay = await scheduleWakeForExistingAssist(opts, state, 'after_observe_assist_not_due');
         if (delay !== null) return delay;
