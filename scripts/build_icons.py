@@ -20,7 +20,7 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "extension" / "icons" / "source.svg"
 OUT_DIR = ROOT / "extension" / "icons"
-SIZES = (16, 32, 48, 128)
+SIZES = (16, 32, 48, 64, 128, 256)
 SUPERSAMPLE = 4
 
 
@@ -204,7 +204,7 @@ def png_chunk(kind: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
 
 
-def write_png(path: Path, size: int, pixels: list[tuple[int, int, int, int]]) -> None:
+def get_png_bytes(size: int, pixels: list[tuple[int, int, int, int]]) -> bytes:
     rows = []
     for y in range(size):
         row = bytearray([0])
@@ -217,7 +217,32 @@ def write_png(path: Path, size: int, pixels: list[tuple[int, int, int, int]]) ->
     png += png_chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
     png += png_chunk(b"IDAT", zlib.compress(data, 9))
     png += png_chunk(b"IEND", b"")
+    return png
+
+
+def write_png(path: Path, size: int, pixels: list[tuple[int, int, int, int]]) -> None:
+    png = get_png_bytes(size, pixels)
     path.write_bytes(png)
+
+
+def write_ico(path: Path, png_data_list: list[tuple[int, bytes]]) -> None:
+    header = struct.pack("<HHH", 0, 1, len(png_data_list))
+    entries = []
+    offset = 6 + 16 * len(png_data_list)
+    for size, data in png_data_list:
+        w = size if size < 256 else 0
+        h = size if size < 256 else 0
+        bytes_in_res = len(data)
+        entry = struct.pack("<BBBBHHII", w, h, 0, 0, 1, 32, bytes_in_res, offset)
+        entries.append(entry)
+        offset += bytes_in_res
+
+    with open(path, "wb") as f:
+        f.write(header)
+        for entry in entries:
+            f.write(entry)
+        for _, data in png_data_list:
+            f.write(data)
 
 
 def load_elements() -> list[dict[str, object]]:
@@ -265,10 +290,18 @@ def load_elements() -> list[dict[str, object]]:
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     elements = load_elements()
+    png_data_list = []
     for size in SIZES:
         out = OUT_DIR / f"icon{size}.png"
-        write_png(out, size, render(size, elements))
+        pixels = render(size, elements)
+        png_bytes = get_png_bytes(size, pixels)
+        out.write_bytes(png_bytes)
         print(f"wrote {out.relative_to(ROOT)}")
+        png_data_list.append((size, png_bytes))
+
+    ico_path = OUT_DIR / "icon.ico"
+    write_ico(ico_path, png_data_list)
+    print(f"wrote {ico_path.relative_to(ROOT)}")
     return 0
 
 
