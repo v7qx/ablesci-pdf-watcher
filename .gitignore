@@ -39,3 +39,4 @@ native-helper/telegram.json
 # optional local build artifacts
 native-helper/bin/
 native-helper/*.exe
+native-helper/*.syso
