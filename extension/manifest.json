@@ -21,7 +21,6 @@
     "tabs"
   ],
   "host_permissions": [
-  "host_permissions": [
     "https://www.ablesci.com/*",
     "https://ablesci.com/*",
     "https://*.oss-cn-shanghai.aliyuncs.com/*",
