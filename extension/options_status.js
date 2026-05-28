@@ -17,29 +17,9 @@
     let advancedStatusCache = null;
     let advancedCountdownTimer = null;
 
-    async function updateCookieStatus(url, name, elementId) {
+    function updatePillFromCookie(cookie, elementId) {
       const cookieEl = el(elementId);
       if (!cookieEl) return;
-
-      let cookie = null;
-      try {
-        if (chromeApi.cookies) {
-          cookie = await chromeApi.cookies.get({ url, name });
-          if (!cookie) {
-            const parsedUrl = new URL(url);
-            const hostParts = parsedUrl.hostname.split('.');
-            if (hostParts.length > 2) {
-              const domain = hostParts.slice(-2).join('.');
-              cookie = await chromeApi.cookies.get({
-                url: `${parsedUrl.protocol}//${domain}`,
-                name
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[Ablesci PDF Watcher] Failed to get ${name} cookie for ${url}:`, err);
-      }
 
       if (cookie) {
         const expiryMs = cookie.expirationDate ? cookie.expirationDate * 1000 : 0;
@@ -50,7 +30,7 @@
             const expiryDate = new Date(expiryMs);
             const expiryTimeStr = expiryDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
             cookieEl.textContent = `剩 ${remainingMinutes} 分钟 (${expiryTimeStr})`;
-            cookieEl.title = `失效时间: ${expiryDate.toLocaleString('zh-CN')}`;
+            cookieEl.title = `域: ${cookie.domain}\n失效时间: ${expiryDate.toLocaleString('zh-CN')}`;
             cookieEl.className = 'pill ok';
           } else {
             cookieEl.textContent = '已失效 (需验证)';
@@ -67,9 +47,40 @@
     }
 
     async function updateCfCookieCountdown() {
-      await updateCookieStatus('https://www.ablesci.com', 'cf_clearance', 'watcherCfCookieStatus');
-      await updateCookieStatus('https://linkinghub.elsevier.com', 'cf_clearance', 'watcherElsevierCookieStatus');
-      await updateCookieStatus('https://www.sciencedirect.com', 'cf_clearance', 'watcherSdCookieStatus');
+      if (!chromeApi.cookies) {
+        const elsevierEl = el('watcherElsevierCookieStatus');
+        if (elsevierEl) {
+          elsevierEl.textContent = '无权限';
+          elsevierEl.className = 'pill error';
+        }
+        const sdEl = el('watcherSdCookieStatus');
+        if (sdEl) {
+          sdEl.textContent = '无权限';
+          sdEl.className = 'pill error';
+        }
+        return;
+      }
+
+      try {
+        const cookies = await chromeApi.cookies.getAll({ name: 'cf_clearance' });
+
+        let elsevierCookie = null;
+        let sdCookie = null;
+
+        for (const c of cookies) {
+          const dom = String(c.domain || '').toLowerCase();
+          if (dom.includes('elsevier.com')) {
+            elsevierCookie = c;
+          } else if (dom.includes('sciencedirect.com')) {
+            sdCookie = c;
+          }
+        }
+
+        updatePillFromCookie(elsevierCookie, 'watcherElsevierCookieStatus');
+        updatePillFromCookie(sdCookie, 'watcherSdCookieStatus');
+      } catch (err) {
+        console.warn('[Ablesci PDF Watcher] Failed to query cf_clearance cookies:', err);
+      }
     }
 
     async function renderAdvancedWatcherStatus() {
