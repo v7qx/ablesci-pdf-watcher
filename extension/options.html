@@ -810,6 +810,7 @@
             <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
             <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
             <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
+            <div class="metric-field" title="显示当前 Ablesci 浏览器安全凭证（Cloudflare Cookie）的有效剩余时间。过期后需要再次进行人机验证。"><label>安全凭证寿命</label><span id="watcherCfCookieStatus" class="pill">-</span></div>
           </div>
         </div>
       </div>
@@ -928,19 +929,21 @@
         <summary>报告与通知</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>验证页处理</strong>
-          <span>遇到验证页时跳过本轮；连续达到阈值后自动暂停值守，避免反复触发。</span>
+          <strong>连续遇阻自动暂停</strong>
+          <span>启用后，当连续遇到人机验证页面达到设定次数时，自动暂停值守，以防频繁撞墙被封。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle" title="单次：遇到验证页立即跳过本轮">
+          <label class="toggle" title="启用连续遇阻自动暂停">
             <input id="watcherStopOnCfChallenge" type="checkbox">
             <span></span>
           </label>
-          <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒">
+          <span style="font-size: 13px; color: var(--muted); margin-left: 5px;">连续遇阻</span>
+          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px; text-align: center;" aria-label="连续遇阻暂停次数">
+          <span style="font-size: 13px; color: var(--muted);">次后暂停</span>
+          <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒" style="margin-left: 10px;">
             <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>
             <span class="toggle-text">CF 提醒</span>
           </label>
-          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="3" aria-label="连续 N 次后暂停值守">
         </div>
       </div>
       <div class="setting-row">

@@ -10,11 +10,59 @@
       countdownText,
       nextDisplaySchedule,
       todayKeyBeijing,
-      setText
+      setText,
+      el
     } = deps;
 
     let advancedStatusCache = null;
     let advancedCountdownTimer = null;
+
+    async function updateCfCookieCountdown() {
+      const cookieEl = el('watcherCfCookieStatus');
+      if (!cookieEl) return;
+
+      let cfClearanceCookie = null;
+      try {
+        if (chromeApi.cookies) {
+          cfClearanceCookie = await chromeApi.cookies.get({
+            url: 'https://www.ablesci.com',
+            name: 'cf_clearance'
+          });
+          if (!cfClearanceCookie) {
+            cfClearanceCookie = await chromeApi.cookies.get({
+              url: 'https://ablesci.com',
+              name: 'cf_clearance'
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[Ablesci PDF Watcher] Failed to get cf_clearance cookie:', err);
+      }
+
+      if (cfClearanceCookie) {
+        const expiryMs = cfClearanceCookie.expirationDate ? cfClearanceCookie.expirationDate * 1000 : 0;
+        if (expiryMs > 0) {
+          const remainingMs = expiryMs - Date.now();
+          if (remainingMs > 0) {
+            const remainingMinutes = Math.floor(remainingMs / 60000);
+            const expiryDate = new Date(expiryMs);
+            const expiryTimeStr = expiryDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            cookieEl.textContent = `剩 ${remainingMinutes} 分钟 (${expiryTimeStr})`;
+            cookieEl.title = `失效时间: ${expiryDate.toLocaleString('zh-CN')}`;
+            cookieEl.className = 'pill ok';
+          } else {
+            cookieEl.textContent = '已失效 (需验证)';
+            cookieEl.className = 'pill error';
+          }
+        } else {
+          cookieEl.textContent = '会话有效';
+          cookieEl.className = 'pill ok';
+        }
+      } else {
+        cookieEl.textContent = '未检测到 (需验证)';
+        cookieEl.className = 'pill error';
+      }
+    }
 
     async function renderAdvancedWatcherStatus() {
       const stored = await chromeApi.storage.local.get([
@@ -54,6 +102,7 @@
         downloadedManual = downloaded;
       }
       setText('watcherRunCounts', `自动: ${downloadedAuto} / 手动: ${downloadedManual}`);
+      await updateCfCookieCountdown();
     }
 
     function renderAdvancedWatcherCountdowns() {
@@ -61,6 +110,7 @@
       const state = advancedStatusCache.state || {};
       const schedule = advancedStatusCache.schedule || nextDisplaySchedule(state);
       setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
+      updateCfCookieCountdown().catch(() => {});
     }
 
     function startAdvancedCountdownTimer() {

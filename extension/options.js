@@ -229,7 +229,8 @@ const {
   countdownText,
   nextDisplaySchedule,
   todayKeyBeijing,
-  setText
+  setText,
+  el
 });
 const {
   showText,
