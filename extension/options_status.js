@@ -17,30 +17,32 @@
     let advancedStatusCache = null;
     let advancedCountdownTimer = null;
 
-    async function updateCfCookieCountdown() {
-      const cookieEl = el('watcherCfCookieStatus');
+    async function updateCookieStatus(url, name, elementId) {
+      const cookieEl = el(elementId);
       if (!cookieEl) return;
 
-      let cfClearanceCookie = null;
+      let cookie = null;
       try {
         if (chromeApi.cookies) {
-          cfClearanceCookie = await chromeApi.cookies.get({
-            url: 'https://www.ablesci.com',
-            name: 'cf_clearance'
-          });
-          if (!cfClearanceCookie) {
-            cfClearanceCookie = await chromeApi.cookies.get({
-              url: 'https://ablesci.com',
-              name: 'cf_clearance'
-            });
+          cookie = await chromeApi.cookies.get({ url, name });
+          if (!cookie) {
+            const parsedUrl = new URL(url);
+            const hostParts = parsedUrl.hostname.split('.');
+            if (hostParts.length > 2) {
+              const domain = hostParts.slice(-2).join('.');
+              cookie = await chromeApi.cookies.get({
+                url: `${parsedUrl.protocol}//${domain}`,
+                name
+              });
+            }
           }
         }
       } catch (err) {
-        console.warn('[Ablesci PDF Watcher] Failed to get cf_clearance cookie:', err);
+        console.warn(`[Ablesci PDF Watcher] Failed to get ${name} cookie for ${url}:`, err);
       }
 
-      if (cfClearanceCookie) {
-        const expiryMs = cfClearanceCookie.expirationDate ? cfClearanceCookie.expirationDate * 1000 : 0;
+      if (cookie) {
+        const expiryMs = cookie.expirationDate ? cookie.expirationDate * 1000 : 0;
         if (expiryMs > 0) {
           const remainingMs = expiryMs - Date.now();
           if (remainingMs > 0) {
@@ -62,6 +64,12 @@
         cookieEl.textContent = '未检测到 (需验证)';
         cookieEl.className = 'pill error';
       }
+    }
+
+    async function updateCfCookieCountdown() {
+      await updateCookieStatus('https://www.ablesci.com', 'cf_clearance', 'watcherCfCookieStatus');
+      await updateCookieStatus('https://linkinghub.elsevier.com', 'cf_clearance', 'watcherElsevierCookieStatus');
+      await updateCookieStatus('https://www.sciencedirect.com', 'cf_clearance', 'watcherSdCookieStatus');
     }
 
     async function renderAdvancedWatcherStatus() {

@@ -21,6 +21,7 @@
     "tabs"
   ],
   "host_permissions": [
+  "host_permissions": [
     "https://www.ablesci.com/*",
     "https://ablesci.com/*",
     "https://*.oss-cn-shanghai.aliyuncs.com/*",
@@ -29,6 +30,8 @@
     "https://dx.doi.org/*",
     "https://www.sciencedirect.com/*",
     "https://sciencedirect.com/*",
+    "https://*.elsevier.com/*",
+    "https://elsevier.com/*",
     "https://www.nature.com/*",
     "https://nature.com/*",
     "https://pubs.rsc.org/*",
