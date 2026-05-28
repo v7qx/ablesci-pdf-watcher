@@ -19,7 +19,7 @@ if ($Output -eq "") {
 $Output = [System.IO.Path]::GetFullPath($Output)
 
 if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "未找到 Go，无法从源码编译 Helper。请先准备 Go 环境，或使用已预编译的 native-helper\\bin\\windows-amd64\\ablesci_pdf_helper.exe。"
+  throw "Go compiler not found. Cannot build helper from source. Please install Go or use the pre-compiled binary in native-helper/bin/windows-amd64/ablesci_pdf_helper.exe."
 }
 
 $OutDir = Split-Path -Parent $Output
@@ -55,11 +55,25 @@ try {
     $IcoSrc = Join-Path $RepoRoot "extension\icons\icon.ico"
     if (Test-Path $VersionInfoJson) {
       Write-Host "Generating Windows resource metadata ($VersionStr)..."
-      go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.4.0 `
-        -ver-major=$Major -ver-minor=$Minor -ver-patch=$Patch -ver-build=$Build `
-        -product-ver-major=$Major -product-ver-minor=$Minor -product-ver-patch=$Patch -product-ver-build=$Build `
-        -file-version="$VersionStr" -product-version="$VersionStr" `
-        -icon="$IcoSrc" -o="resource.syso" "$VersionInfoJson"
+      $GoRunArgs = @()
+      if ($TargetArch -eq "amd64") {
+        $GoRunArgs += "-64"
+      }
+      $GoRunArgs += "-ver-major=$Major"
+      $GoRunArgs += "-ver-minor=$Minor"
+      $GoRunArgs += "-ver-patch=$Patch"
+      $GoRunArgs += "-ver-build=$Build"
+      $GoRunArgs += "-product-ver-major=$Major"
+      $GoRunArgs += "-product-ver-minor=$Minor"
+      $GoRunArgs += "-product-ver-patch=$Patch"
+      $GoRunArgs += "-product-ver-build=$Build"
+      $GoRunArgs += "-file-version=$VersionStr"
+      $GoRunArgs += "-product-version=$VersionStr"
+      $GoRunArgs += "-icon=$IcoSrc"
+      $GoRunArgs += "-o=resource.syso"
+      $GoRunArgs += "$VersionInfoJson"
+
+      go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.4.0 @GoRunArgs
     }
   }
 
