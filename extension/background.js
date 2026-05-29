@@ -90,6 +90,54 @@ let resolveJournalAccessRulesForRuntime = null;
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
 const pendingPublisherTabs = new Map();
 
+function todayKeyBeijingForMetrics() {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date()).reduce((acc, item) => {
+    acc[item.type] = item.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+async function recordManualWatcherDaily(field) {
+  const key = todayKeyBeijingForMetrics();
+  const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
+  const state = stored[AUTO_WATCHER_STATE_KEY] && typeof stored[AUTO_WATCHER_STATE_KEY] === 'object'
+    ? stored[AUTO_WATCHER_STATE_KEY]
+    : { processed: {}, daily: {} };
+  state.daily = state.daily || {};
+  const daily = state.daily[key] || {};
+  state.daily[key] = daily;
+  daily.checked = Number(daily.checked || 0);
+  daily.downloaded = Number(daily.downloaded || 0);
+  daily.downloadedAuto = Number(daily.downloadedAuto || 0);
+  daily.downloadedManual = Number(daily.downloadedManual || 0);
+  daily.uploaded = Number(daily.uploaded || 0);
+  daily.skipped = Number(daily.skipped || 0);
+  daily.failed = Number(daily.failed || 0);
+  daily.notified = Number(daily.notified || 0);
+  daily[field] = Number(daily[field] || 0) + 1;
+  if (field === 'downloaded') {
+    daily.downloadedManual = Number(daily.downloadedManual || 0) + 1;
+    state.monthDone = Number(state.monthDone || 0) + 1;
+    state.actualDone = Number(state.actualDone || 0) + 1;
+    const previousTargetError = Number(state.targetError || state.lag || 0);
+    const previousLag = Number(state.lag || state.targetError || 0);
+    state.targetError = previousTargetError - 1;
+    state.lag = previousLag - 1;
+    if (Number.isFinite(Number(state.actualTotalAssists))) {
+      state.actualTotalAssists = Number(state.actualTotalAssists) + 1;
+    }
+  }
+  state.lastManualAssistMetricAt = new Date().toISOString();
+  state._version = Number(state._version || 0) + 1;
+  await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+}
+
 async function getOptions() {
   const opts = await loadOptionsFromStorage();
   if (typeof resolveJournalAccessRulesForRuntime === 'function') {
@@ -304,7 +352,8 @@ const {
   createBackgroundUploadQueueApi,
   createBackgroundUploadClientApi,
   handlePublisherTabUpdated,
-  handlePublisherRuntimeMessage
+  handlePublisherRuntimeMessage,
+  recordManualWatcherDaily
 });
 attachRuntimeListeners();
 

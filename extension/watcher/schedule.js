@@ -69,6 +69,12 @@
       return logNormalMinutes(median, min, max);
     }
 
+    function effectiveAssistSpeedMode(opts, state = {}) {
+      const configured = String(opts?.watcherSpeedMode || 'adaptive').trim();
+      if (['slow', 'normal', 'fast'].includes(configured)) return configured;
+      return ['slow', 'normal', 'fast'].includes(state?.speedMode) ? state.speedMode : 'normal';
+    }
+
     function applySoftAssistGuard(modelDelay, guardMinutes) {
       const model = Math.max(0, Number(modelDelay) || 0);
       const guard = Math.max(0, Number(guardMinutes) || 0);
@@ -148,7 +154,7 @@
           }
         }
       }
-      const speedMode = state?.speedMode || 'normal';
+      const speedMode = effectiveAssistSpeedMode(opts, state);
       const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode);
       const targetError = Number(state.targetError ?? state.lag ?? 0);
       const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
@@ -189,6 +195,7 @@
         };
       }
       const plan = targetDrivenAssistPlan(opts, state, reason);
+      if (plan.speedMode) state.speedMode = plan.speedMode;
       state.nextAssistRunAt = new Date(now + plan.minutes * 60 * 1000).toISOString();
       state.nextAssistReason = plan.reason;
       state.nextAssistStrategy = plan.strategy;

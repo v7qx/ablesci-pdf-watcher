@@ -22,7 +22,8 @@
       escapeHtml,
       formatTaskError,
       isExpectedTimeoutFailure,
-      formatTimeoutDoneMessage
+      formatTimeoutDoneMessage,
+      recordManualWatcherDaily
     } = deps;
 
     let taskQueue = [];
@@ -88,9 +89,8 @@
           if (failureReason && failureReason !== 'login_required' && failureReason !== 'cf_challenge') {
             await recordJournalAccessResult(payload, { ok: false, reason: failureReason });
           }
-          // PRIVATE_WATCHER_ONLY: Update manual assist failure count
-          if (port.name === 'ablesci-pdf-upload' && globalThis.AblesciWatcherState) {
-            await globalThis.AblesciWatcherState.incrementDaily('failed', 'page_manual').catch(() => {});
+          if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+            await recordManualWatcherDaily('failed').catch(() => {});
           }
 
           if (!task.cancelled || !task.silentCancel) {

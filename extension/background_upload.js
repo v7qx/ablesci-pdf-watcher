@@ -43,7 +43,8 @@
       createBackgroundUploadQueueApi,
       createBackgroundUploadClientApi,
       handlePublisherTabUpdated,
-      handlePublisherRuntimeMessage
+      handlePublisherRuntimeMessage,
+      recordManualWatcherDaily
     } = deps;
 
     const {
@@ -114,9 +115,8 @@
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
 
-      // PRIVATE_WATCHER_ONLY: Update manual assist download count
-      if (port.name === 'ablesci-pdf-upload' && globalThis.AblesciWatcherState) {
-        await globalThis.AblesciWatcherState.incrementDaily('downloaded', 'page_manual').catch(() => {});
+      if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+        await recordManualWatcherDaily('downloaded').catch(() => {});
       }
 
       const downloadMeta = sanitizeDownloadItem(item);
@@ -209,9 +209,8 @@
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
         await recordJournalAccessResult(payload, { ok: true });
-        // PRIVATE_WATCHER_ONLY: Update manual assist upload count
-        if (port.name === 'ablesci-pdf-upload' && globalThis.AblesciWatcherState) {
-          await globalThis.AblesciWatcherState.incrementDaily('uploaded', 'page_manual').catch(() => {});
+        if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+          await recordManualWatcherDaily('uploaded').catch(() => {});
         }
         postDoneFromSiteResponse(port, permit, '上传成功');
         return;
@@ -243,9 +242,8 @@
       if (opts.deleteAfterUpload) {
         await deleteUploadedFile(opts.nativeHostName, stat.path);
       }
-      // PRIVATE_WATCHER_ONLY: Update manual assist upload count
-      if (port.name === 'ablesci-pdf-upload' && globalThis.AblesciWatcherState) {
-        await globalThis.AblesciWatcherState.incrementDaily('uploaded', 'page_manual').catch(() => {});
+      if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+        await recordManualWatcherDaily('uploaded').catch(() => {});
       }
       if (parsed && parsed.msg) {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
@@ -290,7 +288,8 @@
       escapeHtml,
       formatTaskError,
       isExpectedTimeoutFailure,
-      formatTimeoutDoneMessage
+      formatTimeoutDoneMessage,
+      recordManualWatcherDaily
     });
 
     function attachRuntimeListeners() {
