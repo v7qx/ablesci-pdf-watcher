@@ -72,7 +72,29 @@
           applyStorageWatcherTraceLevel(changes);
           const changedKeys = watcherKeys.slice(0, 12).join(',');
           updateActionBadge().catch(() => {});
-          if (watcherKeys.some(key => key !== 'watcherBadgeCountdownEnabled')) {
+
+          const SCHEDULE_AFFECTING_KEYS = [
+            'watcherEnabled',
+            'watcherSpeedMode',
+            'watcherMonthlyTarget',
+            'watcherWorkdays',
+            'watcherWorkWindows',
+            'watcherSchedulerMode',
+            'watcherIntervalMinutes',
+            'watcherMinIntervalMinutes',
+            'watcherMaxIntervalMinutes',
+            'watcherObserveMode',
+            'watcherObserveIntervalMinutes',
+            'watcherAllowZeroSession',
+            'watcherDailyLimit'
+          ];
+          const hasScheduleChange = SCHEDULE_AFFECTING_KEYS.some(key => {
+            const change = changes[key];
+            if (!change) return false;
+            return change.newValue !== change.oldValue;
+          });
+
+          if (hasScheduleChange) {
             const suppressUntil = Number(changes.ablesciSuppressWatcherReplanUntil?.newValue || 0);
             if (Number.isFinite(suppressUntil) && suppressUntil > Date.now()) {
               appendWatcherTrace('alarm_refresh_suppressed', {

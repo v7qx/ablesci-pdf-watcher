@@ -605,4 +605,10 @@
   });
 
   globalThis.initAutoWatcher = initAutoWatcher;
+  globalThis.AblesciWatcherState = {
+    incrementDaily,
+    getWatcherState,
+    saveWatcherState,
+    updateWatcherState
+  };
 })();

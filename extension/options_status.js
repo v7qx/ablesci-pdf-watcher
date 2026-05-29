@@ -23,11 +23,12 @@
         'watcherDailyLimit'
       ]);
       const state = stored[autoWatcherStateKey] || {};
+      const isEnabled = stored.watcherEnabled !== false;
       const daily = state.daily?.[todayKeyBeijing()] || {};
       const downloaded = Math.max(0, Number(daily.downloaded || 0));
       const dailyLimit = Math.max(0, Number(stored.watcherDailyLimit || defaultOptions.watcherDailyLimit || 0));
       const schedule = nextDisplaySchedule(state);
-      advancedStatusCache = { state, schedule };
+      advancedStatusCache = { state, schedule, isEnabled };
       setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
       setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
@@ -43,10 +44,13 @@
       setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
       setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
       setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
-      setText('watcherRuntimeLogic', `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`);
-      setText('watcherNextRunAt', formatBeijingDateTime(schedule.nextRunAt));
-      setText('watcherNextAssistAt', formatBeijingDateTime(schedule.nextAssistAt));
-      setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
+      
+      const runtimeLogicStr = `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`;
+      setText('watcherRuntimeLogic', isEnabled ? runtimeLogicStr : `${runtimeLogicStr} (值守已关闭)`);
+      
+      setText('watcherNextRunAt', isEnabled ? formatBeijingDateTime(schedule.nextRunAt) : '值守已关闭');
+      setText('watcherNextAssistAt', isEnabled ? formatBeijingDateTime(schedule.nextAssistAt) : '值守已关闭');
+      setText('watcherAssistCountdown', isEnabled ? countdownText(schedule.assistCountdownAt) : '已停止');
       setText('watcherWakeCountdown', dailyLimit > 0 ? String(dailyLimit) : '-');
       const downloadedAuto = Math.max(0, Number(daily.downloadedAuto || 0));
       let downloadedManual = Math.max(0, Number(daily.downloadedManual || 0));
@@ -58,6 +62,11 @@
 
     function renderAdvancedWatcherCountdowns() {
       if (!advancedStatusCache) return;
+      const isEnabled = advancedStatusCache.isEnabled !== false;
+      if (!isEnabled) {
+        setText('watcherAssistCountdown', '已停止');
+        return;
+      }
       const state = advancedStatusCache.state || {};
       const schedule = advancedStatusCache.schedule || nextDisplaySchedule(state);
       setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));

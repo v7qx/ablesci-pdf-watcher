@@ -747,6 +747,29 @@
       </div>
     </details>
 
+    <details class="card" open>
+      <summary>运行数据</summary>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>值守状态</strong>
+          <span>从本地 watcher 状态读取，仅用于排查。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <div class="metric-grid">
+            <div class="metric-field" title="实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。"><label>实际 / 预计</label><span id="advancedExpectedActual" class="pill">-</span></div>
+            <div class="metric-field" title="从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。"><label>网页总应助</label><span id="watcherWebTotalAssists" class="pill">-</span></div>
+            <div class="metric-field" title="本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
+            <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
+            <div class="metric-field" title="下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
+            <div class="metric-field" title="与下次应助保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
+            <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
+            <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
+          </div>
+        </div>
+      </div>
+    </details>
+
     <section class="card">
       <h2 class="card-title">实验：低频值守</h2>
       <details class="setting-details nested-setting-details">
@@ -788,28 +811,6 @@
               <label for="watcherMonthlyTarget">月目标</label>
               <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
             </div>
-          </div>
-        </div>
-      </div>
-      </details>
-      <details class="setting-details nested-setting-details">
-        <summary>运行信息</summary>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>值守状态</strong>
-          <span>从本地 watcher 状态读取，仅用于排查。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <div class="metric-grid">
-            <div class="metric-field" title="实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。"><label>实际 / 预计</label><span id="advancedExpectedActual" class="pill">-</span></div>
-            <div class="metric-field" title="从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。"><label>网页总应助</label><span id="watcherWebTotalAssists" class="pill">-</span></div>
-            <div class="metric-field" title="本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
-            <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
-            <div class="metric-field" title="下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
-            <div class="metric-field" title="与下次应助保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
-            <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
           </div>
         </div>
       </div>
