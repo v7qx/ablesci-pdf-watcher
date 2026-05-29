@@ -28,6 +28,10 @@
       cookieEl.className = `pill${isError ? ' error' : ' ok'}`;
     }
 
+    function cookieDomainLabel(cookie) {
+      return String(cookie?.domain || '').replace(/^\./, '') || '-';
+    }
+
     function updatePillFromCookie(cookie, elementId, missingTitle = '') {
       const cookieEl = el(elementId);
       if (!cookieEl) return;
@@ -40,9 +44,9 @@
             const remainingMinutes = Math.floor(remainingMs / 60000);
             const expiryDate = new Date(expiryMs);
             const expiryTimeStr = expiryDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-            cookieEl.textContent = `剩 ${remainingMinutes} 分钟 (${expiryTimeStr})`;
+            cookieEl.textContent = `已检测 (${cookieDomainLabel(cookie)})`;
             const partitionInfo = cookie.partitionKey ? `\n分区: ${JSON.stringify(cookie.partitionKey)}` : '';
-            cookieEl.title = `域: ${cookie.domain}\n路径: ${cookie.path || '/'}\n失效时间: ${expiryDate.toLocaleString('zh-CN')}${partitionInfo}`;
+            cookieEl.title = `域: ${cookie.domain}\n路径: ${cookie.path || '/'}\n浏览器记录失效时间: ${expiryDate.toLocaleString('zh-CN')} (${expiryTimeStr})\n剩余分钟数: ${remainingMinutes}\n注意：Cloudflare / 出版商可能提前要求重新验证，不能只按 Cookie expires 判断实际可用期。${partitionInfo}`;
             cookieEl.className = 'pill ok';
           } else {
             cookieEl.textContent = '已失效 (需验证)';
@@ -50,7 +54,7 @@
             cookieEl.className = 'pill error';
           }
         } else {
-          cookieEl.textContent = '会话有效';
+          cookieEl.textContent = `已检测 (${cookieDomainLabel(cookie)})`;
           cookieEl.title = `域: ${cookie.domain || '-'}\n该 cf_clearance 是会话 Cookie，浏览器关闭后可能失效。`;
           cookieEl.className = 'pill ok';
         }
@@ -153,16 +157,29 @@
           }
         }
 
+        const primaryCookie = newerCookie(elsevierCookie, sdCookie);
         updatePillFromCookie(
-          elsevierCookie,
+          primaryCookie,
           'watcherElsevierCookieStatus',
-          '未在当前专用浏览器 Profile 中检测到 Elsevier / LinkingHub 的 cf_clearance。请在这个 Profile 内打开 linkinghub.elsevier.com 或 Elsevier 文章页并完成验证。'
+          '未在当前专用浏览器 Profile 中检测到 Elsevier / LinkingHub / ScienceDirect 的 cf_clearance。请在这个 Profile 内打开 linkinghub.elsevier.com 跳转页或 www.sciencedirect.com 并完成验证。'
         );
-        updatePillFromCookie(
-          sdCookie,
-          'watcherSdCookieStatus',
-          '未在当前专用浏览器 Profile 中检测到 ScienceDirect 的 cf_clearance。请在这个 Profile 内打开 www.sciencedirect.com 并完成验证。'
-        );
+        if (primaryCookie) {
+          const detected = [];
+          if (elsevierCookie) detected.push(`Elsevier/LinkingHub: ${cookieDomainLabel(elsevierCookie)}`);
+          if (sdCookie) detected.push(`ScienceDirect: ${cookieDomainLabel(sdCookie)}`);
+          setCookiePill(
+            'watcherSdCookieStatus',
+            cookieDomainLabel(primaryCookie),
+            false,
+            `当前命中的 cf_clearance 域：\n${detected.join('\n') || cookieDomainLabel(primaryCookie)}\n如果验证页在 linkinghub.elsevier.com，但最终文献页跳到 www.sciencedirect.com，两个域都可能参与流程；这里显示的是扩展实际读到的 Cookie 域。`
+          );
+        } else {
+          updatePillFromCookie(
+            null,
+            'watcherSdCookieStatus',
+            '未检测到 Elsevier / LinkingHub / ScienceDirect 的 cf_clearance 域。'
+          );
+        }
       } catch (err) {
         console.warn('[Ablesci PDF Watcher] Failed to query cf_clearance cookies:', err);
         const message = err?.message || String(err);
