@@ -19,7 +19,7 @@ if ($Output -eq "") {
 $Output = [System.IO.Path]::GetFullPath($Output)
 
 if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "Go compiler not found. Cannot build helper from source. Please install Go or use the pre-compiled binary in native-helper/bin/windows-amd64/ablesci_pdf_helper.exe."
+  throw "未找到 Go 编译器，无法从源码构建 Helper。请先安装 Go 开发环境 (https://go.dev)。"
 }
 
 $OutDir = Split-Path -Parent $Output

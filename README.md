@@ -26,7 +26,6 @@ Set-ExecutionPolicy -Scope Process Bypass
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\init_browser_profile.ps1 -Browser Edge -Launch
 ```
-*说明：若已存在或使用自管理 Profile，可忽略此步骤。*
 
 #### 2. 加载浏览器扩展
 1. 打开刚才创建的专用浏览器，访问 `chrome://extensions/`（或 `edge://extensions/`）。
@@ -39,26 +38,31 @@ Set-ExecutionPolicy -Scope Process Bypass
 - **PDF 自动下载**：关闭“下载前询问每个文件的保存位置”，并配置 PDF 为“直接下载”（而非在浏览器内置阅读器中预览）。
   - Chrome 设置路径：`chrome://settings/downloads` 与 `chrome://settings/content/pdfDocuments`
   - Edge 设置路径：`edge://settings/downloads` 与 `edge://settings/content/pdfDocuments`
-  - *(说明：使用上述第 1 步脚本初始化专用 Profile时，此项已自动配置。)*
 - **禁用 Chrome 端侧 AI 模型下载**：
-  若未通过快捷方式 `--disable-features` 启动，Chrome 可能会在后台下载端侧 AI 模型（大小约 4GB）。若需手动或全局禁用此下载行为：
-  1. 访问 `chrome://flags`。
-  2. 搜索 `#optimization-guide-on-device-model` 并将其设置为 **`Disabled`**。
-  3. 重启浏览器。
-  4. 手动删除 Profile 目录下的 `OptGuideOnDeviceModel` 缓存文件夹以释放磁盘空间。
-  - *(说明：若使用第 1 步脚本创建的快捷方式启动，命令行已默认添加 `--disable-features=OptimizationGuideOnDeviceModel`，无需手动配置。)*
+  Chrome 会在后台自动下载端侧生成式 AI 模型（大小约 4GB），可通过以下官方推荐的两种方式进行禁用并清理空间：
+
+  **方法 1：管理设备上的端侧生成式 AI 模型**
+  1. 在计算机上打开 Chrome 浏览器。
+  2. 在右上角依次选择“更多”（三个点图标）->“设置”->“系统”。
+  3. 开启或关闭“端侧 AI” (On-device AI)。
+  （详情可参考 Google 官方支持文档：[管理设备上的生成式 AI 模型](https://support.google.com/chrome/answer/16961953)）
+
+  **方法 2：配置 Chrome Flags（针对单个 Profile）**
+  1. 在地址栏输入 `chrome://flags` 并按回车。
+  2. 搜索 `#optimization-guide-on-device-model`。
+  3. 将该项状态从 `Default` 修改为 **`Disabled`**。
+  4. 重启浏览器，并手动删除 Profile 目录下的 `OptGuideOnDeviceModel` 缓存文件夹以释放磁盘空间。
 
 ---
 
 ### 二、编译与安装 Native Helper
 
 #### 1. 编译可执行文件
-检查本地 `native-helper\bin\windows-amd64\` 目录下是否存在 `ablesci_pdf_helper.exe`。若不存在，请先执行编译脚本：
+编译需要 Go 语言开发环境。请在项目根目录下执行编译脚本：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
 ```
-*说明：编译需要 Go 语言开发环境。若无本地编译环境，请将预编译好的 `ablesci_pdf_helper.exe` 放置到 `native-helper\bin\windows-amd64\` 目录。*
 
 #### 2. 注册 Native Host
 运行安装脚本将 Native Host 注册到系统。安装脚本会从专用 Profile 中自动识别已加载扩展的 ID 并完成注册：
@@ -75,11 +79,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\install_host.ps1 -Browser Edge -ProfileDir "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile"
 ```
 
-*若自动识别失败或未使用独立 Profile，可手动指定扩展 ID 运行安装：*
+若自动识别失败，可手动指定扩展 ID 运行安装：
 ```powershell
 .\native-host\install_host.ps1 -Browser Chrome -ExtensionId <您的扩展ID>
 ```
-*说明：更新 Helper 文件或扩展 ID 后，需重新运行安装脚本以覆盖旧注册信息。*
 
 ---
 
