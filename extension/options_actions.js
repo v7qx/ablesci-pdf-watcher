@@ -20,7 +20,9 @@
       setText,
       save,
       reloadJournalAccessConfigFromNative,
-      openConfigDirFromNative
+      openConfigDirFromNative,
+      // PRIVATE_WATCHER_ONLY
+      openLocalStorageDirFromNative
     } = deps;
 
     function showText(id, msg, isErr) {
@@ -114,6 +116,11 @@
 
     async function openConfigDir() {
       return openConfigDirFromNative();
+    }
+
+    // PRIVATE_WATCHER_ONLY
+    async function openLocalStorageDir() {
+      return openLocalStorageDirFromNative();
     }
 
     async function copyAutoWatcherConfig() {
@@ -289,6 +296,8 @@
       copyDiagnostic,
       reloadJournalAccessConfig,
       openConfigDir,
+      // PRIVATE_WATCHER_ONLY
+      openLocalStorageDir,
       copyAutoWatcherConfig,
       clearJournalAccessStats,
       copyTextToClipboard,

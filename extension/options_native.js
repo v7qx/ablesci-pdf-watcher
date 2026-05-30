@@ -107,6 +107,17 @@
       if (res.ok && res.path) setText('journalAccessConfigSource', res.path);
     }
 
+    // PRIVATE_WATCHER_ONLY
+    async function openLocalStorageDir() {
+      const hostNode = el('nativeHostName');
+      const previousHost = hostNode?.value;
+      if (hostNode) hostNode.value = hostNode.value.trim() || defaultOptions.nativeHostName;
+      const extensionId = chromeApi.runtime.id;
+      const res = await nativeConfigMessage('open_local_storage', { extra: { extension_id: extensionId } });
+      if (hostNode && previousHost !== undefined) hostNode.value = previousHost;
+      showPill('nativeStatus', res.ok ? '已打开本地存储目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
+    }
+
     return {
       nativeFailureHelp,
       journalAccessSummary,
@@ -114,7 +125,9 @@
       readJournalAccessConfig,
       renderJournalAccessConfigStatus,
       reloadJournalAccessConfig,
-      openConfigDir
+      openConfigDir,
+      // PRIVATE_WATCHER_ONLY
+      openLocalStorageDir
     };
   }
 

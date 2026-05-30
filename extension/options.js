@@ -57,7 +57,9 @@ const {
   nativeFailureHelp,
   renderJournalAccessConfigStatus: renderJournalAccessConfigStatusFromNative,
   reloadJournalAccessConfig: reloadJournalAccessConfigFromNative,
-  openConfigDir: openConfigDirFromNative
+  openConfigDir: openConfigDirFromNative,
+  // PRIVATE_WATCHER_ONLY
+  openLocalStorageDir: openLocalStorageDirFromNative
 } = createOptionsNativeApi({
   chromeApi: chrome,
   defaultOptions: DEFAULT_OPTIONS,
@@ -239,6 +241,8 @@ const {
   copyDiagnostic,
   reloadJournalAccessConfig,
   openConfigDir,
+  // PRIVATE_WATCHER_ONLY
+  openLocalStorageDir,
   copyAutoWatcherConfig,
   clearJournalAccessStats,
   runAutoWatcherNow,
@@ -265,7 +269,9 @@ const {
   setText,
   save,
   reloadJournalAccessConfigFromNative,
-  openConfigDirFromNative
+  openConfigDirFromNative,
+  // PRIVATE_WATCHER_ONLY
+  openLocalStorageDirFromNative
 });
 
 document.addEventListener('copy', handleDocumentCopy);
@@ -302,6 +308,8 @@ window.addEventListener('blur', () => {
 });
 el('save').addEventListener('click', save);
 el('testNative').addEventListener('click', testNative);
+// PRIVATE_WATCHER_ONLY
+el('openLocalStorageDir')?.addEventListener('click', openLocalStorageDir);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
 el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
