@@ -644,7 +644,7 @@
         '',
         '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
         '| --- | --- | --- | --- | --- | --- | --- |',
-        ...logs.slice(0, 12).map(log => {
+        ...logs.filter(log => log.status !== 'queued_upload' && log.status !== 'queued_download_only').slice(0, 12).map(log => {
           let detailVal = reportDetailValue(log);
           if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
             detailVal = `[点击查看详情](${detailVal})`;

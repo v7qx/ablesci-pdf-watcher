@@ -298,27 +298,31 @@
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
+            let cleanReason = msg.message || 'done';
+            if (cleanReason.includes('上传成功') || cleanReason.includes('已成功') || cleanReason.includes('应助成功') || cleanReason.includes('OSS 上传')) {
+              cleanReason = '上传成功';
+            }
             await Promise.allSettled([
               context.payload?.downloadOnly !== true ? incrementDaily('uploaded', context.trigger) : Promise.resolve(),
               appendWatcherTrace('queue_message_done', {
-                reason: msg.message || 'done',
+                reason: cleanReason,
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 assistId: context.key,
                 durationMs
               }),
-              recordRiskEvent(context.opts || {}, msg.message || 'success', 'success'),
-              recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success'),
+              recordRiskEvent(context.opts || {}, cleanReason, 'success'),
+              recordBanditOutcome(context.source, 'success', durationMs, cleanReason),
               appendWatcherLog({
                 ...context.payload,
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 trigger: context.trigger || '',
                 status: 'success',
-                reason: msg.message || 'done'
+                reason: cleanReason
               }).then(writeDailyReports)
             ]);
-            settle({ ok: true, reason: msg.message || 'done', durationMs });
+            settle({ ok: true, reason: cleanReason, durationMs });
           }
         },
         onDisconnect: {
