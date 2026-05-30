@@ -115,7 +115,7 @@
       const extensionId = chromeApi.runtime.id;
       const res = await nativeConfigMessage('open_local_storage', { extra: { extension_id: extensionId } });
       if (hostNode && previousHost !== undefined) hostNode.value = previousHost;
-      showPill('nativeStatus', res.ok ? '已打开本地存储目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
+      showPill('nativeStatus', res.ok ? '已打开本地目录' : '打开失败：' + (res.error || '未知错误'), !res.ok);
     }
 
     return {

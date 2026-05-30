@@ -420,64 +420,14 @@ func handleOpenConfigDir(req Request) error {
 }
 
 func handleOpenLocalStorageDir(req Request) error {
-	extID := ""
-	if req.Extra != nil {
-		extID = req.Extra["extension_id"]
+	exe, err := os.Executable()
+	if err != nil {
+		return err
 	}
-	if extID == "" {
-		return errors.New("missing extension_id")
-	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	appData := os.Getenv("APPDATA")
-
-	searchDirs := []string{}
-	if localAppData != "" {
-		searchDirs = append(searchDirs,
-			filepath.Join(localAppData, "Google", "Chrome", "User Data"),
-			filepath.Join(localAppData, "Microsoft", "Edge", "User Data"),
-			filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
-		)
-	}
-	if appData != "" {
-		searchDirs = append(searchDirs,
-			filepath.Join(appData, "Opera Software", "Opera Stable"),
-		)
-	}
-
-	targetDir := ""
-	for _, userDataDir := range searchDirs {
-		files, err := os.ReadDir(userDataDir)
-		if err != nil {
-			continue
-		}
-		for _, file := range files {
-			if !file.IsDir() {
-				continue
-			}
-			path := filepath.Join(userDataDir, file.Name(), "Local Extension Settings", extID)
-			if st, err := os.Stat(path); err == nil && st.IsDir() {
-				targetDir = path
-				break
-			}
-		}
-		if targetDir != "" {
-			break
-		}
-	}
-
-	// Fallback to default Chrome path if nothing found
-	if targetDir == "" && localAppData != "" {
-		targetDir = filepath.Join(localAppData, "Google", "Chrome", "User Data", "Default", "Local Extension Settings", extID)
-	}
-
-	if targetDir == "" {
-		return errors.New("could not find local storage directory")
-	}
-
+	targetDir := filepath.Dir(exe)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return err
 	}
-
 	if runtime.GOOS == "windows" {
 		if err := exec.Command("explorer.exe", targetDir).Start(); err != nil {
 			return err

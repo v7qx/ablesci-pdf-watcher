@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExtensionId = "",
 
   [ValidateSet("Chrome", "Edge", "All")]
@@ -302,7 +302,7 @@ if (Test-Path $IcoSrc) {
 
 # Register Start Menu shortcut with AppUserModelID so Windows notification
 # shows the plugin icon in the top-left source area.
-$ShortcutCode = @"
+$ShortcutCode = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -391,7 +391,7 @@ public static class ShortcutManager {
         file.Save(lnkPath, true);
     }
 }
-"@
+'@
 
 $AppIdForShortcut = "AblesciPDFWatcher"
 $ShortcutName = "Ablesci PDF Watcher"
