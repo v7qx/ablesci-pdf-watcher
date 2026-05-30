@@ -72,8 +72,14 @@ edge://settings/downloads
 edge://settings/content/pdfDocuments
 ```
 
-如果使用了第 1 步脚本，这些设置已经写入专用 Profile；这里只需要打开浏览器设置页确认。
-如果浏览器已经打开，再运行脚本修改配置后，请关闭并重新打开专用浏览器，Chrome / Edge 才会重新读取这些下载设置。
+如果使用了第 1 步脚本，这些下载设置以及禁止下载 Chrome 4GB 端侧 AI 模型 (`OptGuideOnDeviceModel`) 的优化策略已自动应用在专用 Profile 中。
+
+#### 附加建议：关闭 Chrome 自动下载 4GB AI 模型 (节省磁盘空间)
+现代 Chrome 可能会在后台自动下载大约 4GB 的 AI 模型 (`OptGuideOnDeviceModel\*\weights.bin`)。如果您是手动创建的 Profile 或想全局关闭此下载：
+1. 在浏览器地址栏输入 `chrome://flags` 并回车。
+2. 搜索并找到 `#optimization-guide-on-device-model` 项。
+3. 将其状态从 `Default` 修改为 **`Disabled`**。
+4. 重启浏览器，并手动删除您 Profile 目录下的 `OptGuideOnDeviceModel` 文件夹释放空间。
 
 ### 第 4 步：安装 Native Helper（仅自动上传所必需）
 

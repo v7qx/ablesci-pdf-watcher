@@ -60,12 +60,45 @@ function Set-ObjectProperty($Object, [string]$Name, $Value) {
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ExtensionDir = Join-Path $RepoRoot "extension"
 $BrowserExe = Find-BrowserExe $Browser
+
+# Prevent Chrome/Edge from downloading the huge on-device GenAI model (~4GB)
+function Set-BrowserGenAIPolicy([string]$BrowserName) {
+  $policyName = "GenAILocalFoundationalModelSettings"
+  $path = if ($BrowserName -eq "Edge") {
+    "HKCU:\SOFTWARE\Policies\Microsoft\Edge"
+  } else {
+    "HKCU:\SOFTWARE\Policies\Google\Chrome"
+  }
+  try {
+    if (!(Test-Path -LiteralPath $path)) {
+      New-Item -Path $path -Force | Out-Null
+    }
+    New-ItemProperty -Path $path -Name $policyName -Value 1 -PropertyType DWORD -Force | Out-Null
+    Write-Host "Set user policy: $path\$policyName = 1 (Prevents large on-device AI model weights download)"
+  } catch {
+    Write-Warning "Could not write GenAI policy to registry: $_"
+  }
+}
+
+Set-BrowserGenAIPolicy $Browser
+
 $ProfileDir = [System.IO.Path]::GetFullPath($ProfileDir)
 $DownloadDir = [System.IO.Path]::GetFullPath($DownloadDir)
 $DefaultProfileDir = Join-Path $ProfileDir "Default"
 $PreferencesPath = Join-Path $DefaultProfileDir "Preferences"
 $LocalStatePath = Join-Path $ProfileDir "Local State"
 $FirstRunPath = Join-Path $ProfileDir "First Run"
+
+# Clean up existing huge AI model directory to free disk space immediately
+$modelDir = Join-Path $ProfileDir "OptGuideOnDeviceModel"
+if (Test-Path -LiteralPath $modelDir) {
+  try {
+    Remove-Item -LiteralPath $modelDir -Recurse -Force | Out-Null
+    Write-Host "Deleted existing large model directory: $modelDir"
+  } catch {
+    Write-Warning "Could not delete existing model directory: $_"
+  }
+}
 
 New-Item -ItemType Directory -Force -Path $DefaultProfileDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
@@ -100,9 +133,9 @@ $prefs | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $PreferencesPath -E
 
 $DesktopDir = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $DesktopDir "$ShortcutName.lnk"
-$Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default chrome://extensions/"
+$Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default --disable-features=OptimizationGuideOnDeviceModel chrome://extensions/"
 if ($Browser -eq "Edge") {
-  $Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default edge://extensions/"
+  $Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default --disable-features=OptimizationGuideOnDeviceModel edge://extensions/"
 }
 
 $shell = New-Object -ComObject WScript.Shell
