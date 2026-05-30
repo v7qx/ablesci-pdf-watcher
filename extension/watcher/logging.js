@@ -67,7 +67,7 @@
     }
 
     function normalizeTraceLevel(value) {
-      return ['off', 'normal', 'verbose'].includes(value) ? value : 'normal';
+      return ['off', 'compact', 'normal', 'verbose'].includes(value) ? value : 'normal';
     }
 
     async function getTraceLevel() {
@@ -84,6 +84,37 @@
       try {
         const traceLevel = await getTraceLevel();
         if (traceLevel === 'off') return;
+        if (traceLevel === 'compact') {
+          const noisySteps = [
+            'candidate_skip_list_filter',
+            'candidate_skip_journal_stats',
+            'candidate_skip_processed',
+            'session_plan_url',
+            'session_plan_result',
+            'session_plan_done',
+            'session_source_order',
+            'run_session_size',
+            'session_size_calculated',
+            'tab_open_request',
+            'tab_opened',
+            'tab_complete',
+            'tab_close_request',
+            'tab_closed',
+            'tab_open_failed',
+            'tab_close_failed',
+            'list_dom_ready',
+            'list_parse_result',
+            'alarm_refresh_start',
+            'alarm_cleared',
+            'alarm_disabled',
+            'alarm_scheduled',
+            'alarm_scheduled_existing_assist',
+            'alarm_scheduled_rate_limited_retry',
+            'sync_web_assist_count',
+            'assist_next_scheduled'
+          ];
+          if (noisySteps.includes(step)) return;
+        }
         const url = details.url || details.detailUrl || details.listUrl || '';
         traceBuffer.push({
           time: new Date().toISOString(),

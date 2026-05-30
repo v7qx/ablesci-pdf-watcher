@@ -36,6 +36,160 @@
       return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
     }
 
+    const STEP_TRANSLATIONS = {
+      'failed': '失败',
+      'skipped': '已跳过',
+      'candidate_detail_start': '详情页评估开始',
+      'candidate_skip_list_filter': '列表页过滤跳过',
+      'candidate_skip_journal_stats': '期刊状态过滤跳过',
+      'candidate_skip_processed': '已处理过滤跳过',
+      'run_session_size': '会话大小计算',
+      'session_size_calculated': '会话大小已计算',
+      'session_start': '会话开始',
+      'session_done': '会话完成',
+      'session_plan_result': '会话规划结果',
+      'session_plan_done': '会话规划完成',
+      'candidate_skip_detail_filter': '详情页过滤跳过',
+      'candidate_payload_allowed': '候选允许处理',
+      'candidate_enqueue': '加入上传队列',
+      'queue_message_done': '上传队列完成',
+      'queue_message_error': '上传队列错误',
+      'queue_message_blocked': '上传队列受阻',
+      'run_skip_already_running': '跳过(正在运行)',
+      'detail_extract_failed': '提取详情失败',
+      'detail_extract_result': '提取详情结果',
+      'detail_extract_error': '提取详情错误',
+      'watcher_paused_after_download_failure': '下载失败后值守暂停',
+      'session_stopped_after_candidate_failure': '候选失败后会话停止',
+      'detail_tab_closed_cancel_task': '关闭详情页取消任务',
+      'tab_open_request': '请求打开标签页',
+      'tab_opened': '标签页已打开',
+      'tab_complete': '标签页加载完成',
+      'tab_close_request': '请求关闭标签页',
+      'tab_closed': '标签页已关闭',
+      'alarm_refresh_start': '刷新定时闹钟开始',
+      'alarm_cleared': '清除定时闹钟',
+      'alarm_disabled': '禁用定时闹钟',
+      'alarm_scheduled': '定时闹钟已排程',
+      'assist_next_scheduled': '下一次应助已排程',
+      'sync_web_assist_count': '同步网页应助数'
+    };
+
+    const REASON_TRANSLATIONS = {
+      'candidate_passed_list_filter': '候选通过列表筛选',
+      'journal_blocked_rule': '期刊黑名单限制',
+      'session_size_calculated': '会话大小已计算',
+      'already running': '已有任务在运行中',
+      'already_running': '已有任务在运行中',
+      'no_candidate': '未发现有效候选',
+      'risk_budget_limit': '超出今日风险预算',
+      'daily_limit_reached': '已达到每日应助上限',
+      'outside_work_window': '处于非工作时间窗口',
+      'not_due': '时间未到',
+      'no_cookie': '未检测到有效凭证',
+      'no_credential': '未检测到有效凭证',
+      'cf_challenge': '触发 Cloudflare 人机验证',
+      'cloudflare_challenge': '触发 Cloudflare 人机验证',
+      'download_timeout': '下载 PDF 超时',
+      'no_download_timeout': '未触发下载超时',
+      'upload_failed': '上传 PDF 失败',
+      'high_risk_journal': '高风险期刊过滤',
+      'supplement_pdf': '跳过补充材料(Supplement)',
+      'remark_pdf': '跳过备注或勘误',
+      'book_chapter': '跳过图书章节',
+      'patent_report': '跳过专利报告',
+      'risk_text': '跳过风险文本匹配',
+      'doi_missing': '缺少 DOI 信息',
+      'reported': '已被举报/处理过',
+      'rejected': '已被拒绝',
+      'no_access': '无订阅访问权限',
+      'between_candidates': '候选任务间延迟等待',
+      'session_completed': '本轮会话已圆满完成',
+      'quota_reset': '限额重置',
+      'rate_limited_': '触发滑动窗口频控限制(将快速重试)',
+      'rate_limited_retry': '触发滑动窗口频控限制(将快速重试)'
+    };
+
+    function translateStep(step) {
+      const s = String(step || '').trim();
+      return STEP_TRANSLATIONS[s] || s;
+    }
+
+    function translateReason(reason) {
+      const r = String(reason || '').trim();
+      if (REASON_TRANSLATIONS[r]) {
+        return REASON_TRANSLATIONS[r];
+      }
+      if (r.startsWith('rate_limited_')) {
+        return REASON_TRANSLATIONS['rate_limited_'];
+      }
+      if (r.startsWith('storage_changed:')) {
+        const keysStr = r.substring('storage_changed:'.length);
+        const keys = keysStr.split(',').filter(Boolean);
+        if (keys.length > 2) {
+          return `修改设置 (${keys.slice(0, 2).join(', ')}等 ${keys.length} 项)`;
+        }
+        return `修改设置 (${keysStr})`;
+      }
+      return r;
+    }
+
+    function formatTraceDetail(details) {
+      if (!details) return '';
+      
+      const assistId = details.assistId || '';
+      const url = details.url || details.detailUrl || details.listUrl || '';
+      
+      let linkMarkdown = '';
+      if (assistId) {
+        const detailUrl = url || `https://www.ablesci.com/assist/detail?id=${assistId}`;
+        linkMarkdown = `[${assistId}](${sanitizeReportUrl(detailUrl)})`;
+      } else if (url) {
+        const cleanUrl = sanitizeReportUrl(url);
+        linkMarkdown = `[链接](${cleanUrl})`;
+      }
+      
+      const parts = [];
+      if (linkMarkdown) {
+        parts.push(linkMarkdown);
+      }
+      
+      const journalName = details.journalShortName || details.journal || details.journalName;
+      if (journalName) {
+        parts.push(journalName);
+      }
+      if (details.doi) {
+        parts.push(details.doi);
+      }
+      if (details.title) {
+        const cleanTitle = String(details.title).replace(/\s+相关领域.*$/, '').trim();
+        parts.push(cleanTitle.length > 40 ? cleanTitle.slice(0, 40) + '...' : cleanTitle);
+      }
+      
+      if (details.targetSessionSize !== undefined) parts.push(`目标大小: ${details.targetSessionSize}`);
+      if (details.currentExecutionModel) parts.push(`执行模式: ${details.currentExecutionModel}`);
+      if (details.checkedDelta !== undefined) parts.push(`检查变化: ${details.checkedDelta}`);
+      if (details.downloadedDelta !== undefined) parts.push(`下载变化: ${details.downloadedDelta}`);
+      
+      if (parts.length > 0) {
+        return parts.join(' | ');
+      }
+      
+      if (details.reasonText) return details.reasonText;
+      
+      // Check if there is actual content
+      const cleanKeys = Object.keys(details).filter(k => !['reason', 'sessionId', 'trigger', 'time', 'step'].includes(k));
+      const hasRealContent = cleanKeys.some(k => {
+        const val = details[k];
+        return val !== undefined && val !== null && val !== '';
+      });
+      if (!hasRealContent) {
+        return '无额外细节';
+      }
+      
+      return reportJson(details).slice(0, 220);
+    }
+
     function sanitizeReportUrl(value) {
       try {
         const url = new URL(value);
@@ -183,8 +337,41 @@
         }));
       }
       const dataRows = [
-        ...logs.map(log => jsonLine('assist_event', log)),
-        ...traces.map(trace => jsonLine('trace', trace)),
+        ...logs.map(log => {
+          const cleanTitle = log.title ? String(log.title).replace(/\s+相关领域.*$/, '').trim() : '';
+          const cleanLog = {
+            time: log.time,
+            assistId: log.assistId,
+            title: cleanTitle ? (cleanTitle.length > 80 ? cleanTitle.slice(0, 80) + '...' : cleanTitle) : undefined,
+            doi: log.doi,
+            journalName: log.journalName,
+            status: log.status,
+            reason: log.reason,
+            trigger: log.trigger,
+            sessionId: log.sessionId
+          };
+          return jsonLine('assist_event', cleanLog);
+        }),
+        ...traces.map(trace => {
+          const cleanTrace = {
+            time: trace.time,
+            step: trace.step,
+            reason: trace.reason,
+            trigger: trace.trigger,
+            sessionId: trace.sessionId,
+            details: trace.details ? {
+              assistId: trace.details.assistId,
+              doi: trace.details.doi,
+              journal: trace.details.journal || trace.details.journalName || trace.details.journalShortName,
+              title: trace.details.title ? String(trace.details.title).replace(/\s+相关领域.*$/, '').trim().slice(0, 80) : undefined,
+              targetSessionSize: trace.details.targetSessionSize,
+              currentExecutionModel: trace.details.currentExecutionModel,
+              checkedDelta: trace.details.checkedDelta,
+              downloadedDelta: trace.details.downloadedDelta
+            } : undefined
+          };
+          return jsonLine('trace', cleanTrace);
+        }),
         ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
       ];
       const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
@@ -344,108 +531,121 @@
       const skipDecisionRows = [
         ...logs
           .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
-          .map(log => ({
-            time: log.time,
-            trigger: log.trigger || '',
-            step: log.status || '',
-            reason: log.reason || '',
-            detail: reportDetailValue(log) || log.journalName || log.doi || ''
-          })),
+          .map(log => {
+            const cleanDetail = reportDetailValue(log) || log.journalName || log.doi || '';
+            let formattedDetail = cleanDetail;
+            if (cleanDetail.startsWith('http://') || cleanDetail.startsWith('https://')) {
+              formattedDetail = `[点击查看详情](${cleanDetail})`;
+            }
+            return {
+              time: log.time,
+              trigger: log.trigger || '',
+              step: translateStep(log.status || ''),
+              reason: translateReason(log.reason || ''),
+              detail: formattedDetail
+            };
+          }),
         ...traces
           .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
           .map(trace => ({
             time: trace.time,
             trigger: trace.trigger || '',
-            step: trace.step || '',
-            reason: trace.reason || '',
-            detail: reportJson(trace.details || {}).slice(0, 220)
+            step: translateStep(trace.step || ''),
+            reason: translateReason(trace.reason || ''),
+            detail: formatTraceDetail(trace.details)
           }))
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
 
       const monthDir = date.slice(0, 7);
       const reportStem = `${monthDir}/${date}`;
       const md = [
-        `# Ablesci Watcher Daily Report ${date}`,
+        `# 科研通值守日报 ${date}`,
         '',
-        '## Summary',
+        '## 运行数据摘要 (Summary)',
         '',
-        `- Checked: ${Number(daily.checked || 0)}`,
-        `- Downloaded or queued: ${Number(daily.downloaded || 0)}`,
-        `- Uploaded: ${Number(daily.uploaded || 0)}`,
-        `- Skipped: ${Number(daily.skipped || 0)}`,
-        `- Failed: ${Number(daily.failed || 0)}`,
-        `- Notified: ${Number(daily.notified || 0)}`,
-        `- Speed mode: ${state.speedMode || 'normal'}`,
-        `- Scheduler model: ${state.schedulerModelMode || 'simple'}`,
-        `- Runtime logic: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
-        `- Current assist strategy: ${state.lastAssistStrategy || ''}`,
-        `- Next wake: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
-        `- Next assist attempt: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
-        `- Next assist strategy: ${state.nextAssistStrategy || ''} / ${state.nextAssistReason || ''}`,
-        `- Next assist plan data: planned=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
-        `- Next assist delay model / guard / final: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} minutes`,
-        `- Next assist guard: ${state.nextAssistGuardMode || 'none'}, lift=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
-        `- Runs auto / manual: ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- Last run: ${state.lastRunTrigger || ''} ${state.lastRunResult?.reason || ''}`,
-        `- Last attempt time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
-        `- Last attempt trigger: ${lastAttempt.trigger || ''}`,
-        `- Last attempt result: ${lastAttempt.resultReason || ''}`,
-        `- Last attempt target session size: ${lastAttempt.targetSessionSize ?? ''}`,
-        `- Last attempt checked delta: ${lastAttempt.checkedDelta ?? ''}`,
-        `- Last attempt downloaded delta: ${lastAttempt.downloadedDelta ?? ''}`,
-        `- Last attempt list scan started: ${lastAttempt.listScanStarted === true ? 'yes' : 'no'}`,
-        `- Last attempt picked list URL: ${lastAttempt.pickedListUrl || ''}`,
-        `- Last attempt random session: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, random=${lastAttempt.randomValue ?? ''}`,
-        `- Trend factor: ${Number(state.trendFactor || 1).toFixed(2)}`,
-        `- Work time progress: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
-        `- Active progress / availability: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
-        `- Active wake count expected / actual: ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
-        `- Expected / actual / error: ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- Rate multiplier: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
-        `- Hour target: ${Number(state.hourTarget || 0)}`,
-        `- Risk used / limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
-        `- Today target: ${Number(state.todayTarget || 0)}`,
-        `- Detailed data file: ${monthDir}/watcher-data-${date}.jsonl`,
-        `- Journal access files: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
-        `- Session ID: ${state.lastSession?.id || ''}`,
-        `- Session size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
-        `- Session handled: ${Number(state.lastSession?.handledCount || 0)}`,
-        `- Session duration seconds: ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
-        `- Trace events: ${traces.length}`,
+        `- 已检查候选数: ${Number(daily.checked || 0)}`,
+        `- 下载或排队数: ${Number(daily.downloaded || 0)}`,
+        `- 成功上传数: ${Number(daily.uploaded || 0)}`,
+        `- 已跳过候选数: ${Number(daily.skipped || 0)}`,
+        `- 失败任务数: ${Number(daily.failed || 0)}`,
+        `- 发送通知数: ${Number(daily.notified || 0)}`,
+        `- 值守速度模式: ${state.speedMode === 'adaptive' ? '自适应' : (state.speedMode === 'slow' ? '低频' : (state.speedMode === 'fast' ? '快速' : '标准'))}`,
+        `- 调度器模式: ${state.schedulerModelMode || 'simple'}`,
+        `- 运行时策略模式: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
+        `- 当前应助策略: ${state.lastAssistStrategy || ''}`,
+        `- 下一次唤醒时间: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
+        `- 下一次应助尝试时间: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
+        `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '')}`,
+        `- 下一次应助规划数据: 规划时间=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
+        `- 下一次应助延迟模型/守卫/最终延迟: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} 分钟`,
+        `- 下一次应助守卫配置: 守卫模式=${state.nextAssistGuardMode || 'none'}, 抬升时间=${Number(state.nextAssistGuardLiftMinutes || 0)}m, 权重=${Number(state.nextAssistGuardWeight || 0)}`,
+        `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
+        `- 最近一次运行原因与结果: 触发方式=${state.lastRunTrigger || ''}, 结果=${translateReason(state.lastRunResult?.reason || '')}`,
+        `- 最近一次尝试时间: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
+        `- 最近一次尝试触发方式: ${lastAttempt.trigger || ''}`,
+        `- 最近一次尝试执行结果: ${translateReason(lastAttempt.resultReason || '')}`,
+        `- 最近一次会话目标下载数: ${lastAttempt.targetSessionSize ?? ''}`,
+        `- 最近一次检查文献增量: ${lastAttempt.checkedDelta ?? ''}`,
+        `- 最近一次下载文献增量: ${lastAttempt.downloadedDelta ?? ''}`,
+        `- 最近一次是否启动列表扫描: ${lastAttempt.listScanStarted === true ? '是' : '否'}`,
+        `- 最近一次选中的列表页链接: ${lastAttempt.pickedListUrl ? `[点击跳转](${lastAttempt.pickedListUrl})` : ''}`,
+        `- 最近一次随机评估结果: 选中=${lastAttempt.randomSessionPicked ?? ''}, 最终=${lastAttempt.randomSessionFinalSize ?? ''}, 随机值=${lastAttempt.randomValue ?? ''}`,
+        `- 应助趋势系数: ${Number(state.trendFactor || 1).toFixed(2)}`,
+        `- 工作时间进度比率: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
+        `- 活跃时间进度 / 可用性系数: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
+        `- 活跃唤醒次数 (预计 / 实际): ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
+        `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
+        `- 速率倍增系数: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
+        `- 本小时目标应助数: ${Number(state.hourTarget || 0)}`,
+        `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- 今日应助目标数: ${Number(state.todayTarget || 0)}`,
+        `- 详细事件数据 file: ${monthDir}/watcher-data-${date}.jsonl`,
+        `- 期刊权限文件: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
+        `- 最近会话 ID: ${state.lastSession?.id || ''}`,
+        `- 最近会话目标大小: ${Number(state.lastSession?.targetSessionSize || 0)}`,
+        `- 最近会话已处理数: ${Number(state.lastSession?.handledCount || 0)}`,
+        `- 最近会话执行时长 (秒): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
+        `- Trace 事件记录数: ${traces.length}`,
         '',
-        '## Skips And Decisions',
+        '## 决策与过滤记录 (Skips And Decisions)',
         '',
-        '| Time | Trigger | Step | Reason | Detail | Date |',
+        '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
         '| --- | --- | --- | --- | --- | --- |',
         ...skipDecisionRows.map(row => [
           formatBeijingTimeOnly(row.time),
-          row.trigger,
+          row.trigger === 'alarm' ? '自动' : (row.trigger === 'manual' ? '手动' : row.trigger),
           row.step,
           row.reason,
           row.detail,
           formatBeijingDateOnly(row.time)
         ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
         '',
-        '## Recent Events',
+        '## 最近事件记录 (Recent Events)',
         '',
-        '| Time | Trigger | Status | Reason | Journal | DOI | Detail |',
+        '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
         '| --- | --- | --- | --- | --- | --- | --- |',
-        ...logs.slice(0, 12).map(log => [
-          formatBeijingDateTime(log.time),
-          log.trigger || '',
-          log.status || '',
-          log.reason || '',
-          log.journalName || '',
-          log.doi || '',
-          reportDetailValue(log)
-        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | '))
+        ...logs.slice(0, 12).map(log => {
+          let detailVal = reportDetailValue(log);
+          if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
+            detailVal = `[点击查看详情](${detailVal})`;
+          }
+          return [
+            formatBeijingDateTime(log.time),
+            log.trigger === 'alarm' ? '自动' : (log.trigger === 'manual' ? '手动' : log.trigger),
+            translateStep(log.status || ''),
+            translateReason(log.reason || ''),
+            log.journalName || '',
+            log.doi || '',
+            detailVal
+          ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ');
+        })
           .map(row => `| ${row} |`),
         ''
       ].join('\n');
 
       await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
       await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
-      await writeReportFile(`${monthDir}/watcher-data-${date}.jsonl`, detailJsonl, 'application/x-ndjson', opts);
+      // PRIVATE_WATCHER_ONLY: skipped writing .jsonl file to optimize disk space
       await writeReportFile('journal-access/summary.md', journalAccessMd, 'text/markdown', opts);
       await writeReportFile('journal-access/stats.csv', journalAccessCsv, 'text/csv', opts);
       await writeReportFile('journal-access/stats.json', journalAccessJson, 'application/json', opts);

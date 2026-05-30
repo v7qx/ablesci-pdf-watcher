@@ -67,6 +67,7 @@
       "matches": [
         "https://www.sciencedirect.com/*",
         "https://sciencedirect.com/*",
+        "https://linkinghub.elsevier.com/*",
         "https://www.nature.com/*",
         "https://nature.com/*",
         "https://pubs.rsc.org/*"

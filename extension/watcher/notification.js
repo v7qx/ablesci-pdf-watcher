@@ -199,12 +199,14 @@
         const message = reached
           ? `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`
           : `检测到 Ablesci 验证页（第 ${state.cfChallengeStreak} 次）。请前往浏览器处理；若继续累积将自动暂停值守。`;
-        await notifyWatcherNeedsAttention(
+        const notifyResult = await notifyWatcherNeedsAttention(
           message,
           listUrl,
           { requireInteraction: true, soundKind: 'urgent', priority: 2 }
         );
-        await incrementDaily('notified', trigger);
+        if (notifyResult && notifyResult.ok) {
+          await incrementDaily('notified', trigger);
+        }
       }
       if (reached) {
         state.pausedByCfChallenge = true;

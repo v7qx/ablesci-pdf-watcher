@@ -18,7 +18,8 @@
   let rscChallengePrompted = false;
 
   function isScienceDirect() {
-    return /(^|\.)sciencedirect\.com$/i.test(host);
+    // PRIVATE_WATCHER_ONLY
+    return /(^|\.)sciencedirect\.com$/i.test(host) || /(^|\.)elsevier\.com$/i.test(host);
   }
 
   function isNature() {

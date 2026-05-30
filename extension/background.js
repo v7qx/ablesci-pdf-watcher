@@ -314,6 +314,8 @@ const {
   hasActiveTask
 } = createBackgroundUploadApi({
   chromeApi: chrome,
+  // PRIVATE_WATCHER_ONLY
+  pendingPublisherTabs,
   defaultOptions: DEFAULT_OPTIONS,
   htmlDownloadMessage: HTML_DOWNLOAD_MESSAGE,
   nativeMessageLongTimeoutMs: NATIVE_MESSAGE_LONG_TIMEOUT_MS,

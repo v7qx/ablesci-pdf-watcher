@@ -174,7 +174,7 @@
           tabId = tab.id;
           timer = setTimeout(() => {
             cleanup();
-            reject(new Error('未触发 PDF 下载超时；请确认 Chrome 已设置“下载 PDF，而不是在 Chrome 中打开”，或当前账号有权限。'));
+            reject(new Error('未触发 PDF 下载超时（请确认已设置直接下载 PDF，或账号有权限）'));
           }, noDownloadTimeoutMs);
         } catch (err) {
           cleanup();
@@ -202,7 +202,7 @@
         let sourceUrlForMatching = pdfUrl;
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
-        let noDownloadTimeoutMessage = '未触发 PDF 下载超时；可能没有通过验证、没有权限，Chrome 没有设置为直接下载 PDF，或下载记录被清理。';
+        let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
         const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl);
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();

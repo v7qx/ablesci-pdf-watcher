@@ -424,8 +424,10 @@
         status: payload.downloadOnly ? 'download_only' : 'queued_upload',
         reason: payload.downloadOnly ? 'download_only' : 'auto_upload_enabled'
       });
-      await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载并校验一个候选。' : '低频值守已排队处理一个候选。');
-      await incrementDaily('notified', trigger || session?.trigger || '');
+      const notifyResult = await notifyWatcherNeedsAttention(payload.downloadOnly ? '低频值守已排队下载并校验一个候选。' : '低频值守已排队处理一个候选。');
+      if (notifyResult && notifyResult.ok) {
+        await incrementDaily('notified', trigger || session?.trigger || '');
+      }
       if (sessionPort) {
         const result = await sessionPort.result;
         if (!payload.downloadOnly) {

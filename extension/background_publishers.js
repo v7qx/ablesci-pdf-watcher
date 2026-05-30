@@ -2,7 +2,9 @@
 
 (function () {
   function isScienceDirectUrl(url) {
-    return /:\/\/(?:www\.)?sciencedirect\.com\//i.test(String(url || ''));
+    // PRIVATE_WATCHER_ONLY
+    const s = String(url || '');
+    return /:\/\/(?:www\.)?sciencedirect\.com\//i.test(s) || /:\/\/(?:linkinghub\.)?elsevier\.com\//i.test(s);
   }
 
   function extractScienceDirectPii(url) {
@@ -46,7 +48,9 @@
   }
 
   function isScienceDirectRelatedHost(h) {
-    return /(^|\.)sciencedirect\.com$/i.test(String(h || '')) || /(^|\.)sciencedirectassets\.com$/i.test(String(h || ''));
+    // PRIVATE_WATCHER_ONLY
+    const s = String(h || '');
+    return /(^|\.)sciencedirect\.com$/i.test(s) || /(^|\.)sciencedirectassets\.com$/i.test(s) || /(^|\.)elsevier\.com$/i.test(s);
   }
 
   function isScienceDirectAssetPdfUrl(url) {

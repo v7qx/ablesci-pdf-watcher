@@ -4,6 +4,8 @@
 (function initBackgroundUploadQueue(globalThis) {
   function createBackgroundUploadQueueApi(deps = {}) {
     const {
+      // PRIVATE_WATCHER_ONLY
+      pendingPublisherTabs,
       defaultOptions,
       htmlDownloadMessage,
       getOptions,
@@ -29,6 +31,18 @@
     let taskQueue = [];
     let activeTask = null;
     let nextTaskId = 1;
+
+    // PRIVATE_WATCHER_ONLY
+    function hasSeenPublisherChallengeForTask(payload) {
+      if (!payload?.assistId || !pendingPublisherTabs) return false;
+      const targetId = String(payload.assistId).trim();
+      for (const pending of pendingPublisherTabs.values()) {
+        if (pending && String(pending.payloadSummary?.assistId).trim() === targetId) {
+          if (pending.publisherChallengeSeen) return true;
+        }
+      }
+      return false;
+    }
 
     function uploadLabel(payload) {
       const id = payload?.assistId || '';
@@ -81,6 +95,11 @@
           let failureReason = classifyJournalAccessFailureReason(err);
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
+          }
+          // PRIVATE_WATCHER_ONLY
+          if ((failureReason === 'download_not_triggered_timeout' || failureReason === 'task_timeout' || !failureReason) &&
+              hasSeenPublisherChallengeForTask(payload)) {
+            failureReason = 'cf_challenge';
           }
           let accessEnvironmentPause = null;
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {

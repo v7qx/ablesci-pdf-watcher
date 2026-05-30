@@ -162,7 +162,8 @@ async function save(saveOptions = {}) {
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
   opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
-  opts.watcherTraceLevel = ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
+  // PRIVATE_WATCHER_ONLY: Add compact trace level
+  opts.watcherTraceLevel = ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherConfigDir = String(opts.watcherConfigDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);

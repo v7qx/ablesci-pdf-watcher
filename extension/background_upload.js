@@ -5,6 +5,8 @@
   function createBackgroundUploadApi(deps) {
     const {
       chromeApi,
+      // PRIVATE_WATCHER_ONLY
+      pendingPublisherTabs,
       defaultOptions,
       htmlDownloadMessage,
       nativeMessageLongTimeoutMs,
@@ -270,6 +272,8 @@
       cancelTask,
       hasActiveTask
     } = createBackgroundUploadQueueApi({
+      // PRIVATE_WATCHER_ONLY
+      pendingPublisherTabs,
       defaultOptions,
       htmlDownloadMessage,
       getOptions,

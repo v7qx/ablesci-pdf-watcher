@@ -120,6 +120,7 @@
     }
 
     async function recordPublisherCfChallenge(pageUrl = '') {
+      // PRIVATE_WATCHER_ONLY
       const opts = await getOptions();
       if (opts.watcherStopOnCfChallenge === false) {
         return { paused: false, streak: 0, threshold: 0, notified: false };
@@ -127,10 +128,10 @@
       const stored = await chromeApi.storage.local.get([AUTO_WATCHER_STATE_KEY, 'watcherEnabled']);
       const state = stored[AUTO_WATCHER_STATE_KEY] || {};
       const threshold = Math.max(1, Number(opts.watcherCfPauseThreshold || defaultOptions.watcherCfPauseThreshold || 3));
-      state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
-      const reached = opts.watcherAdvancedSchedulerEnabled === true || state.cfChallengeStreak >= threshold;
+      state.publisherCfChallengeStreak = Number(state.publisherCfChallengeStreak || 0) + 1;
+      const reached = opts.watcherAdvancedSchedulerEnabled === true || state.publisherCfChallengeStreak >= threshold;
       if (reached) {
-        state.pausedByCfChallenge = true;
+        state.pausedByPublisherCfChallenge = true;
         await chromeApi.storage.local.set({
           watcherEnabled: false,
           [AUTO_WATCHER_STATE_KEY]: state
@@ -143,14 +144,14 @@
       let notified = false;
       if (opts.watcherCfNotificationEnabled !== false) {
         const message = reached
-          ? `连续 ${state.cfChallengeStreak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`
-          : `检测到出版商验证页（第 ${state.cfChallengeStreak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
+          ? `连续 ${state.publisherCfChallengeStreak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`
+          : `检测到出版商验证页（第 ${state.publisherCfChallengeStreak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
         await notifyAccessEnvironmentAnomaly(message);
         notified = true;
       }
       return {
         paused: reached,
-        streak: state.cfChallengeStreak,
+        streak: state.publisherCfChallengeStreak,
         threshold,
         notified,
         pageUrl: urlHostPath(pageUrl || '')
@@ -158,11 +159,12 @@
     }
 
     async function clearPublisherCfChallengeState() {
+      // PRIVATE_WATCHER_ONLY
       const stored = await chromeApi.storage.local.get(AUTO_WATCHER_STATE_KEY);
       const state = stored[AUTO_WATCHER_STATE_KEY] || {};
-      if (!state.cfChallengeStreak && !state.pausedByCfChallenge) return;
-      state.cfChallengeStreak = 0;
-      state.pausedByCfChallenge = false;
+      if (!state.publisherCfChallengeStreak && !state.pausedByPublisherCfChallenge) return;
+      state.publisherCfChallengeStreak = 0;
+      state.pausedByPublisherCfChallenge = false;
       await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
     }
 

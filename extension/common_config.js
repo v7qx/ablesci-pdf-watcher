@@ -56,7 +56,8 @@
     watcherDailyReportEnabled: true,
     watcherBadgeCountdownEnabled: true,
     watcherNotificationEnabled: false,
-    watcherTraceLevel: 'normal',
+    // PRIVATE_WATCHER_ONLY: default trace level to off
+    watcherTraceLevel: 'off',
     watcherReportDir: '',
     watcherConfigDir: '',
     watcherNoDownloadTimeoutMinutes: 1,
@@ -210,7 +211,8 @@
       watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
       watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
       watcherNotificationEnabled: opts.watcherNotificationEnabled !== false,
-      watcherTraceLevel: ['off', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
+      // PRIVATE_WATCHER_ONLY: Add compact trace level
+      watcherTraceLevel: ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60),

@@ -73,6 +73,19 @@
           const changedKeys = watcherKeys.slice(0, 12).join(',');
           updateActionBadge().catch(() => {});
 
+          if (changes.watcherEnabled && changes.watcherEnabled.newValue === true) {
+            // PRIVATE_WATCHER_ONLY
+            getWatcherState().then(state => {
+              if (state.cfChallengeStreak || state.pausedByCfChallenge || state.publisherCfChallengeStreak || state.pausedByPublisherCfChallenge) {
+                state.cfChallengeStreak = 0;
+                state.pausedByCfChallenge = false;
+                state.publisherCfChallengeStreak = 0;
+                state.pausedByPublisherCfChallenge = false;
+                return saveWatcherState(state);
+              }
+            }).catch(err => console.warn('[Ablesci PDF Watcher] Failed to reset CF streak on enable:', err));
+          }
+
           const SCHEDULE_AFFECTING_KEYS = [
             'watcherEnabled',
             'watcherSpeedMode',
