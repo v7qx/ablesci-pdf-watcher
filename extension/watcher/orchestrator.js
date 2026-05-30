@@ -281,7 +281,8 @@
               expectedDone: 0,
               targetError: 0,
               rateMultiplier: 1,
-              sessionIntensity: 0
+              sessionIntensity: 0,
+              riskLimit: Number(opts.watcherRiskBudgetLimit || 10)
             }
           : calculateTargetState(stateForTargets, opts);
         const frozenTargetState = trigger === 'alarm' && stateForTargets.nextAssistPlanningData?.targetState

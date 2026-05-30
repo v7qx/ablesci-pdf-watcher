@@ -36,6 +36,15 @@
       return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
     }
 
+    function formatMarkdownTableRow(cells) {
+      const formatted = cells.map(value => {
+        const raw = value || '';
+        const str = String(raw).trim();
+        return str !== '' ? ` ${str.replace(/\|/g, '\\|')} ` : ' ';
+      });
+      return `|${formatted.join('|')}|`;
+    }
+
     const STEP_TRANSLATIONS = {
       'failed': '失败',
       'skipped': '已跳过',
@@ -466,7 +475,7 @@
         '',
         '| Journal | State | Success | Fail | Consecutive Fail | DOI Fail | Reason | Aliases |',
         '| --- | --- | ---: | ---: | ---: | ---: | --- | --- |',
-        ...journalAccessItems.slice(0, 80).map(item => [
+        ...journalAccessItems.slice(0, 80).map(item => formatMarkdownTableRow([
           item.journalName,
           item.accessState,
           item.successCount,
@@ -475,7 +484,7 @@
           item.consecutiveDoiFailureCount,
           item.lastReason,
           item.aliases.slice(0, 6).join(', ')
-        ].map(value => String(value || '').replace(/\|/g, '\\|')).join(' | ')).map(row => `| ${row} |`),
+        ])),
         '',
         '## Files',
         '',
@@ -484,7 +493,7 @@
         '- `journal-access/summary.md`: compact human-readable view.',
         '- `journal-access.json`: compatibility copy at report root.',
         ''
-      ].join('\n');
+      ].map(line => line.trimEnd()).join('\n');
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -558,11 +567,14 @@
 
       const monthDir = date.slice(0, 7);
       const reportStem = `${monthDir}/${date}`;
-      const md = [
-        `# 科研通值守日报 ${date}`,
-        '',
-        '## 运行数据摘要 (Summary)',
-        '',
+      const isTraceCompact = opts.watcherTraceLevel === 'compact' || opts.watcherTraceLevel === 'off';
+      const summaryLines = isTraceCompact ? [
+        `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
+        `- 最近一次选中的列表页链接: ${lastAttempt.pickedListUrl ? `[点击跳转](${lastAttempt.pickedListUrl})` : '无'}`,
+        `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
+        `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- 今日应助目标数: ${Number(state.todayTarget || 0)}`
+      ] : [
         `- 已检查候选数: ${Number(daily.checked || 0)}`,
         `- 下载或排队数: ${Number(daily.downloaded || 0)}`,
         `- 成功上传数: ${Number(daily.uploaded || 0)}`,
@@ -605,22 +617,30 @@
         `- 最近会话目标大小: ${Number(state.lastSession?.targetSessionSize || 0)}`,
         `- 最近会话已处理数: ${Number(state.lastSession?.handledCount || 0)}`,
         `- 最近会话执行时长 (秒): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
-        `- Trace 事件记录数: ${traces.length}`,
+        `- Trace 事件记录数: ${traces.length}`
+      ];
+
+      const md = [
+        `# 科研通值守日报 ${date}`,
         '',
-        '## 决策与过滤记录 (Skips And Decisions)',
+        '## Summary',
+        '',
+        ...summaryLines,
+        '',
+        '## Skips And Decisions',
         '',
         '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
         '| --- | --- | --- | --- | --- | --- |',
-        ...skipDecisionRows.map(row => [
+        ...skipDecisionRows.map(row => formatMarkdownTableRow([
           formatBeijingTimeOnly(row.time),
           row.trigger === 'alarm' ? '自动' : (row.trigger === 'manual' ? '手动' : row.trigger),
           row.step,
           row.reason,
           row.detail,
           formatBeijingDateOnly(row.time)
-        ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ')),
+        ])),
         '',
-        '## 最近事件记录 (Recent Events)',
+        '## Recent Events',
         '',
         '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
         '| --- | --- | --- | --- | --- | --- | --- |',
@@ -629,7 +649,7 @@
           if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
             detailVal = `[点击查看详情](${detailVal})`;
           }
-          return [
+          return formatMarkdownTableRow([
             formatBeijingDateTime(log.time),
             log.trigger === 'alarm' ? '自动' : (log.trigger === 'manual' ? '手动' : log.trigger),
             translateStep(log.status || ''),
@@ -637,11 +657,10 @@
             log.journalName || '',
             log.doi || '',
             detailVal
-          ].map(v => String(v).replace(/\|/g, '\\|')).join(' | ');
-        })
-          .map(row => `| ${row} |`),
+          ]);
+        }),
         ''
-      ].join('\n');
+      ].map(line => line.trimEnd()).join('\n');
 
       await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
       await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);

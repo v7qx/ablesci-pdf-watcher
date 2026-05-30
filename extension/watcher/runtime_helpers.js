@@ -150,6 +150,19 @@
       return Math.max(1, minutesUntilMidnight + Math.random() * 5);
     }
 
+    function quotaResetDelayMinutes(opts, date = new Date()) {
+      const nowMinute = beijingMinutesNow(date);
+      const minutesUntilMidnight = 24 * 60 - nowMinute;
+      if (opts?.watcherUseCalendarProgress || !opts?.watcherQuantSchedulerEnabled) return Math.max(1, minutesUntilMidnight + Math.random() * 5);
+      for (let d = 1; d <= 8; d += 1) {
+        const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
+        if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;
+        const firstStart = opts.watcherWorkWindows.map(w => w.start).sort((a, b) => a - b)[0] ?? 0;
+        return Math.max(1, minutesUntilMidnight + (d - 1) * 24 * 60 + firstStart + Math.random() * 10);
+      }
+      return Math.max(1, minutesUntilMidnight + Math.random() * 5);
+    }
+
     function isAssistDue(state = null) {
       const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
       return !Number.isFinite(nextAssistMs) || nextAssistMs <= Date.now() + 1000;
@@ -159,8 +172,8 @@
       return {
         schedulerModelMode: state.schedulerModelMode || '',
         speedMode: state.speedMode || '',
-        todayTarget: 0,
-        hourTarget: 0,
+        todayTarget: state.todayTarget ?? 0,
+        hourTarget: state.hourTarget ?? 0,
         rateMultiplier: 1,
         targetError: state.targetError ?? state.lag ?? 0,
         lag: state.lag ?? state.targetError ?? 0,
@@ -191,18 +204,18 @@
         monthDone: liveTarget.monthDone,
         targetError: liveTarget.targetError ?? liveTarget.lag ?? frozenTarget.targetError ?? frozenTarget.lag ?? 0,
         lag: liveTarget.lag ?? liveTarget.targetError ?? frozenTarget.lag ?? frozenTarget.targetError ?? 0,
-        todayTarget: 0,
-        hourTarget: 0,
+        todayTarget: liveTarget.todayTarget || frozenTarget.todayTarget || 0,
+        hourTarget: liveTarget.hourTarget || frozenTarget.hourTarget || 0,
         rateMultiplier: 1,
         demandFactor: 1,
         trendFactor: 1,
         marketRegime: '',
         recentH1DemandDelta: 0,
         recentD1DemandDelta: 0,
-        riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed,
-        riskLimit: liveTarget.riskLimit ?? frozenTarget.riskLimit,
-        riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining,
-        riskExhausted: liveTarget.riskExhausted === true
+        riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed ?? 0,
+        riskLimit: liveTarget.riskLimit || frozenTarget.riskLimit || 0,
+        riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining ?? 0,
+        riskExhausted: liveTarget.riskExhausted === true || frozenTarget.riskExhausted === true
       };
     }
 

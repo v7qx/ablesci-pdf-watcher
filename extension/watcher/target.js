@@ -377,7 +377,6 @@
       }
       return configMode;
     }
-
     function calculateTargetState(state, opts) {
       const done = monthDone(state, opts);
       const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
@@ -390,6 +389,22 @@
         ? effectiveTarget
         : Math.round(monthlyTarget * Math.min(1, effectiveProgress));
       const lag = expectedDone - done;
+
+      const key = todayKey();
+      const [year, month, day] = key.split('-').map(Number);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      let remainingWorkdays = 0;
+      for (let d = 1; d <= daysInMonth; d += 1) {
+        const current = new Date(year, month - 1, d, 12, 0, 0);
+        if (opts.watcherWorkdays && opts.watcherWorkdays.has && opts.watcherWorkdays.has(weekdayNumber(current))) {
+          if (d >= day) {
+            remainingWorkdays += 1;
+          }
+        }
+      }
+      const calculatedTodayTarget = Math.max(0, Math.ceil((monthlyTarget - done) / Math.max(1, remainingWorkdays)));
+      const riskLimit = Number(opts.watcherRiskBudgetLimit || 10);
+
       if (monthlyTarget <= 0) {
         const rawSpeedMode = 'normal';
         const speedMode = determineSpeedMode(state, opts, rawSpeedMode);
@@ -406,6 +421,7 @@
           actualDone: done,
           targetError: 0,
           todayTarget: 0,
+          riskLimit,
           demandFactor: 1,
           trendFactor: 1,
           rateMultiplier: 1
@@ -426,7 +442,8 @@
         availabilityFactor: availability.availabilityFactor,
         availabilityExpectedWakeCount: availability.expectedWakeCount,
         availabilityActualWakeCount: availability.actualWakeCount,
-        todayTarget: 0,
+        todayTarget: calculatedTodayTarget,
+        riskLimit,
         schedulerModelMode: 'calendar_target',
         demandFactor: 1,
         trendFactor: 1,

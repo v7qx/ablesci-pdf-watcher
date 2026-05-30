@@ -308,7 +308,15 @@
                 durationMs
               }),
               recordRiskEvent(context.opts || {}, msg.message || 'success', 'success'),
-              recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success')
+              recordBanditOutcome(context.source, 'success', durationMs, msg.message || 'success'),
+              appendWatcherLog({
+                ...context.payload,
+                detailUrl: context.detailUrl,
+                sessionId: context.sessionId || '',
+                trigger: context.trigger || '',
+                status: 'success',
+                reason: msg.message || 'done'
+              }).then(writeDailyReports)
             ]);
             settle({ ok: true, reason: msg.message || 'done', durationMs });
           }
@@ -324,6 +332,7 @@
         disconnect
       };
     }
+
 
     function makeSessionPortContext(context) {
       let timer = null;
