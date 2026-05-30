@@ -89,17 +89,6 @@ $PreferencesPath = Join-Path $DefaultProfileDir "Preferences"
 $LocalStatePath = Join-Path $ProfileDir "Local State"
 $FirstRunPath = Join-Path $ProfileDir "First Run"
 
-# Clean up existing huge AI model directory to free disk space immediately
-$modelDir = Join-Path $ProfileDir "OptGuideOnDeviceModel"
-if (Test-Path -LiteralPath $modelDir) {
-  try {
-    Remove-Item -LiteralPath $modelDir -Recurse -Force | Out-Null
-    Write-Host "Deleted existing large model directory: $modelDir"
-  } catch {
-    Write-Warning "Could not delete existing model directory: $_"
-  }
-}
-
 New-Item -ItemType Directory -Force -Path $DefaultProfileDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
 if (!(Test-Path -LiteralPath $FirstRunPath)) {

@@ -1,247 +1,154 @@
 # Ablesci PDF Watcher
 
-Chrome / Edge 扩展 + Go Native Messaging Helper，用于在 Ablesci 求助详情页辅助完成正文 PDF 的下载、校验和上传。
+Chrome / Edge 扩展 + Go Native Messaging Helper，用于在 Ablesci 求助详情页辅助完成正文 PDF 的下载、校验与上传。
 
-它只使用当前浏览器已经能访问到的 PDF，不处理登录页、验证码页、错误页、HTML 或其它非 PDF 文件。
+## 安装与配置
 
-## 安装与启动顺序
+本项目包含 **浏览器扩展** 与 **Native Helper (本地助手)** 两部分：
+- **浏览器扩展**：提供用户界面、选项设置页、页面辅助应助按钮及状态提示等核心交互逻辑。
+- **Native Helper**：运行在本地的辅助进程，提供自动上传、PDF 文件头校验、计算 MD5/文件大小以及本地应助日志写入等功能（如需自动上传则为必需）。
 
-先区分两类能力：
+建议按照以下步骤完成系统配置与安装：
 
-- **只要浏览器提醒、设置页、页面按钮**：只加载扩展即可，**不需要 Native Helper**。
-- **需要自动上传 / PDF 校验 / 本地日报 / 本地配置文件**：必须再安装 **Native Helper**。
+### 一、安装与配置浏览器扩展
 
-推荐顺序如下。
+#### 1. 准备专用浏览器 Profile（推荐）
+为了避免日常浏览器的 PDF 预览与下载设置受到干扰，建议为本插件创建一个专用的 Chrome/Edge 浏览器 Profile。运行以下初始化脚本可自动生成专用 Profile 及其桌面启动快捷方式：
 
-### 第 1 步：准备专用浏览器 Profile（推荐）
-
-为了避免影响日常浏览器的 PDF 预览和下载设置，建议先创建一个专用 Chrome / Edge Profile。脚本会自动：
-
-- 创建专用浏览器 Profile 目录；
-- 创建独立下载目录；
-- 关闭下载前询问保存位置；
-- 设置 PDF 直接下载；
-- 在桌面创建一个专用浏览器快捷方式；
-- 打开扩展管理页，方便你手动加载扩展。
-
-Chrome：
-
+**Chrome**：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\init_browser_profile.ps1 -Browser Chrome -Launch
 ```
 
-Edge：
-
+**Edge**：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\init_browser_profile.ps1 -Browser Edge -Launch
 ```
+*说明：若已存在或使用自管理 Profile，可忽略此步骤。*
 
-这一步不会自动安装扩展。浏览器打开后仍需要你手动开启开发者模式并加载 `extension` 目录。
+#### 2. 加载浏览器扩展
+1. 打开刚才创建的专用浏览器，访问 `chrome://extensions/`（或 `edge://extensions/`）。
+2. 开启页面右上角的 **开发者模式**。
+3. 点击 **加载已解压的扩展程序**。
+4. 选择本仓库的 `extension` 文件夹。
 
-如果你已经手动创建了专用浏览器 Profile，也可以跳过这一步。
+#### 3. 检查 PDF 下载设置与端侧 AI 模型拦截
+为确保下载机制正常运行并节省磁盘空间，请核对以下设置：
+- **PDF 自动下载**：关闭“下载前询问每个文件的保存位置”，并配置 PDF 为“直接下载”（而非在浏览器内置阅读器中预览）。
+  - Chrome 设置路径：`chrome://settings/downloads` 与 `chrome://settings/content/pdfDocuments`
+  - Edge 设置路径：`edge://settings/downloads` 与 `edge://settings/content/pdfDocuments`
+  - *(说明：使用上述第 1 步脚本初始化专用 Profile时，此项已自动配置。)*
+- **禁用 Chrome 端侧 AI 模型下载**：
+  若未通过快捷方式 `--disable-features` 启动，Chrome 可能会在后台下载端侧 AI 模型（大小约 4GB）。若需手动或全局禁用此下载行为：
+  1. 访问 `chrome://flags`。
+  2. 搜索 `#optimization-guide-on-device-model` 并将其设置为 **`Disabled`**。
+  3. 重启浏览器。
+  4. 手动删除 Profile 目录下的 `OptGuideOnDeviceModel` 缓存文件夹以释放磁盘空间。
+  - *(说明：若使用第 1 步脚本创建的快捷方式启动，命令行已默认添加 `--disable-features=OptimizationGuideOnDeviceModel`，无需手动配置。)*
 
-### 第 2 步：加载扩展（必须）
+---
 
-1. 打开 `chrome://extensions/` 或 `edge://extensions/`
-2. 开启开发者模式
-3. 选择“加载已解压的扩展程序”
-4. 选择 `extension` 目录
+### 二、编译与安装 Native Helper
 
-这一步完成后，浏览器通知、设置页、测试提醒等能力已经可以工作。
-
-### 第 3 步：确认浏览器下载设置（建议）
-
-插件依赖浏览器下载完成事件。建议：
-
-- 关闭下载前询问保存位置
-- 设置 PDF 直接下载，不在内置 PDF 阅读器中打开
-
-Chrome：
-
-```text
-chrome://settings/downloads
-chrome://settings/content/pdfDocuments
-```
-
-Edge：
-
-```text
-edge://settings/downloads
-edge://settings/content/pdfDocuments
-```
-
-如果使用了第 1 步脚本，这些下载设置以及禁止下载 Chrome 4GB 端侧 AI 模型 (`OptGuideOnDeviceModel`) 的优化策略已自动应用在专用 Profile 中。
-
-#### 附加建议：关闭 Chrome 自动下载 4GB AI 模型 (节省磁盘空间)
-现代 Chrome 可能会在后台自动下载大约 4GB 的 AI 模型 (`OptGuideOnDeviceModel\*\weights.bin`)。如果您是手动创建的 Profile 或想全局关闭此下载：
-1. 在浏览器地址栏输入 `chrome://flags` 并回车。
-2. 搜索并找到 `#optimization-guide-on-device-model` 项。
-3. 将其状态从 `Default` 修改为 **`Disabled`**。
-4. 重启浏览器，并手动删除您 Profile 目录下的 `OptGuideOnDeviceModel` 文件夹释放空间。
-
-### 第 4 步：安装 Native Helper（仅自动上传所必需）
-
-如果你需要以下能力，才需要这一步：
-
-- 自动上传
-- `%PDF-` 文件头校验
-- MD5 / 文件大小计算
-- OSS 上传
-- 本地日报写入
-- 读取 / 写入 `journal-access.json`、`telegram.json`
-
-先确认 helper 可执行文件是否存在：
-
-```powershell
-Test-Path .\native-helper\bin\windows-amd64\ablesci_pdf_helper.exe
-```
-
-如果返回 `False`，先编译 helper：
-
+#### 1. 编译可执行文件
+检查本地 `native-helper\bin\windows-amd64\` 目录下是否存在 `ablesci_pdf_helper.exe`。若不存在，请先执行编译脚本：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
 ```
+*说明：编译需要 Go 语言开发环境。若无本地编译环境，请将预编译好的 `ablesci_pdf_helper.exe` 放置到 `native-helper\bin\windows-amd64\` 目录。*
 
-如果提示未找到 Go，说明当前环境还不能从源码编译 helper；请先准备 Go 环境，或使用已经预编译好的 `native-helper\bin\windows-amd64\ablesci_pdf_helper.exe`。
+#### 2. 注册 Native Host
+运行安装脚本将 Native Host 注册到系统。安装脚本会从专用 Profile 中自动识别已加载扩展的 ID 并完成注册：
 
-然后安装 Native Host。安装脚本需要从专用 Profile 中识别扩展 ID，所以请先完成第 1 步：打开专用浏览器、进入 `chrome://extensions/` 或 `edge://extensions/`、开启开发者模式、加载本仓库 `extension` 目录。加载后建议关闭一次专用浏览器，再执行下面命令。
-
-Chrome：
-
+**Chrome**：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\install_host.ps1 -Browser Chrome -ProfileDir "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile"
 ```
 
-Edge：
-
+**Edge**：
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\install_host.ps1 -Browser Edge -ProfileDir "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile"
 ```
 
-安装脚本会从专用 Profile 中自动识别已加载扩展的 ID，并再次确认该 Profile 已设置为 PDF 直接下载。
-如果你没有使用第 1 步脚本、扩展还没有加载到这个 Profile，或者自动识别失败，可以在扩展管理页复制扩展 ID 后手动指定：
-
+*若自动识别失败或未使用独立 Profile，可手动指定扩展 ID 运行安装：*
 ```powershell
-.\native-host\install_host.ps1 -Browser Chrome -ExtensionId <扩展ID>
+.\native-host\install_host.ps1 -Browser Chrome -ExtensionId <您的扩展ID>
 ```
+*说明：更新 Helper 文件或扩展 ID 后，需重新运行安装脚本以覆盖旧注册信息。*
 
-如果 Chrome 和 Edge 都使用，需要分别用各自浏览器里的扩展 ID 运行一次。
+---
 
-如果你之前安装过早期版本的 Native Helper，更新后请重新执行本步骤。当前公开版默认 Native Host ID 为 `com.ablesci.pdf_watcher`。
+### 三、验证与测试
+1. 打开浏览器扩展的“选项”设置页面。
+2. 点击 **测试提醒**，验证浏览器桌面通知是否正常触发。
+3. 点击 **测试** 以校验 Native Helper。若状态框提示 `正常：pong`，说明扩展程序与本地助手的通信链路已打通。
 
-### 第 5 步：验证
+*若提示 `Error when communicating with the native messaging host`，说明通信失败。可能原因包括：注册表未正确导入、扩展 ID 变动未重新注册、或可执行文件启动被系统拦截。此时仅本地自动上传与本地日报功能受阻，页面辅助按钮仍可工作。*
 
-1. 打开扩展设置页
-2. 点击“测试提醒”
-   - 默认应走**浏览器通知**
-   - 这一步**不依赖 Native Helper**
-3. 如果你要用自动上传，再点击“测试 Native Helper”
-   - 显示 `正常：pong` 才说明 helper 可用
+---
 
-如果“测试 Native Helper”报：
+## 选项配置
 
-```text
-Error when communicating with the native messaging host
-```
+可在选项设置页面配置以下选项：
 
-通常表示：
+- **Native Host 名称**：默认 `com.ablesci.pdf_watcher`。
+- **最小自动上传体积**：默认 `1 MB`，小于该值时只下载不上传。
+- **最大自动上传体积**：默认 `99 MB`，大于该值时只下载不上传。
+- **保留浏览器下载记录**：控制是否在浏览器历史中保存下载痕迹。
+- **上传成功后删除本地 PDF**：默认关闭。开启后，仅自动清除已成功上传且通过校验的文献 PDF。
+- **调试模式**：仅下载并校验 PDF，不执行上传，用于验证提取与校验逻辑。
+- **智能推送**：提交成功后是否显示相关文献推荐弹窗。
+- **页面辅助按钮样式**：可自定义应助按钮的名称、颜色与挂载位置。
+- **复制最近一次诊断信息**：方便排查环境故障。
+- **实验低频值守**：默认关闭。启用后通过浏览器后台定时器低频轮询 Ablesci 求助列表，自动过滤置顶、举报、驳回及格式异常的文献候选，实现单任务自动调度。
 
-- 没有执行 `install_host.ps1`
-- 扩展 ID 变了但没有重新注册
-- 这台电脑拦截了未签名本地 EXE
+---
 
-此时：
+## PDF 下载与校验上传逻辑
 
-- **浏览器通知仍可工作**
-- **自动上传、PDF 校验、本地日报会受影响**
+- **链接提取**：若求助详情页提供直接 PDF 链接，优先采用该链接下载；针对 ScienceDirect、Nature 等出版商，将自动分析并请求页面中的原生 PDF 入口。
+- **文件校验**：插件监听浏览器下载完成事件，捕获下载文件并递交给 Native Helper。Helper 将校验文件是否包含 `%PDF-` 头部特征，并计算 MD5 和文件大小。
+- **异常拦截**：若下载的为 HTML、登录页、验证码或错误提示页，插件将中止后续流程，不会执行上传。
+- **安全过滤**：若命中期刊黑名单、补充材料备注、求助已驳回/举报或超出体积限制，将仅下载并校验文件，不触发自动上传。
+- **串行处理**：任务采用串行队列，同一时间仅下载/校验一个求助任务。
 
-## 设置
+---
 
-扩展设置页里可以修改：
+## 运行须知与文件清理
 
-- Native Host 名称：默认 `com.ablesci.pdf_watcher`。
-- 最小自动上传体积：默认 `1 MB`，小于该值只下载不上传。
-- 最大自动上传体积：默认 `99 MB`，大于该值只下载不上传。
-- 是否保留浏览器下载记录。
-- 上传成功后是否删除本地 PDF：默认关闭，开启后只删除当前任务上传成功且通过 PDF 校验的文件。
-- 调试模式：只下载并校验 PDF，不自动上传，并显示准备上传的文件信息。
-- 智能推送：控制提交成功后是否显示网站返回的相关文献提示层。
-- 按钮显示名称、颜色和位置；有快捷应助区域时挂到该区域，没有时回退到页面详情区域。
-- 复制最近一次诊断信息。
-- 实验低频值守：默认关闭；启用后使用浏览器 alarm 低频检查 Ablesci 求助列表，跳过置顶、举报、驳回、补充材料和明显异常候选，每次最多处理 1 个候选。
+- **避免误上传**：插件基于浏览器下载事件（Downloads API）进行监听，在排队或等待下载期间，请勿手动在同浏览器中下载其他 PDF 文档，以防触发误上传。
+- **文件保留规则**：默认不会删除本地下载的文件。如启用“上传成功后删除本地 PDF”，插件仅在检测到 PDF 上传成功且通过文件头校验后，才会清除该本地文件。若下载失败或未触发上传，文件将继续留存。
 
-## 下载和上传逻辑
+---
 
-- Ablesci 页面如果提供直接 PDF 链接，优先使用该链接。
-- ScienceDirect / Nature 等页面会使用出版社网页中的原生 PDF 入口。
-- 插件会监听浏览器下载完成事件，拿到下载文件后交给 Native Helper 校验 `%PDF-` 文件头、计算 MD5 和文件大小。
-- 如果下载到的是 HTML、登录页、验证码页或错误页，插件会停止处理，不会上传。
-- 命中风险提示、补充材料、备注、驳回/举报提示、小于最小体积或大于最大体积时，只下载和校验，不自动上传。
-- 同一时间只处理一个 Ablesci 任务，后续任务会排队。
+## Native Helper 运行机制
 
-## 使用提醒与文件删除
+- **轻量无状态**：`ablesci_pdf_helper.exe` 基于 Native Messaging 协议，仅在浏览器扩展发起请求时由浏览器拉起运行，执行完毕后立即退出。非后台常驻进程，不监听任何端口，不占用系统网络服务。
+- **核心职责**：
+  1. 通信响应（`ping/pong` 校验）；
+  2. PDF 文件头 `%PDF-` 特征码校验；
+  3. 计算文件 MD5 与文件大小；
+  4. 将通过校验的 PDF 文件上传至目标云存储（OSS）地址；
+  5. 依据扩展配置自动清理已上传的 PDF 文件；
+  6. 读写本地的 `journal-access.json` 等配置文件。
 
-插件依赖浏览器下载事件。使用时建议一次只处理一个求助任务；等待下载期间，不要在同一浏览器里手动下载其它文献 PDF，否则可能误传文件。
+---
 
-默认不删除本地 PDF。只有开启“上传成功后删除本地 PDF”时，才会删除当前任务上传成功、且通过 `%PDF-` 校验的 `.pdf` 文件。下载到 HTML、登录页、验证码页或错误页时不会上传，默认也不会删除。
+## 从源码构建 Helper
 
-## Native Helper
+在需要自主打包或修改 Helper 逻辑时，可按需重新构建 EXE 及其相关图标资源（需本地安装 Go 语言环境）：
 
-`ablesci_pdf_helper.exe` 是 Native Messaging Helper。它不是常驻服务，不开端口；浏览器需要时启动，完成任务后退出。
-
-Helper 主要做：
-
-1. `ping` 测试；
-2. 校验 PDF 文件头；
-3. 计算 MD5 和文件大小；
-4. 上传到 Ablesci 返回的 OSS 地址；
-5. 按扩展设置决定是否删除上传成功后的本地 PDF；
-6. 管理配置文件（读取/写入 JSON 配置）。
-
-通知默认**不依赖 Helper**。默认提醒方式是浏览器通知；只有你手动切到 `Native Helper（实验）` 时，才会调用 helper 的本地通知路径。
-
-### Helper 兼容性说明
-
-某些 Windows 电脑会拦截未签名 EXE，表现为：
-
-```text
-测试 Native Helper 失败：
-Error when communicating with the native messaging host
-```
-
-这不会影响浏览器通知，但会影响自动上传链路。
-
-`install_host.ps1` 安装时会自动：
-
-1. 将 `icon.ico`（多分辨率）复制到安装目录；
-2. 在开始菜单 `\Programs\Ablesci PDF Watcher\` 创建 `.lnk` 快捷方式；
-3. 快捷方式设置 `AppUserModelID = AblesciPDFWatcher` 并关联图标。
-
-如果你显式选择 Native 通知模式，Helper 会通过 PowerShell 桥接 WinRT Toast API 发通知。这个路径更容易被安全策略拦截，所以只保留为实验选项。
-
-## 从源码构建 Helper（可选）
-
-只有在以下情况才需要这一步：
-
-- 仓库里没有预编译 helper
-- 你修改了 `native-helper` 源码
-- 你需要自己重新产出 EXE
-
-编译 `ablesci_pdf_helper.exe`，同时生成通知所需的 `icon48.png` 和 `icon.ico`（多分辨率图标）：
-
-Windows：
-
+**Windows 平台编译**：
 ```powershell
 .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
 ```
 
-Linux / macOS 交叉编译：
-
+**多平台交叉编译**：
 ```powershell
 .\native-host\build_helper.ps1 -TargetOS linux -TargetArch amd64
 .\native-host\build_helper.ps1 -TargetOS linux -TargetArch arm64
@@ -249,76 +156,40 @@ Linux / macOS 交叉编译：
 .\native-host\build_helper.ps1 -TargetOS darwin -TargetArch arm64
 ```
 
-## 扩展图标（仅改图标时需要）
+---
 
-图标源码位于 `extension/icons/source.svg`。**只有当你修改了 SVG 颜色或形状时**，才需要重新生成浏览器使用的 PNG：
+## 扩展图标重新生成
 
+图标源文件为 `extension/icons/source.svg`。若修改了 SVG 颜色或设计，需重新生成不同尺寸的 PNG 文件：
 ```powershell
 python .\scripts\build_icons.py
 ```
+脚本将自动渲染生成 `icon16.png`、`icon32.png`、`icon48.png` 和 `icon128.png`。生成后在扩展管理页重新加载即可生效。
 
-脚本会生成 `extension/icons/icon16.png`、`icon32.png`、`icon48.png` 和 `icon128.png`。开发者模式下需要在扩展管理页重新加载扩展后生效。
+---
 
 ## 卸载
 
-这个项目分成两部分：
+本项目由浏览器扩展与本地 Helper 两部分组成，需分别卸载：
 
-1. **浏览器扩展**
-   - 直接在 Chrome / Edge 的扩展管理页移除即可
-   - 这部分不写系统注册表
+### 1. 卸载浏览器扩展
+在 Chrome / Edge 扩展程序管理页面直接移除扩展即可。此部分不写入系统注册表。
 
-2. **Native Helper**
-   - 会写入当前用户注册表：
-     - `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ablesci.pdf_watcher`
-     - `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.ablesci.pdf_watcher`
-   - 会在本地安装目录放置：
-     - `ablesci_pdf_helper.exe`
-     - Native host manifest
-     - 图标文件
-   - 会创建一个开始菜单快捷方式，用于通知图标来源
+### 2. 卸载 Native Helper
+按照以下步骤清理系统注册表及本地物理文件：
 
-所以如果你只删除扩展，**Helper 不会自动消失**。
+* **第一步：注销注册表项及快捷方式**
+  在项目根目录下打开 PowerShell 并运行注销脚本，清理当前用户下的 Native Messaging 注册表项和开始菜单快捷方式：
+  ```powershell
+  .\native-host\uninstall_host.ps1
+  ```
 
-只移除 Native Helper 注册信息和开始菜单快捷方式：
-
-```powershell
-.\native-host\uninstall_host.ps1
-```
-
-连同安装目录一起删除：
-
-```powershell
-.\native-host\uninstall_host.ps1 -RemoveFiles
-```
-
-现在的卸载脚本是保守模式：
-
-- 只删除**已知属于本插件**的文件：
-  - `ablesci_pdf_helper.exe`
-  - `com.ablesci.pdf_watcher.json`
-  - `icon48.png`
-  - `icon.ico`
-  - 安装标记文件
-- 只有在目录被清空后，才会删除安装目录本身
-- 如果目录里有别的文件，脚本会停止目录删除并提示你手动检查
-- 如果安装目录里缺少插件标记或 manifest 不匹配，脚本会拒绝删文件，只建议你手动检查
-
-如果你想手动确认再删，可以先打开安装目录：
-
-```powershell
-.\native-host\uninstall_host.ps1 -OpenInstallDir
-```
-
-建议顺序：
-
-1. 在浏览器扩展管理页移除扩展
-2. 运行 `.\native-host\uninstall_host.ps1`
-3. 如果确认不再使用，再运行 `.\native-host\uninstall_host.ps1 -RemoveFiles`
-
-如果你更偏向手动处理，也可以只运行：
-
-```powershell
-.\native-host\uninstall_host.ps1 -OpenInstallDir
-```
-
-然后自行删除打开的安装目录。这样更适合排查“另一台电脑脚本看起来没生效”这种情况，因为你可以直接看到 Helper 文件是否还在。
+* **第二步：清理本地物理文件**
+  - **手动删除（推荐）**：运行以下命令打开 Helper 本地安装目录，手动将 `AblesciPdfWatcher` 文件夹彻底删除：
+    ```powershell
+    .\native-host\uninstall_host.ps1 -OpenInstallDir
+    ```
+  - **自动删除（可选）**：若需使用脚本自动清理文件，可运行以下命令（若目录下存在非已知文件或自定义配置文件，脚本将不会执行删除）：
+    ```powershell
+    .\native-host\uninstall_host.ps1 -RemoveFiles
+    ```
