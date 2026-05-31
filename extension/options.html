@@ -113,13 +113,22 @@
       flex-basis: 420px;
     }
 
+    .setting-control-compact {
+      min-width: 120px;
+      flex: 0 0 180px;
+    }
+
+    .compact-number {
+      max-width: 160px;
+    }
+
     .watcher-action-row {
       align-items: center;
     }
 
     .watcher-action-control {
-      min-width: 360px;
-      flex: 0 0 520px;
+      min-width: 340px;
+      flex: 0 1 430px;
     }
 
     .watcher-action-group {
@@ -140,6 +149,10 @@
       padding: 0 8px;
     }
 
+    .watcher-action-row .setting-copy span {
+      white-space: nowrap;
+    }
+
     input[type="text"],
     input[type="number"],
     textarea,
@@ -153,6 +166,10 @@
       font: inherit;
       padding: 7px 10px;
       transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+
+    input[type="number"] {
+      text-align: right;
     }
 
     input[type="text"]:focus,
@@ -511,6 +528,8 @@
 </head>
 <body>
   <main class="page">
+    <input id="nativeHostName" type="hidden" value="com.ablesci.pdf_watcher">
+    <input id="downloadSubdir" type="hidden" value="">
     <header class="header">
       <h1>Ablesci PDF Watcher</h1>
       <p>设置下载、上传、按钮显示和低频值守。</p>
@@ -639,15 +658,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>Native Host 名称</strong>
-          <span>默认无需修改。</span>
-        </div>
-        <div class="setting-control">
-          <input id="nativeHostName" type="text" value="com.ablesci.pdf_watcher">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>保留浏览器下载记录</strong>
           <span>异常 HTML 下载会保留记录，便于确认。</span>
         </div>
@@ -660,17 +670,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>浏览器下载子目录</strong>
-          <span>相对浏览器默认下载目录，例如 AblesciPDF；留空则直接下载到默认目录。</span>
-        </div>
-        <div class="setting-control">
-          <input id="downloadSubdir" type="text" placeholder="AblesciPDF">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>PDF 移动目录</strong>
-          <span>可选。Native Helper 校验 PDF 前移动到这个绝对路径，用于避免默认下载目录堆积。</span>
+          <strong>自定义保存目录</strong>
+          <span>可选绝对路径。PDF 下载完成后由 Native Helper 移动到此目录；留空则保留在浏览器下载目录。</span>
         </div>
         <div class="setting-control">
           <input id="moveToDir" type="text" placeholder="D:\AblesciPDF">
@@ -705,8 +706,8 @@
           <strong>每日应助上限</strong>
           <span>按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。</span>
         </div>
-        <div class="setting-control">
-          <input id="watcherDailyLimit" type="number" min="0" max="500" step="1" value="10" aria-label="每日应助上限">
+        <div class="setting-control setting-control-compact">
+          <input id="watcherDailyLimit" class="compact-number" type="number" min="0" max="500" step="1" value="10" aria-label="每日应助上限">
         </div>
       </div>
       <div class="setting-row">
@@ -767,7 +768,7 @@
         </div>
         <div class="setting-control">
           <select id="watcherSpeedMode" aria-label="值守速度模式">
-            <option value="adaptive">智能自适应 (中位数 2~6 分钟)</option>
+            <option value="adaptive">自适应 (中位数 2~6 分钟)</option>
             <option value="fast">极速模式 (中位数 2 分钟)</option>
             <option value="normal">快速模式 (中位数 6 分钟)</option>
             <option value="slow">普通慢速 (中位数 10 分钟)</option>
@@ -777,15 +778,10 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>月目标</strong>
-          <span>按本月时间进度估算当前应完成量，用于智能自适应模式下计算调度间隔。</span>
+          <span>按本月时间进度估算当前应完成量，用于自适应模式下计算调度间隔。</span>
         </div>
-        <div class="setting-control setting-control-wide">
-          <div class="metric-grid">
-            <div class="metric-field">
-              <label for="watcherMonthlyTarget">月目标</label>
-              <input id="watcherMonthlyTarget" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
-            </div>
-          </div>
+        <div class="setting-control setting-control-compact">
+          <input id="watcherMonthlyTarget" class="compact-number" type="number" min="0" max="5000" step="10" value="2000" aria-label="月目标">
         </div>
       </div>
       </details>
@@ -794,7 +790,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
-          <span>每行一个 Ablesci 求助列表链接。默认使用 ScienceDirect / Elsevier 等待列表。</span>
+          <span>每行一个 Ablesci 求助列表链接。默认 Elsevier 在 3~200 页随机；也可追加 <code>&amp;page_min=1&amp;page_max=5</code> 自定义范围。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherListUrls" spellcheck="false"></textarea>
@@ -802,20 +798,11 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>每次最多候选</strong>
-          <span>保留兼容字段；量化调度使用"每会话最多候选"。</span>
-        </div>
-        <div class="setting-control">
-          <input id="watcherMaxCandidatesPerRun" type="number" min="1" max="1" step="1" value="1" disabled>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>非 SD 最低求助量</strong>
           <span>除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。</span>
         </div>
-        <div class="setting-control">
-          <input id="watcherMinNonSdSeekingCount" type="number" min="0" max="100000" step="1" value="200">
+        <div class="setting-control setting-control-compact">
+          <input id="watcherMinNonSdSeekingCount" class="compact-number" type="number" min="0" max="100000" step="1" value="200">
         </div>
       </div>
       <div class="setting-row">
@@ -867,15 +854,15 @@
           <div class="metric-grid">
             <div class="metric-field">
               <label for="watcherNoDownloadTimeoutMinutes">未触发下载</label>
-              <input id="watcherNoDownloadTimeoutMinutes" type="number" min="0.25" max="60" step="0.25" value="1" aria-label="未触发下载超时分钟">
+              <input id="watcherNoDownloadTimeoutMinutes" class="compact-number" type="number" min="0.25" max="60" step="0.25" value="1" aria-label="未触发下载超时分钟">
             </div>
             <div class="metric-field">
               <label for="watcherDownloadTimeoutMinutes">下载中</label>
-              <input id="watcherDownloadTimeoutMinutes" type="number" min="1" max="120" step="1" value="5" aria-label="下载中超时分钟">
+              <input id="watcherDownloadTimeoutMinutes" class="compact-number" type="number" min="1" max="120" step="1" value="5" aria-label="下载中超时分钟">
             </div>
             <div class="metric-field">
               <label for="watcherTaskTimeoutMinutes">单任务最长</label>
-              <input id="watcherTaskTimeoutMinutes" type="number" min="1" max="180" step="1" value="10" aria-label="单任务最长超时分钟">
+              <input id="watcherTaskTimeoutMinutes" class="compact-number" type="number" min="1" max="180" step="1" value="10" aria-label="单任务最长超时分钟">
             </div>
           </div>
         </div>
@@ -894,7 +881,7 @@
             <span></span>
           </label>
           <span style="font-size: 13px; color: var(--muted); margin-left: 5px;">连续遇阻</span>
-          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px; text-align: center;" aria-label="连续遇阻暂停次数">
+          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px;" aria-label="连续遇阻暂停次数">
           <span style="font-size: 13px; color: var(--muted);">次后暂停</span>
           <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒" style="margin-left: 10px;">
             <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>

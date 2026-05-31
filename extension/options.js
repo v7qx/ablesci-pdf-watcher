@@ -3,7 +3,6 @@
 const {
   DEFAULT_OPTIONS,
   WATCHER_DAILY_LIMIT_MAX,
-  sanitizePathPart,
   normalizeSizeUnit,
   clampNumber,
   normalizeSchedulerMode,
@@ -116,7 +115,7 @@ async function save(saveOptions = {}) {
     opts[id] = node.type === 'checkbox' ? node.checked : node.value.trim();
   }
 
-  opts.downloadSubdir = sanitizePathPart(opts.downloadSubdir || '');
+  opts.downloadSubdir = '';
   opts.moveToDir = String(opts.moveToDir || '').trim();
   opts.downloadMode = 'auto';
   opts.scienceDirectTabMode = 'silent_then_visible';

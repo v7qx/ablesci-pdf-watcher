@@ -57,7 +57,6 @@
     normalizeOptions: normalizeSharedOptions
   } = globalThis.AblesciWatcherConfig;
   const {
-    minutesOfDay,
     normalizeWorkdaysSet,
     normalizeWorkWindowsDetailed,
     weekdayNumber,
@@ -142,10 +141,6 @@
     calculateTargetState,
     calculateAdvancedTargetState,
     candidateSource,
-    ensureBanditStats,
-    banditItem,
-    banditScore,
-    weightedSampleWithoutReplacement,
     selectBanditCandidates,
     recordBanditOutcome
   } = createWatcherTargetApi({
@@ -165,15 +160,10 @@
     demandFactorByRegime: regime => demandFactorByRegime(regime),
     trendFactorFromModel: model => trendFactorFromModel(model),
     riskSnapshot: (state, opts) => riskSnapshot(state, opts),
-    journalAccessRuleFor: (...args) => journalAccessRuleFor(...args),
-    getWatcherState,
-    saveWatcherState
+    journalAccessRuleFor: (...args) => journalAccessRuleFor(...args)
   });
   const {
     publisherAlias,
-    aggregatePublisherCounts,
-    buildFallbackPublisherModel,
-    buildAdvancedPublisherModel,
     demandFactorByRegime,
     trendFactorFromModel,
     refreshPublisherModelFromSnapshots
@@ -445,35 +435,8 @@
     enrichCandidateJournalFromMap
   });
   const {
-    recordDemandSnapshot,
-    shouldObserveDemand,
-    markObservedSlot,
     collectDemandIfDue
-  } = createWatcherDemandApi({
-    chromeApi: globalThis.chrome,
-    deps: depsRef,
-    normalizeOptions,
-    todayKey,
-    formatBeijingDateTime,
-    minutesOfDay,
-    beijingMinutesNow,
-    getDemandSnapshots,
-    classifyDemandSnapshotAnomaly,
-    buildMarketDataModel,
-    buildAdvancedPublisherModel,
-    demandRegimeFor,
-    calculateAdvancedTargetState,
-    calculateTargetState,
-    hasPendingAssist,
-    getWatcherState,
-    saveWatcherState,
-    appendWatcherLog: entry => appendWatcherLog(entry),
-    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    parseListUrl: url => parseListUrl(url),
-    demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
-    marketRawRetentionMs: MARKET_RAW_RETENTION_MS,
-    maxDemandSnapshots: MAX_DEMAND_SNAPSHOTS
-  });
+  } = createWatcherDemandApi();
   const {
     sessionSize,
     advancedSessionSize,

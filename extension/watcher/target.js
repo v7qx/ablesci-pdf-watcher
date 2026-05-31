@@ -21,9 +21,7 @@
       demandFactorByRegime,
       trendFactorFromModel,
       riskSnapshot,
-      journalAccessRuleFor,
-      getWatcherState,
-      saveWatcherState
+      journalAccessRuleFor
     } = config;
 
     function publisherAliasLocal(name) {
@@ -527,38 +525,11 @@
     }
 
     function selectBanditCandidates(candidates, state, market, count) {
-      const scored = (Array.isArray(candidates) ? candidates : [])
-        .map((candidate, order) => ({ candidate, order, ...banditScore(candidate, state, market) }))
-        .sort((a, b) => (b.score - a.score) || (a.order - b.order));
-      const top = scored.slice(0, Math.max(count * 3, Math.min(12, scored.length)));
-      const picked = weightedSampleWithoutReplacement(top, count);
-      state.banditTopPublishers = scored.slice(0, 8).map(item => ({
-        source: item.source,
-        score: item.score,
-        estimatedSuccessRate: item.estimatedSuccessRate,
-        demandPressure: item.demandPressure,
-        sourceTrend: item.sourceTrend
-      }));
-      return picked.map(item => item.candidate);
+      return (Array.isArray(candidates) ? candidates : []).slice(0, Math.max(1, count || 1));
     }
 
     async function recordBanditOutcome(source, outcome, durationMs = 0, reason = '') {
-      const state = await getWatcherState();
-      const stats = ensureBanditStats(state);
-      const item = banditItem(stats, source || 'Unknown');
-      item.trials += 1;
-      if (outcome === 'success') {
-        item.success += 1;
-      } else {
-        item.failure += 1;
-        item.lastFailureAt = new Date().toISOString();
-        if (/html|login|not_pdf|error_page/i.test(reason)) item.htmlFailure += 1;
-        if (/cf|challenge/i.test(reason)) item.cfFailure += 1;
-      }
-      if (durationMs > 0) {
-        item.avgDurationMs = item.avgDurationMs ? Math.round(item.avgDurationMs * 0.75 + durationMs * 0.25) : Math.round(durationMs);
-      }
-      await saveWatcherState(state);
+      return undefined;
     }
 
     return {

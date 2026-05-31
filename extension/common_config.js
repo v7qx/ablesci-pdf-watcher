@@ -174,7 +174,7 @@
     return {
       ...opts,
       nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
-      downloadSubdir: sanitizePathPart(opts.downloadSubdir || ''),
+      downloadSubdir: '',
       moveToDir: String(opts.moveToDir || '').trim(),
       downloadMode: 'auto',
       scienceDirectTabMode: 'silent_then_visible',
