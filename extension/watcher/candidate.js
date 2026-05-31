@@ -54,20 +54,6 @@
       return [entry.short, entry.full, entry.journal, entry.name, ...aliases].filter(Boolean);
     }
 
-    function parseJournalAccessRules(raw) {
-      try {
-        const parsed = JSON.parse(String(raw || '{}'));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { blocked: [], allowed: [], partial: [] };
-        return {
-          blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
-          allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
-          partial: Array.isArray(parsed.partial) ? parsed.partial : []
-        };
-      } catch (_) {
-        return { blocked: [], allowed: [], partial: [] };
-      }
-    }
-
     function candidateJournalNames(candidate, payload = null) {
       return [
         payload?.journalShortName,
@@ -137,41 +123,6 @@
       });
     }
 
-    function journalAccessStatsRank() {
-      return 0;
-    }
-
-    function journalAccessStatsIndexFromStats() {
-      return {};
-    }
-
-    async function hydrateJournalAccessStatsIndex(state = {}) {
-      Object.defineProperty(state, '__journalAccessStatsIndex', {
-        value: {},
-        enumerable: false,
-        configurable: true
-      });
-      Object.defineProperty(state, '__journalAccessStatsCount', {
-        value: 0,
-        enumerable: false,
-        configurable: true
-      });
-      Object.defineProperty(state, '__journalAccessStatsIndexSize', {
-        value: 0,
-        enumerable: false,
-        configurable: true
-      });
-      return state;
-    }
-
-    function journalAccessStatsStateFor() {
-      return { accessState: '', item: null, journalName: '' };
-    }
-
-    function isListCandidateHighRiskByStats() {
-      return false;
-    }
-
     function isLikelyRscCandidate(candidate = {}) {
       const haystack = [
         candidate.publisherName,
@@ -181,14 +132,6 @@
         candidate.rowText
       ].map(value => String(value || '')).join(' ');
       return /rsc|royal society of chemistry/i.test(haystack);
-    }
-
-    function isListCandidateDoiHighRiskByStats() {
-      return false;
-    }
-
-    function journalAccessRuleFor() {
-      return { state: '', entry: null };
     }
 
     function describeWatcherReason(reason) {
@@ -413,7 +356,6 @@
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
       if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
       if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
-      if (journalAccessRuleFor(candidate, opts).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
       return { ok: true };
     }
 
@@ -434,7 +376,6 @@
       if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
       if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
       if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
-      if (journalAccessRuleFor({}, opts, payload).state === 'blocked') return { ok: false, reason: 'journal_blocked_rule' };
       if (opts.watcherSkipRiskText && flags.systemPromptSupplementDoi) {
         return { ok: false, reason: 'detail_system_prompt_si' };
       }
@@ -456,20 +397,12 @@
       normalizeDocumentType,
       normalizeJournalKey,
       journalRuleNames,
-      parseJournalAccessRules,
       candidateJournalNames,
       journalShortNameMapFromState,
       journalShortNameMapEntry,
       enrichCandidateJournalFromMap,
       rememberJournalShortNameMapping,
-      journalAccessStatsRank,
-      journalAccessStatsIndexFromStats,
-      hydrateJournalAccessStatsIndex,
-      journalAccessStatsStateFor,
-      isListCandidateHighRiskByStats,
       isLikelyRscCandidate,
-      isListCandidateDoiHighRiskByStats,
-      journalAccessRuleFor,
       describeWatcherReason,
       orderCandidatesForRun,
       parseAssistListPage,

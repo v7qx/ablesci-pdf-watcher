@@ -122,14 +122,8 @@ func run() error {
 		return handleDeleteFile(req)
 	case "notify_user":
 		return handleNotifyUser(req)
-	case "open_config_dir":
-		return handleOpenConfigDir(req)
 	case "open_local_storage":
 		return handleOpenLocalStorageDir(req)
-	case "read_config_file":
-		return handleReadConfigFile(req)
-	case "write_config_file":
-		return handleWriteConfigFile(req)
 	case "write_text_file":
 		return handleWriteTextFile(req)
 	default:
@@ -316,26 +310,6 @@ func handleNotifyUser(req Request) error {
 	return writeResponse(Response{OK: true, Action: "notify_user"})
 }
 
-func handleOpenConfigDir(req Request) error {
-	dir, err := resolveConfigDir(req.Dir)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	if err := ensureDefaultConfigFiles(dir); err != nil {
-		return err
-	}
-	if runtime.GOOS == "windows" {
-		if err := exec.Command("explorer.exe", dir).Start(); err != nil {
-			return err
-		}
-		return writeResponse(Response{OK: true, Action: "open_config_dir", Path: dir})
-	}
-	return writeResponse(Response{OK: true, Action: "open_config_dir", Path: dir})
-}
-
 func handleOpenLocalStorageDir(req Request) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -353,162 +327,7 @@ func handleOpenLocalStorageDir(req Request) error {
 	return writeResponse(Response{OK: true, Action: "open_local_storage", Path: targetDir})
 }
 
-func handleReadConfigFile(req Request) error {
-	path, err := resolveConfigFile(req, false)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return writeResponse(Response{OK: true, Action: "read_config_file", Path: path, Filename: filepath.Base(path), Size: int64(len(data)), Body: string(data)})
-}
 
-func handleWriteConfigFile(req Request) error {
-	path, err := resolveConfigFile(req, true)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(req.Content), 0600); err != nil {
-		return err
-	}
-	return writeResponse(Response{OK: true, Action: "write_config_file", Path: path, Filename: filepath.Base(path), Size: int64(len(req.Content))})
-}
-
-func resolveConfigFile(req Request, forWrite bool) (string, error) {
-	if strings.TrimSpace(req.ConfigPath) != "" {
-		path := cleanConfigPath(req.ConfigPath)
-		if path == "" {
-			return "", errors.New("invalid config path")
-		}
-		base := filepath.Base(path)
-		if !allowedConfigFilename(base) {
-			return "", fmt.Errorf("unsupported config file: %s", base)
-		}
-		if !forWrite {
-			if _, err := os.Stat(path); err != nil {
-				return "", err
-			}
-		}
-		return path, nil
-	}
-	filename := strings.TrimSpace(req.Filename)
-	if filename == "" {
-		filename = "watcher-rules.json"
-	}
-	filename = filepath.Base(filename)
-	if !allowedConfigFilename(filename) {
-		return "", fmt.Errorf("unsupported config file: %s", filename)
-	}
-	if forWrite {
-		dir, err := resolveConfigDir(req.Dir)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(dir, filename), nil
-	}
-	for _, dir := range configDirCandidates(req.Dir) {
-		path := filepath.Join(dir, filename)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("%s not found in local config dirs", filename)
-}
-
-func resolveConfigDir(dir string) (string, error) {
-	for _, candidate := range configDirCandidates(dir) {
-		if strings.TrimSpace(candidate) == "" {
-			continue
-		}
-		return candidate, nil
-	}
-	return "", errors.New("no config dir candidate")
-}
-
-func configDirCandidates(explicitDir string) []string {
-	candidates := []string{}
-	if strings.TrimSpace(explicitDir) != "" {
-		candidates = append(candidates, explicitDir)
-	}
-	if env := strings.TrimSpace(os.Getenv("ABLESCI_WATCHER_CONFIG_DIR")); env != "" {
-		candidates = append(candidates, env)
-	}
-	if exe, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates,
-			exeDir,
-			filepath.Join(exeDir, "config.local"),
-			filepath.Join(filepath.Dir(exeDir), "config.local"),
-		)
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(cwd, "config.local"),
-			filepath.Join(filepath.Dir(cwd), "config.local"),
-		)
-	}
-
-	seen := map[string]bool{}
-	out := []string{}
-	for _, candidate := range candidates {
-		path := cleanConfigPath(candidate)
-		if path == "" {
-			continue
-		}
-		if seen[path] {
-			continue
-		}
-		seen[path] = true
-		out = append(out, path)
-	}
-	return out
-}
-
-func ensureDefaultConfigFiles(dir string) error {
-	files := map[string]string{
-		"watcher-rules.json": "{\n  \"note\": \"reserved for future local watcher rules\"\n}\n",
-	}
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err == nil {
-			continue
-		}
-		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func cleanConfigPath(path string) string {
-	path = strings.Trim(path, "\" ")
-	if path == "" {
-		return ""
-	}
-	if runtime.GOOS == "windows" {
-		path = strings.ReplaceAll(path, "/", `\`)
-	}
-	if !filepath.IsAbs(path) {
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-	}
-	return filepath.Clean(path)
-}
-
-func allowedConfigFilename(filename string) bool {
-	switch strings.ToLower(filepath.Base(filename)) {
-	case "watcher-rules.json":
-		return true
-	default:
-		return false
-	}
-}
 
 func handleWriteTextFile(req Request) error {
 	filename := sanitizeReportFilename(req.Filename)
@@ -896,23 +715,7 @@ func uniquePath(p string) string {
 	return fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext)
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
-}
+
 
 func sameFilePath(a, b string) bool {
 	aa, _ := filepath.Abs(a)

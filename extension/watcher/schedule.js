@@ -17,8 +17,6 @@
       lagThresholds,
       dailyDownloadedFromState,
       quotaResetDelayMinutes,
-      nextRiskResumeAt,
-      riskSnapshot,
       nextWorkDelayMinutes,
       targetStateSnapshot,
       nextRateLimitClearDelayMinutes

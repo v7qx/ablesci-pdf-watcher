@@ -13,7 +13,6 @@
       incrementDaily,
       appendWatcherLog,
       normalizeText,
-      nextRiskResumeAt,
       appendWatcherTrace,
       nativeNotifyTimeoutMs
     } = config;

@@ -5,7 +5,6 @@
   function createWatcherEntryApi(config) {
     const {
       chromeApi,
-      depsRef,
       setDeps,
       alarmName,
       badgeRefreshAlarmName,
@@ -27,8 +26,7 @@
       clearBufferedWatcherLogs,
       clearBufferedWatcherTrace,
       trimStoredWatcherTraceLogs,
-      notifyWatcherNeedsAttention,
-      stateRef
+      notifyWatcherNeedsAttention
     } = config;
 
     function initAutoWatcher(nextDeps) {

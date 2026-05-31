@@ -41,7 +41,6 @@
     watcherSkipBookChapter: true,
     watcherSkipPatentReport: true,
     watcherSkipRiskText: true,
-    watcherJournalAccessRules: '',
     watcherOpenDetail: true,
     watcherAutoDownload: true,
     watcherAutoUpload: true,
@@ -50,19 +49,16 @@
     watcherDailyLimit: 100,
     watcherStopOnCfChallenge: true,
     watcherCfNotificationEnabled: false,
-    watcherSkipHighRiskJournal: false,
-    watcherDailyReportEnabled: true,
+    watcherDailyReportEnabled: false,
     watcherBadgeCountdownEnabled: true,
     watcherNotificationEnabled: false,
     // PRIVATE_WATCHER_ONLY: default trace level to off
     watcherTraceLevel: 'off',
     watcherReportDir: '',
-    watcherConfigDir: '',
-    watcherNoDownloadTimeoutMinutes: 1,
+    watcherNoDownloadTimeoutMinutes: 1.5,
     watcherDownloadTimeoutMinutes: 4,
     watcherTaskTimeoutMinutes: 7,
     watcherNotifyMode: 'browser',
-    watcherJournalAccessConfigPath: '',
     watcherCfPauseThreshold: 6,
     watcherQuantSchedulerEnabled: true,
     watcherRiskBudgetLimit: 10,
@@ -97,11 +93,8 @@
     return Math.min(max, Math.max(min, n));
   }
 
+  // FORCE scheduler mode to 'quant' and enable quant scheduler.
   function normalizeSchedulerMode(opts) {
-    const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
-    if (raw === 'fixed' || raw === 'quant') return raw;
-    if (raw === 'advanced') return 'quant';
-    if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
     return 'quant';
   }
 
@@ -130,25 +123,12 @@
   }
 
   function parseJournalAccessRules(raw) {
-    try {
-      const parsed = JSON.parse(String(raw || '{}'));
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { blocked: [], allowed: [], partial: [], unknown: [] };
-      }
-      return {
-        blocked: Array.isArray(parsed.blocked) ? parsed.blocked : [],
-        allowed: Array.isArray(parsed.allowed) ? parsed.allowed : [],
-        partial: Array.isArray(parsed.partial) ? parsed.partial : [],
-        unknown: Array.isArray(parsed.unknown) ? parsed.unknown : []
-      };
-    } catch (_) {
-      return { blocked: [], allowed: [], partial: [], unknown: [] };
-    }
+    return { blocked: [], allowed: [], partial: [], unknown: [] };
   }
 
   function normalizeOptions(raw = {}, uiNormalizers = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...(raw || {}) };
-    const schedulerMode = normalizeSchedulerMode(opts);
+    const schedulerMode = 'quant';
     const intervals = normalizeWatcherIntervals(opts);
     const normalizeButtonLabel = typeof uiNormalizers.normalizeButtonLabel === 'function'
       ? uiNormalizers.normalizeButtonLabel
@@ -193,22 +173,18 @@
       watcherSkipBookChapter: opts.watcherSkipBookChapter !== false,
       watcherSkipPatentReport: opts.watcherSkipPatentReport !== false,
       watcherSkipRiskText: opts.watcherSkipRiskText !== false,
-      watcherJournalAccessRules: '',
-      watcherSkipHighRiskJournal: false,
-      watcherDailyReportEnabled: opts.watcherDailyReportEnabled !== false,
+      watcherDailyReportEnabled: opts.watcherDailyReportEnabled === true,
       watcherBadgeCountdownEnabled: opts.watcherBadgeCountdownEnabled !== false,
       watcherNotificationEnabled: opts.watcherNotificationEnabled !== false,
       // PRIVATE_WATCHER_ONLY: Add compact trace level
       watcherTraceLevel: ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
-      watcherConfigDir: String(opts.watcherConfigDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60),
       watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120),
       watcherTaskTimeoutMinutes: clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180),
       watcherNotifyMode: opts.watcherNotifyMode === 'native' ? 'native' : 'browser',
-      watcherJournalAccessConfigPath: '',
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),
-      watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
+      watcherQuantSchedulerEnabled: true,
       watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100),
       watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
       watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),

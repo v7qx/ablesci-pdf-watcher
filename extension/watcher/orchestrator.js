@@ -7,7 +7,6 @@
       depsRef,
       stateRef,
       normalizeOptions,
-      hydrateJournalAccessRulesFromConfig,
       recordRunStart,
       getWatcherState,
       saveWatcherState,
@@ -19,7 +18,6 @@
       isInWorkSchedule,
       formatBeijingDateTime,
       resetCfChallengeStreak,
-      hydrateJournalAccessStatsIndex,
       isAssistDue,
       checkShortTermRateLimit,
       calculateAdvancedTargetState,
@@ -192,8 +190,7 @@
       }
       try {
         await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
-        let opts = normalizeOptions(await depsRef.getOptions());
-        opts = await hydrateJournalAccessRulesFromConfig(opts);
+        const opts = normalizeOptions(await depsRef.getOptions());
         currentRunOpts = opts;
         await recordRunStart(trigger, opts);
         const initialState = await getWatcherState();
@@ -220,7 +217,6 @@
         }
         const stateForTargets = await getWatcherState();
         stateForTargets.optionsSnapshot = opts;
-        await hydrateJournalAccessStatsIndex(stateForTargets);
         await syncActualAssistCount(stateForTargets, opts);
         if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
           await appendWatcherTrace('run_skip_assist_not_due', {

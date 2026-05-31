@@ -36,18 +36,9 @@
         ...shared,
         watcherEnabled: shared.watcherEnabled === true,
         watcherListUrls: normalizeListUrls(shared.watcherListUrls, depsRef.defaultListUrls),
-        watcherJournalAccessRules: String(shared.watcherJournalAccessRules || '').trim(),
         watcherWorkdays: normalizeWorkdays(shared.watcherWorkdays),
         watcherWorkWindows: normalizeWorkWindows(shared.watcherWorkWindows),
         watcherMaxPerSession: 1
-      };
-    }
-
-    async function hydrateJournalAccessRulesFromConfig(opts) {
-      return {
-        ...opts,
-        watcherJournalAccessRules: '',
-        watcherJournalAccessRulesSource: ''
       };
     }
 
@@ -229,7 +220,6 @@
 
     return {
       normalizeOptions,
-      hydrateJournalAccessRulesFromConfig,
       normalizeWorkdays,
       normalizeWorkWindows,
       isInWorkSchedule,

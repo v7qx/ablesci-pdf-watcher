@@ -128,7 +128,7 @@
     }
 
     async function downloadByBackgroundTab(pdfUrl, options = {}) {
-      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 60 * 1000);
+      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const signal = options.signal || null;
       return await new Promise(async (resolve, reject) => {
@@ -191,7 +191,7 @@
     }
 
     async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
-      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 60 * 1000);
+      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const active = options.active !== false;
       const revealAfterMs = Number(options.revealAfterMs || 0);

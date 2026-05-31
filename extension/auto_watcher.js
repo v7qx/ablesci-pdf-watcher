@@ -95,6 +95,7 @@
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     updateActionBadge: state => updateActionBadge(state)
   });
+  const { publisherAlias } = createWatcherMarketApi({ normalizeText });
   const {
     monthDone,
     lagThresholds,
@@ -108,28 +109,20 @@
     formatBeijingDateTime,
     beijingMinutesNow,
     weekdayNumber,
-    riskSnapshot: (state, opts) => riskSnapshot(state, opts)
+    riskSnapshot: (state, opts) => riskSnapshot(state, opts),
+    publisherAlias
   });
-  const { publisherAlias } = createWatcherMarketApi({ normalizeText });
   const {
     candidatePublisherName,
     normalizeDocumentType,
     normalizeJournalKey,
     journalRuleNames,
-    parseJournalAccessRules,
     candidateJournalNames,
     journalShortNameMapFromState,
     journalShortNameMapEntry,
     enrichCandidateJournalFromMap,
     rememberJournalShortNameMapping,
-    journalAccessStatsRank,
-    journalAccessStatsIndexFromStats,
-    hydrateJournalAccessStatsIndex,
-    journalAccessStatsStateFor,
-    isListCandidateHighRiskByStats,
     isLikelyRscCandidate,
-    isListCandidateDoiHighRiskByStats,
-    journalAccessRuleFor,
     describeWatcherReason,
     orderCandidatesForRun,
     parseAssistListPage,
@@ -172,7 +165,6 @@
   });
   const {
     normalizeOptions,
-    hydrateJournalAccessRulesFromConfig,
     normalizeWorkdays,
     normalizeWorkWindows,
     isInWorkSchedule,
@@ -200,7 +192,6 @@
     beijingMinutesNow,
     weekdayNumber,
     normalizeText,
-    parseJournalAccessRules,
     nativeConfigTimeoutMs: NATIVE_CONFIG_TIMEOUT_MS,
     countdownText,
     formatBeijingDateTime,
@@ -252,7 +243,6 @@
     chromeApi: globalThis.chrome,
     deps: depsRef,
     normalizeOptions,
-    hydrateJournalAccessRulesFromConfig,
     todayKey,
     flushWatcherLogs: () => flushWatcherLogs(),
     flushWatcherTrace: () => flushWatcherTrace(),
@@ -262,8 +252,6 @@
     reportJson,
     reportValueForJson,
     getWatcherState,
-    journalAccessStatsIndexFromStats,
-    parseJournalAccessRules,
     reportDir: REPORT_DIR,
     nativeReportTimeoutMs: NATIVE_REPORT_TIMEOUT_MS,
     autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
@@ -289,7 +277,6 @@
     incrementDaily,
     appendWatcherLog: entry => appendWatcherLog(entry),
     normalizeText,
-    nextRiskResumeAt,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     nativeNotifyTimeoutMs: NATIVE_NOTIFY_TIMEOUT_MS
   });
@@ -319,14 +306,12 @@
     lagThresholds,
     dailyDownloadedFromState,
     quotaResetDelayMinutes,
-    nextRiskResumeAt,
     riskSnapshot,
     nextWorkDelayMinutes,
     targetStateSnapshot,
     nextRateLimitClearDelayMinutes
   });
   const {
-    isHighRiskJournal,
     waitForTabComplete,
     openHiddenTab,
     closeTabQuietly,
@@ -359,8 +344,6 @@
     journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
     isDetailAllowedForWatcher,
     isListCandidateAllowed,
-    isListCandidateHighRiskByStats,
-    isListCandidateDoiHighRiskByStats,
     enrichCandidateJournalFromMap
   });
   const { sessionSize } = createWatcherSessionApi({
@@ -373,7 +356,6 @@
     depsRef,
     stateRef,
     normalizeOptions,
-    hydrateJournalAccessRulesFromConfig,
     recordRunStart,
     getWatcherState,
     saveWatcherState,
@@ -385,7 +367,6 @@
     isInWorkSchedule,
     formatBeijingDateTime,
     resetCfChallengeStreak,
-    hydrateJournalAccessStatsIndex,
     isAssistDue,
     checkShortTermRateLimit,
     calculateAdvancedTargetState,
@@ -407,8 +388,6 @@
     enrichCandidateJournalFromMap,
     isListCandidateAllowed,
     describeWatcherReason,
-    isListCandidateHighRiskByStats,
-    isListCandidateDoiHighRiskByStats,
     wasRecentlyProcessed,
     inspectDetail,
     closeTabQuietly,

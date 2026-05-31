@@ -139,19 +139,16 @@ async function save(saveOptions = {}) {
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX);
-  opts.watcherSkipHighRiskJournal = false;
-  opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
+  opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled === true;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
   opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
   // PRIVATE_WATCHER_ONLY: Add compact trace level
   opts.watcherTraceLevel = ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
-  opts.watcherConfigDir = String(opts.watcherConfigDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
   opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);
   opts.watcherTaskTimeoutMinutes = clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180);
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'native' ? 'native' : 'browser';
-  opts.watcherJournalAccessConfigPath = '';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
   opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
@@ -163,7 +160,6 @@ async function save(saveOptions = {}) {
   opts.watcherMaxPerSession = 1;
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
   opts.watcherUseCalendarProgress = opts.watcherUseCalendarProgress !== false;
-  opts.watcherJournalAccessRules = '';
   Object.assign(opts, normalizeOptions(opts, { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition }));
 
   try {

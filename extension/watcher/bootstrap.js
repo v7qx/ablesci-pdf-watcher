@@ -7,8 +7,7 @@
       getWatcherState,
       saveWatcherState,
       appendWatcherTrace,
-      updateActionBadge,
-      nextWorkDelayMinutes
+      updateActionBadge
     } = config;
 
     function getProcessedKey(candidate, payload) {
@@ -30,12 +29,6 @@
     async function sleepMinutes(minutes) {
       if (minutes <= 0) return;
       await new Promise(resolve => setTimeout(resolve, minutes * 60 * 1000));
-    }
-
-    function nextRiskResumeAt(opts) {
-      const delay = nextWorkDelayMinutes(opts);
-      const minutes = delay === null ? 60 : Math.max(15, delay);
-      return new Date(Date.now() + minutes * 60 * 1000).toISOString();
     }
 
     async function recoverStaleWatcherState(reason = 'startup_recovery') {
@@ -77,7 +70,6 @@
       getProcessedKey,
       wasRecentlyProcessed,
       sleepMinutes,
-      nextRiskResumeAt,
       recoverStaleWatcherState
     };
   }

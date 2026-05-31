@@ -10,21 +10,9 @@
       formatBeijingDateTime,
       beijingMinutesNow,
       weekdayNumber,
-      riskSnapshot
+      riskSnapshot,
+      publisherAlias
     } = config;
-
-    function publisherAliasLocal(name) {
-      const s = normalizeText(name);
-      if (!s) return 'Unknown';
-      if (/elsevier|science\s*direct/i.test(s)) return 'Elsevier';
-      if (/wiley/i.test(s)) return 'Wiley';
-      if (/springer/i.test(s)) return 'Springer';
-      if (/nature/i.test(s)) return 'Nature';
-      if (/oxford/i.test(s)) return 'Oxford';
-      if (/ieee/i.test(s)) return 'IEEE';
-      if (/\brsc\b|royal\s+society\s+of\s+chemistry|pubs\.rsc\.org/i.test(s)) return 'RSC';
-      return s.split(/[\/|,，;；\s]+/).filter(Boolean)[0] || 'Unknown';
-    }
 
     function monthKey() {
       return todayKey().slice(0, 7);
@@ -240,7 +228,7 @@
     }
 
     function candidateSource(candidate, payload = null) {
-      return publisherAliasLocal(payload?.publisherName || payload?.journalName || candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
+      return publisherAlias(payload?.publisherName || payload?.journalName || candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
     }
 
     return {

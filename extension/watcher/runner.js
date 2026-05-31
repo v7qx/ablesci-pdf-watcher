@@ -21,14 +21,10 @@
       describeWatcherReason,
       isDetailAllowedForWatcher,
       isListCandidateAllowed,
-      isListCandidateHighRiskByStats,
-      isListCandidateDoiHighRiskByStats,
       enrichCandidateJournalFromMap
     } = config;
 
-    async function isHighRiskJournal(journalName) {
-      return false;
-    }
+
 
     async function waitForTabComplete(tabId, timeoutMs = 45000) {
       return await new Promise((resolve, reject) => {
@@ -428,7 +424,7 @@
     }
 
     return {
-      isHighRiskJournal,
+
       waitForTabComplete,
       openHiddenTab,
       closeTabQuietly,
