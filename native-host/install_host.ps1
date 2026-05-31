@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ExtensionId = "",
 
   [ValidateSet("Chrome", "Edge", "All")]
@@ -192,29 +192,30 @@ if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
   if ($Browser -eq "All") {
     throw "Automatic ExtensionId detection is only supported for one browser at a time. Use -Browser Chrome or -Browser Edge, or pass -ExtensionId explicitly."
   }
+  $extensionsPage = if ($Browser -eq "Edge") { "edge://extensions/" } else { "chrome://extensions/" }
   $detected = Find-ExtensionIdInPreferences $Browser $ProfileDir $ExtensionDir
   if ($null -eq $detected) {
     $profileHint = if ([string]::IsNullOrWhiteSpace($ProfileDir)) { "(未指定，正在检查默认浏览器 Profile)" } else { [System.IO.Path]::GetFullPath($ProfileDir) }
-    $hint = @"
-无法自动识别扩展 ID。
-
-这通常不是 Helper 是否预编译的问题，而是安装脚本没有在指定浏览器 Profile 中找到已加载的扩展。
-
-请按顺序确认：
-1. 已用专用浏览器 Profile 打开 chrome://extensions/
-2. 已开启开发者模式，并加载本仓库的 extension 目录
-3. 加载后关闭专用浏览器，让 Chrome / Edge 写入 Profile 配置
-4. 重新运行本脚本
-
-如果仍失败，请在扩展管理页复制扩展 ID 后显式传入：
-.\native-host\install_host.ps1 -Browser $Browser -ExtensionId <扩展ID>
-
-当前检查的 Profile：
-$profileHint
-
-当前期望的扩展目录：
-$ExtensionDir
-"@
+    $hint = @(
+      "无法自动识别扩展 ID。",
+      "",
+      "这通常不是 Helper 是否预编译的问题，而是安装脚本没有在指定浏览器 Profile 中找到已加载的扩展。",
+      "",
+      "请按顺序确认：",
+      "1. 已用专用浏览器 Profile 打开 $extensionsPage",
+      "2. 已开启开发者模式，并加载本仓库的 extension 目录",
+      "3. 加载后关闭专用浏览器，让 Chrome / Edge 写入 Profile 配置",
+      "4. 重新运行本脚本",
+      "",
+      "如果仍失败，请在扩展管理页复制扩展 ID 后显式传入：",
+      ".\native-host\install_host.ps1 -Browser $Browser -ExtensionId <扩展ID>",
+      "",
+      "当前检查的 Profile：",
+      $profileHint,
+      "",
+      "当前期望的扩展目录：",
+      $ExtensionDir
+    ) -join [Environment]::NewLine
     throw $hint
   }
   $ExtensionId = $detected.Id
