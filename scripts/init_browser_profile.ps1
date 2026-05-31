@@ -2,11 +2,11 @@ param(
   [ValidateSet("Chrome", "Edge")]
   [string]$Browser = "Chrome",
 
-  [string]$ProfileDir = "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile",
+  [string]$ProfileDir = "",
 
   [string]$DownloadDir = "$env:USERPROFILE\Downloads",
 
-  [string]$ShortcutName = "Ablesci PDF Watcher",
+  [string]$ShortcutName = "",
 
   [switch]$Launch
 )
@@ -60,6 +60,13 @@ function Set-ObjectProperty($Object, [string]$Name, $Value) {
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $ExtensionDir = Join-Path $RepoRoot "extension"
 $BrowserExe = Find-BrowserExe $Browser
+
+if ([string]::IsNullOrWhiteSpace($ProfileDir)) {
+  $ProfileDir = "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile_$Browser"
+}
+if ([string]::IsNullOrWhiteSpace($ShortcutName)) {
+  $ShortcutName = "Ablesci PDF Watcher ($Browser)"
+}
 
 $ProfileDir = [System.IO.Path]::GetFullPath($ProfileDir)
 $DownloadDir = [System.IO.Path]::GetFullPath($DownloadDir)
