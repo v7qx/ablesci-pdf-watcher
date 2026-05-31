@@ -230,6 +230,8 @@
       width: 42px;
       height: 24px;
       flex: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .toggle input {
@@ -271,6 +273,8 @@
       color: var(--muted);
       font-size: 12px;
       white-space: nowrap;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .toggle-option .toggle-text {
@@ -410,7 +414,8 @@
       padding: 15px 44px 15px 18px;
       font-size: 15px;
       font-weight: 650;
-      user-select: text;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     details.card summary::-webkit-details-marker { display: none; }
@@ -446,7 +451,8 @@
       cursor: pointer;
       padding: 14px 44px 14px 18px;
       font-weight: 600;
-      user-select: text;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     details.setting-details summary::-webkit-details-marker { display: none; }
