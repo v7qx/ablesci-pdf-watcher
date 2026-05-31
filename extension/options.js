@@ -75,6 +75,7 @@ async function load() {
     if (node.type === 'checkbox') node.checked = !!opts[id];
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
+  }
   await renderAdvancedWatcherStatus();
 }
 
