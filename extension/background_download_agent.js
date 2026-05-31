@@ -141,7 +141,10 @@
           if (timer) clearTimeout(timer);
           if (abortListener && signal) signal.removeEventListener('abort', abortListener);
           chromeApi.downloads.onCreated.removeListener(onCreated);
-          if (tabId !== null) chromeApi.tabs.remove(tabId).catch(() => {});
+          if (tabId !== null) {
+            pendingPublisherTabs.delete(tabId);
+            chromeApi.tabs.remove(tabId).catch(() => {});
+          }
         }
 
         function onCreated(item) {
@@ -172,6 +175,12 @@
           chromeApi.downloads.onCreated.addListener(onCreated);
           const tab = await chromeApi.tabs.create({ url: pdfUrl, active: false });
           tabId = tab.id;
+          pendingPublisherTabs.set(tabId, {
+            pdfUrl,
+            createdAt: Date.now(),
+            enableDownloadSubdir: options.enableDownloadSubdir || false,
+            downloadSubdir: options.downloadSubdir || ''
+          });
           timer = setTimeout(() => {
             cleanup();
             reject(new Error('未触发 PDF 下载超时（请确认已设置直接下载 PDF，或账号有权限）'));
@@ -313,6 +322,8 @@
             port,
             finishError,
             revealPublisherTab,
+            enableDownloadSubdir: options.enableDownloadSubdir || false,
+            downloadSubdir: options.downloadSubdir || '',
             payloadSummary: {
               assistId: options.payload?.assistId || '',
               doi: options.payload?.doi || '',
@@ -365,7 +376,13 @@
       const mode = opts.downloadMode || 'auto';
       const noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
       const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || defaultOptions.watcherDownloadTimeoutMinutes) * 60 * 1000);
-      const timeoutOptions = { noDownloadTimeoutMs, downloadTimeoutMs, signal };
+      const timeoutOptions = {
+        noDownloadTimeoutMs,
+        downloadTimeoutMs,
+        signal,
+        enableDownloadSubdir: opts.enableDownloadSubdir,
+        downloadSubdir: opts.downloadSubdir
+      };
 
       if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {
         const sdMode = opts.scienceDirectTabMode || 'silent_then_visible';
