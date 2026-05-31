@@ -199,11 +199,8 @@
 
       const text = JSON.stringify(payload, null, 2);
       try {
-        const ok = await copyTextToClipboard(text);
-        if (!ok) throw new Error('copy_failed');
-        showPill('watcherConfigStatus', '已复制');
+        await copyTextToClipboard(text);
       } catch (_) {
-        showPill('watcherConfigStatus', '复制失败', true);
       }
     }
 

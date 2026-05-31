@@ -857,11 +857,11 @@
             </div>
             <div class="metric-field">
               <label for="watcherDownloadTimeoutMinutes">下载中</label>
-              <input id="watcherDownloadTimeoutMinutes" class="compact-number" type="number" min="1" max="120" step="1" value="5" aria-label="下载中超时分钟">
+              <input id="watcherDownloadTimeoutMinutes" class="compact-number" type="number" min="1" max="120" step="1" value="4" aria-label="下载中超时分钟">
             </div>
             <div class="metric-field">
               <label for="watcherTaskTimeoutMinutes">单任务最长</label>
-              <input id="watcherTaskTimeoutMinutes" class="compact-number" type="number" min="1" max="180" step="1" value="10" aria-label="单任务最长超时分钟">
+              <input id="watcherTaskTimeoutMinutes" class="compact-number" type="number" min="1" max="180" step="1" value="7" aria-label="单任务最长超时分钟">
             </div>
           </div>
         </div>
@@ -871,21 +871,25 @@
         <summary>报告与通知</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>连续遇阻自动暂停</strong>
+          <strong>连续遇阻自动暂停（实验）</strong>
           <span>启用后，当连续遇到人机验证页面达到设定次数时，自动暂停值守，以防频繁撞墙被封。</span>
         </div>
-        <div class="setting-control">
-          <label class="toggle" title="启用连续遇阻自动暂停">
-            <input id="watcherStopOnCfChallenge" type="checkbox">
-            <span></span>
-          </label>
-          <span style="font-size: 13px; color: var(--muted); margin-left: 5px;">连续遇阻</span>
-          <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px;" aria-label="连续遇阻暂停次数">
-          <span style="font-size: 13px; color: var(--muted);">次后暂停</span>
-          <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒" style="margin-left: 10px;">
-            <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>
-            <span class="toggle-text">CF 提醒</span>
-          </label>
+        <div class="setting-control" style="flex-direction: column; align-items: flex-end; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="toggle" title="启用连续遇阻自动暂停">
+              <input id="watcherStopOnCfChallenge" type="checkbox">
+              <span></span>
+            </label>
+            <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒" style="user-select: text; -webkit-user-select: text; margin-left: 0;">
+              <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>
+              <span class="toggle-text" style="user-select: text; -webkit-user-select: text;">CF 提醒</span>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+            <span style="font-size: 13px; color: var(--muted);">连续遇阻</span>
+            <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px;" aria-label="连续遇阻暂停次数">
+            <span style="font-size: 13px; color: var(--muted);">次后暂停</span>
+          </div>
         </div>
       </div>
       <div class="setting-row">
@@ -956,10 +960,9 @@
         </div>
         <div class="setting-control watcher-action-control">
           <div class="watcher-action-group">
+            <span id="watcherRunStatus" class="pill">未检查</span>
             <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
             <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
-            <span id="watcherRunStatus" class="pill">未检查</span>
-            <span id="watcherConfigStatus" class="pill">未复制</span>
           </div>
         </div>
       </div>
