@@ -104,9 +104,9 @@ $prefs | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath $PreferencesPath -E
 
 $DesktopDir = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $DesktopDir "$ShortcutName.lnk"
-$Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default chrome://extensions/"
+$Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default --disk-cache-size=20971520 chrome://extensions/"
 if ($Browser -eq "Edge") {
-  $Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default edge://extensions/"
+  $Arguments = "--user-data-dir=`"$ProfileDir`" --profile-directory=Default --disk-cache-size=20971520 edge://extensions/"
 }
 
 $shell = New-Object -ComObject WScript.Shell
