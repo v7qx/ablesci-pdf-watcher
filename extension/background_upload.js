@@ -134,8 +134,7 @@
       try {
         stat = await sendNativeMessage(opts.nativeHostName, {
           action: 'stat_pdf',
-          path: item.filename,
-          move_to_dir: opts.moveToDir || ''
+          path: item.filename
         }, nativeMessageLongTimeoutMs);
       } catch (err) {
         if (isNonPdfAccessPageError(err)) {

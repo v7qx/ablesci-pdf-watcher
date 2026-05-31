@@ -87,7 +87,6 @@
       return sendNativeMessage(nativeHostName, {
         action: 'upload_oss',
         path: stat.path,
-        move_to_dir: opts.moveToDir || '',
         csrf_param: payload.csrfParam || '_csrf',
         csrf_token: payload.csrfToken,
         assist_id: payload.assistId,

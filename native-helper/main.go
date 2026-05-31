@@ -152,17 +152,8 @@ func handleStatPDF(req Request) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
+	if err := ensureAllowedPDFPath(path); err != nil {
 		return err
-	}
-	if req.MoveToDir != "" {
-		path, err = moveFileToDir(path, req.MoveToDir)
-		if err != nil {
-			return err
-		}
-		if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
-			return err
-		}
 	}
 	info, md5sum, err := inspectPDF(path)
 	if err != nil {
@@ -520,7 +511,7 @@ func handleUploadOSS(req Request) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureAllowedPDFPath(path, req.MoveToDir); err != nil {
+	if err := ensureAllowedPDFPath(path); err != nil {
 		return err
 	}
 	info, _, err := inspectPDF(path)
@@ -669,8 +660,8 @@ func cleanExistingPath(p string) (string, error) {
 	return resolved, nil
 }
 
-func ensureAllowedPDFPath(path string, moveToDir string) error {
-	allowed := allowedPDFDirs(moveToDir)
+func ensureAllowedPDFPath(path string) error {
+	allowed := allowedPDFDirs()
 	for _, dir := range allowed {
 		if isPathInsideDir(path, dir) {
 			return nil
@@ -679,16 +670,13 @@ func ensureAllowedPDFPath(path string, moveToDir string) error {
 	return errors.New("pdf path is outside allowed download/temp directories")
 }
 
-func allowedPDFDirs(moveToDir string) []string {
+func allowedPDFDirs() []string {
 	dirs := []string{}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		dirs = append(dirs, filepath.Join(home, "Downloads"))
 	}
 	if temp := os.TempDir(); temp != "" {
 		dirs = append(dirs, temp)
-	}
-	if cleaned := cleanOptionalDir(moveToDir); cleaned != "" {
-		dirs = append(dirs, cleaned)
 	}
 	seen := map[string]bool{}
 	out := []string{}
@@ -794,36 +782,6 @@ func addPDFExtension(src string) (string, error) {
 	return dst, nil
 }
 
-func moveFileToDir(src, targetDir string) (string, error) {
-	targetDir = strings.Trim(targetDir, "\" ")
-	if targetDir == "" {
-		return src, nil
-	}
-	if runtime.GOOS == "windows" {
-		targetDir = strings.ReplaceAll(targetDir, "/", `\`)
-	}
-	if !filepath.IsAbs(targetDir) {
-		return "", errors.New("move_to_dir must be an absolute path")
-	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return "", err
-	}
-	base := filepath.Base(src)
-	dst := filepath.Join(targetDir, base)
-	dst = uniquePath(dst)
-	if sameFilePath(src, dst) {
-		return src, nil
-	}
-	if err := os.Rename(src, dst); err != nil {
-		if err := copyFile(src, dst); err != nil {
-			return "", err
-		}
-		if err := os.Remove(src); err != nil {
-			return "", err
-		}
-	}
-	return dst, nil
-}
 
 func reportDir(dir string) (string, error) {
 	dir = strings.Trim(dir, "\" ")

@@ -125,9 +125,6 @@ async function save(saveOptions = {}) {
     opts[id] = node.type === 'checkbox' ? node.checked : node.value.trim();
   }
 
-  opts.enableDownloadSubdir = !!opts.enableDownloadSubdir;
-  opts.downloadSubdir = sanitizePathPart(opts.downloadSubdir || 'AblesciPdfWatcher');
-  opts.moveToDir = String(opts.moveToDir || '').trim();
   opts.downloadMode = 'auto';
   opts.scienceDirectTabMode = 'silent_then_visible';
   opts.minAutoUploadMB = Number(opts.minAutoUploadMB);
