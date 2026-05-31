@@ -11,7 +11,6 @@
       updateProcessed,
       incrementDaily,
       recordRiskEvent,
-      recordBanditOutcome,
       notifyWatcherNeedsAttention,
       getProcessedKey,
       candidateSource,
@@ -114,8 +113,8 @@
           tabId: tab.id,
           cfChallenge: parsed.cfChallenge === true,
           candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-          totalSeeking: parsed.demandSnapshot?.totalSeeking ?? '',
-          publisherCount: Object.keys(parsed.demandSnapshot?.publisherCounts || {}).length,
+          totalSeeking: parsed.listStats?.totalSeeking ?? '',
+          publisherCount: Object.keys(parsed.listStats?.publisherCounts || {}).length,
           rowCount: parsed.debug?.rowCount ?? '',
           detailLinkCount: parsed.debug?.detailLinkCount ?? '',
           publisherItemCount: parsed.debug?.publisherItemCount ?? '',
@@ -246,7 +245,6 @@
               updateProcessed(context.key, 'failed', msg.message || 'upload_failed'),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
-              recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'upload_failed'),
               appendWatcherLog({
                 ...context.payload,
                 detailUrl: context.detailUrl,
@@ -272,7 +270,6 @@
               updateProcessed(context.key, 'failed', msg.message || 'blocked'),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked'),
-              recordBanditOutcome(context.source, 'failure', durationMs, msg.message || 'blocked'),
               appendWatcherLog({
                 ...context.payload,
                 detailUrl: context.detailUrl,
@@ -299,7 +296,6 @@
                 durationMs
               }),
               recordRiskEvent(context.opts || {}, cleanReason, 'success'),
-              recordBanditOutcome(context.source, 'success', durationMs, cleanReason),
               appendWatcherLog({
                 ...context.payload,
                 detailUrl: context.detailUrl,

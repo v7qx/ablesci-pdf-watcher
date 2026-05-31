@@ -159,10 +159,6 @@
         state.daily[key].consecutiveFailures = 0;
       }
       const risk = riskSnapshot(state, opts);
-      if (opts.watcherAdvancedSchedulerEnabled && risk.exhausted) {
-        state.riskPausedUntil = nextRiskResumeAt(opts);
-        state.riskPauseReason = 'risk_budget_exhausted';
-      }
       await saveWatcherState(state);
       return risk;
     }
@@ -171,7 +167,7 @@
       const state = await getWatcherState();
       const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
       state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
-      const reached = opts.watcherAdvancedSchedulerEnabled || state.cfChallengeStreak >= threshold;
+      const reached = state.cfChallengeStreak >= threshold;
       if (opts.watcherCfNotificationEnabled !== false) {
         const message = reached
           ? `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`
@@ -192,7 +188,6 @@
       }
       await saveWatcherState(state);
       await incrementDaily('failed', trigger);
-      if (opts.watcherAdvancedSchedulerEnabled) await recordRiskEvent(opts, 'cf_challenge', 'blocked');
       await appendWatcherLog({
         detailUrl: listUrl,
         status: reached ? 'paused' : 'blocked',

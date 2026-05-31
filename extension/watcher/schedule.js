@@ -108,52 +108,6 @@
       const hold = quotaHoldPlan(opts, state);
       if (hold) return hold;
       const guardMinutes = assistGuardMinutes(opts);
-      const now = Date.now();
-      if (opts.watcherAdvancedSchedulerEnabled && state?.riskPausedUntil) {
-        const pauseMs = new Date(state.riskPausedUntil).getTime() - now;
-        if (pauseMs > 0) {
-          const guarded = applySoftAssistGuard(pauseMs / 60000, guardMinutes);
-          return {
-            minutes: guarded.minutes,
-            modelDelayMinutes: pauseMs / 60000,
-            guardMinutes,
-            ...guarded,
-            reason: 'risk_pause',
-            strategy: 'risk_pause'
-          };
-        }
-      }
-      if (opts.watcherAdvancedSchedulerEnabled && state?.lastSession) {
-        const cooldownUntilMs = state.lastSession.cooldownUntil ? new Date(state.lastSession.cooldownUntil).getTime() : 0;
-        if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > now) {
-          const modelDelay = (cooldownUntilMs - now) / 60000;
-          const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
-          return {
-            minutes: guarded.minutes,
-            modelDelayMinutes: modelDelay,
-            guardMinutes,
-            ...guarded,
-            reason: 'session_cooldown',
-            strategy: 'session_cooldown'
-          };
-        }
-        const finishedAtMs = state.lastSession.finishedAt ? new Date(state.lastSession.finishedAt).getTime() : 0;
-        const cooldownMinutes = Number(state.lastSession.cooldownMinutes || 0);
-        if (Number.isFinite(finishedAtMs) && finishedAtMs > 0 && cooldownMinutes > 0) {
-          const remaining = cooldownMinutes - ((now - finishedAtMs) / 60000);
-          if (remaining > 0) {
-            const guarded = applySoftAssistGuard(remaining, guardMinutes);
-            return {
-              minutes: guarded.minutes,
-              modelDelayMinutes: remaining,
-              guardMinutes,
-              ...guarded,
-              reason: 'session_cooldown',
-              strategy: 'session_cooldown'
-            };
-          }
-        }
-      }
       const speedMode = effectiveAssistSpeedMode(opts, state);
       const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode);
       const targetError = Number(state.targetError ?? state.lag ?? 0);
@@ -175,8 +129,6 @@
         speedMode,
         rateMultiplier: 1,
         targetError,
-        marketRegime: '',
-        h1Delta: 0,
         severeLag,
         mediumLag,
         combinedMultiplier: 1
@@ -184,7 +136,7 @@
     }
 
     function ensureNextAssistSchedule(opts, state = {}, reason = 'ensure') {
-      if (!opts.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
+      if (!opts.watcherQuantSchedulerEnabled) return null;
       const now = Date.now();
       const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
       if (Number.isFinite(nextAssistMs) && nextAssistMs > now) {
@@ -209,7 +161,6 @@
       state.nextAssistPlannedAt = new Date().toISOString();
       state.nextAssistPlanningData = {
         plannedAt: state.nextAssistPlannedAt,
-        marketDataAt: state.lastDemandSnapshotAt || state.marketData?.generatedAt || '',
         appliesNewSamplesAfterThisAttempt: true,
         targetState: targetStateSnapshot(state)
       };
@@ -219,8 +170,6 @@
         speedMode: plan.speedMode || '',
         rateMultiplier: plan.rateMultiplier || '',
         targetError: plan.targetError || 0,
-        marketRegime: plan.marketRegime || '',
-        h1Delta: plan.h1Delta || 0,
         dailyDownloaded: plan.dailyDownloaded ?? dailyDownloadedFromState(state),
         dailyLimit: plan.dailyLimit ?? Number(opts.watcherDailyLimit || 0),
         todayTarget: plan.todayTarget ?? Number(state.todayTarget || 0),
@@ -241,10 +190,10 @@
     }
 
     async function scheduleNextAssistAfterRun(opts, result, trigger) {
-      if (!opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
-      if (trigger === 'manual' || trigger === 'manual-observe') return null;
+      if (!opts?.watcherQuantSchedulerEnabled) return null;
+      if (trigger === 'manual') return null;
       const reason = String(result?.reason || '');
-      if (/assist_not_due|observe_only|outside_work_schedule|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
+      if (/assist_not_due|outside_work_schedule|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
       const state = await getWatcherState();
       delete state.nextAssistRunAt;
       delete state.nextAssistReason;
@@ -289,10 +238,7 @@
         const outsideDelay = nextWorkDelayMinutes(opts);
         if (outsideDelay !== null) return Math.max(1, outsideDelay);
         const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
-        const assistDelay = opts.watcherObserveMode === 'observe_only' ? Number.POSITIVE_INFINITY : Number(assistPlan?.minutes || Number.POSITIVE_INFINITY);
-        if (Number.isFinite(assistDelay)) return Math.max(1, assistDelay);
-        const observeDelay = opts.watcherObserveIntervalMinutes * (0.85 + Math.random() * 0.30);
-        return Math.max(1, observeDelay);
+        return Math.max(1, Number(assistPlan?.minutes || Number.POSITIVE_INFINITY));
       }
       const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
       const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
@@ -311,6 +257,24 @@
         await appendWatcherTrace('alarm_cleared', { reason });
       }
       if (!opts.watcherEnabled) {
+        const state = await getWatcherState();
+        delete state.nextAssistRunAt;
+        delete state.nextAssistReason;
+        delete state.nextAssistStrategy;
+        delete state.nextAssistDelayMinutes;
+        delete state.nextAssistModelDelayMinutes;
+        delete state.nextAssistGuardMinutes;
+        delete state.nextAssistGuardApplied;
+        delete state.nextAssistGuardLiftMinutes;
+        delete state.nextAssistGuardWeight;
+        delete state.nextAssistGuardMode;
+        delete state.nextAssistPlannedAt;
+        delete state.nextAssistPlanningData;
+        delete state.nextAssistPlan;
+        state.nextScheduledAt = '';
+        state.chromeAlarmScheduledAt = '';
+        await saveWatcherState(state);
+        await updateActionBadge(state);
         await appendWatcherTrace('alarm_disabled', { reason });
         return;
       }
@@ -333,7 +297,7 @@
       const delay = randomIntervalMinutes(opts, state);
       state.nextScheduledAt = Date.now() + delay * 60 * 1000;
       state.currentSchedulerMode = opts.watcherSchedulerMode;
-      state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+      state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
       state.lastAlarmRefreshReason = reason;
       await saveWatcherState(state);
       await chromeApi.alarms.create(alarmName, { delayInMinutes: delay });
@@ -354,21 +318,20 @@
         nextAssistRunAt: state.nextAssistRunAt || '',
         nextAssistStrategy: state.nextAssistStrategy || '',
         nextAssistReason: state.nextAssistReason || '',
-        observeIntervalMinutes: opts.watcherObserveIntervalMinutes || '',
         speedMode: state.speedMode || '',
         rateMultiplier: state.rateMultiplier || ''
       });
     }
 
     async function scheduleWakeForExistingAssist(opts, state, reason = 'existing_assist_due', minDelayMinutes = 0.05) {
-      if (!opts?.watcherEnabled || !opts?.watcherQuantSchedulerEnabled || opts.watcherObserveMode === 'observe_only') return null;
+      if (!opts?.watcherEnabled || !opts?.watcherQuantSchedulerEnabled) return null;
       const nextAssistMs = state?.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
       if (!Number.isFinite(nextAssistMs) || nextAssistMs <= 0) return null;
       await chromeApi.alarms.clear(alarmName);
       const delay = Math.max(minDelayMinutes, (nextAssistMs - Date.now()) / 60000);
       state.nextScheduledAt = Date.now() + delay * 60 * 1000;
       state.currentSchedulerMode = opts.watcherSchedulerMode;
-      state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : 'quant_rules';
+      state.currentExecutionModel = 'quant_rules';
       state.lastAlarmRefreshReason = reason;
       await saveWatcherState(state);
       await chromeApi.alarms.create(alarmName, { delayInMinutes: delay });
@@ -406,7 +369,7 @@
         state.nextAssistStrategy = 'rate_limited_retry';
         state.nextScheduledAt = clearTimeMs;
         state.currentSchedulerMode = opts.watcherSchedulerMode;
-        state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+        state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
         state.lastAlarmRefreshReason = 'rate_limited_retry';
         await saveWatcherState(state);
         await chromeApi.alarms.clear(alarmName);
@@ -434,18 +397,6 @@
           state.nextAssistStrategy = state.nextAssistStrategy || 'calendar_target_lognormal';
         }
         const delay = await scheduleWakeForExistingAssist(opts, state, 'retry_after_active_task', 1);
-        if (delay !== null) return delay;
-      }
-      if (reason === 'observed_assist_not_due' && attempt?.nextAssistBefore) {
-        const state = await getWatcherState();
-        const beforeMs = new Date(attempt.nextAssistBefore).getTime();
-        const currentMs = state.nextAssistRunAt ? new Date(state.nextAssistRunAt).getTime() : 0;
-        if (Number.isFinite(beforeMs) && beforeMs > 0 && (!Number.isFinite(currentMs) || currentMs <= 0 || currentMs > beforeMs)) {
-          state.nextAssistRunAt = attempt.nextAssistBefore;
-          state.nextAssistReason = state.nextAssistReason || 'preserved_after_observe';
-          state.nextAssistStrategy = state.nextAssistStrategy || 'calendar_target_lognormal';
-        }
-        const delay = await scheduleWakeForExistingAssist(opts, state, 'after_observe_assist_not_due');
         if (delay !== null) return delay;
       }
       return refreshAutoWatcherAlarm(true, 'after_alarm_run');

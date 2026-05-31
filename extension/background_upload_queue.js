@@ -18,7 +18,6 @@
       isDoiUrl,
       isLikelyRscPayload,
       pauseWatcherForAccessEnvironment,
-      recordJournalAccessResult,
       saveErrorDiagnostic,
       isNonPdfAccessPageError,
       escapeHtml,
@@ -104,9 +103,6 @@
           let accessEnvironmentPause = null;
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
-          }
-          if (failureReason && failureReason !== 'login_required' && failureReason !== 'cf_challenge') {
-            await recordJournalAccessResult(payload, { ok: false, reason: failureReason });
           }
           if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});

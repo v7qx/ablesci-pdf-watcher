@@ -17,8 +17,7 @@ importScripts(
   'background_upload_client.js',
   'background_upload.js',
   'background_task_snapshot.js',
-  'background_tab_registry.js',
-  'background_journal_rules.js'
+  'background_tab_registry.js'
 );
 
 const {
@@ -64,7 +63,6 @@ const {
 } = globalThis.AblesciBackgroundPublishers;
 const { createBackgroundTaskSnapshotApi } = globalThis.AblesciBackgroundTaskSnapshot;
 const { createBackgroundTabRegistryApi } = globalThis.AblesciBackgroundTabRegistry;
-const { createBackgroundJournalRulesApi } = globalThis.AblesciBackgroundJournalRules;
 const { createBackgroundPortUtilsApi } = globalThis.AblesciBackgroundPortUtils;
 const { createBackgroundNativeApi } = globalThis.AblesciBackgroundNative;
 const { createBackgroundFileUtilsApi } = globalThis.AblesciBackgroundFileUtils;
@@ -82,7 +80,6 @@ const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
 const NATIVE_MESSAGE_LONG_TIMEOUT_MS = 5 * 60 * 1000;
 const ORPHAN_PUBLISHER_TAB_MAX_AGE_MS = 5 * 60 * 1000;
 const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF。可能是未登录、没有权限、机构认证失效、验证码或出版商错误页。插件已停止，不会上传。';
-let resolveJournalAccessRulesForRuntime = null;
 
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
 const pendingPublisherTabs = new Map();
@@ -136,11 +133,7 @@ async function recordManualWatcherDaily(field) {
 }
 
 async function getOptions() {
-  const opts = await loadOptionsFromStorage();
-  if (typeof resolveJournalAccessRulesForRuntime === 'function') {
-    return resolveJournalAccessRulesForRuntime(opts, { persist: true });
-  }
-  return opts;
+  return loadOptionsFromStorage();
 }
 
 const {
@@ -188,11 +181,6 @@ const {
 });
 
 const {
-  resolveJournalAccessRulesForOptions,
-  recordJournalAccessResult
-} = createBackgroundJournalRulesApi();
-resolveJournalAccessRulesForRuntime = resolveJournalAccessRulesForOptions;
-const {
   makeDiagnosticBase,
   classifyJournalAccessFailureReason,
   isLikelyRscPayload,
@@ -218,7 +206,6 @@ const {
   basenameOf,
   extensionOf,
   getOptions,
-  recordJournalAccessResult,
   post,
   escapeHtml,
   formatTaskError
@@ -307,7 +294,6 @@ const {
   pauseWatcherForAccessEnvironment,
   recordAccessEnvironmentSuccess,
   clearPublisherCfChallengeState,
-  recordJournalAccessResult,
   sendNativeMessage,
   formatBytes,
   formatConfiguredSize,
@@ -351,7 +337,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/demand.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');
+  importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

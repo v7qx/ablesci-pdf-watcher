@@ -65,14 +65,7 @@
     watcherJournalAccessConfigPath: '',
     watcherCfPauseThreshold: 6,
     watcherQuantSchedulerEnabled: true,
-    watcherAdvancedSchedulerEnabled: false,
     watcherRiskBudgetLimit: 10,
-    watcherObserveOnly: false,
-    watcherObserveMode: 'assist',
-    watcherDemandObserveUrl: 'https://www.ablesci.com/assist/index?status=waiting',
-    watcherObserveTimes: '',
-    watcherObserveIntervalMinutes: 5,
-    watcherObserveFallbackMinutes: 180,
     watcherWorkdays: '1,2,3,4,5',
     watcherWorkWindows: '09:00-12:00\n13:30-18:00',
     watcherMonthlyTarget: 2000,
@@ -107,7 +100,7 @@
   function normalizeSchedulerMode(opts) {
     const raw = String(opts?.watcherSchedulerMode || '').trim().toLowerCase();
     if (raw === 'fixed' || raw === 'quant') return raw;
-    if (raw === 'advanced' || opts?.watcherAdvancedSchedulerEnabled === true) return 'quant';
+    if (raw === 'advanced') return 'quant';
     if (opts?.watcherQuantSchedulerEnabled === false) return 'fixed';
     return 'quant';
   }
@@ -216,14 +209,7 @@
       watcherJournalAccessConfigPath: '',
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),
       watcherQuantSchedulerEnabled: schedulerMode !== 'fixed',
-      watcherAdvancedSchedulerEnabled: false,
       watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100),
-      watcherObserveMode: 'assist',
-      watcherObserveOnly: false,
-      watcherDemandObserveUrl: DEFAULT_OPTIONS.watcherDemandObserveUrl,
-      watcherObserveTimes: DEFAULT_OPTIONS.watcherObserveTimes,
-      watcherObserveIntervalMinutes: DEFAULT_OPTIONS.watcherObserveIntervalMinutes,
-      watcherObserveFallbackMinutes: DEFAULT_OPTIONS.watcherObserveFallbackMinutes,
       watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
       watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
       watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000),

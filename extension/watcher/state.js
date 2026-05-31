@@ -116,7 +116,6 @@
 
     function triggerMetricKey(trigger) {
       if (trigger === 'alarm') return 'autoRuns';
-      if (trigger === 'manual-observe') return 'manualObserveRuns';
       return 'manualRuns';
     }
 
@@ -135,7 +134,7 @@
         state.lastRunStartedAt = now;
         state.lastRunTrigger = trigger;
         state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
-        state.currentExecutionModel = opts.watcherAdvancedSchedulerEnabled ? 'advanced_session' : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+        state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
         state.activeRunDays = state.activeRunDays || {};
         state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
         const keepAfter = Date.now() - activeRunRetentionDays * 24 * 60 * 60 * 1000;
@@ -192,7 +191,6 @@
       await appendWatcherTrace('run_attempt_summary', {
         reason: finished.resultReason,
         trigger: finished.trigger,
-        observeSnapshot: finished.observeSnapshot,
         targetSessionSize: finished.targetSessionSize,
         checkedDelta: finished.checkedDelta,
         downloadedDelta: finished.downloadedDelta,

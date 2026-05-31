@@ -99,13 +99,6 @@
     function watcherOptionSnapshot(opts) {
       const snapshot = {};
       const hiddenKeys = new Set([
-        'watcherDemandObserveUrl',
-        'watcherObserveTimes',
-        'watcherObserveIntervalMinutes',
-        'watcherObserveFallbackMinutes',
-        'watcherObserveOnly',
-        'watcherObserveMode',
-        'watcherAdvancedSchedulerEnabled',
         'watcherJournalAccessRules',
         'watcherJournalAccessConfigPath',
         'watcherSkipHighRiskJournal'

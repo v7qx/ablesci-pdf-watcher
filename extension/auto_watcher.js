@@ -6,7 +6,6 @@
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
-  const DEMAND_SNAPSHOTS_KEY = 'demandSnapshots';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
   const JOURNAL_SHORT_NAME_MAP_KEY = 'journalShortNameMap';
@@ -17,33 +16,16 @@
   const NATIVE_CONFIG_TIMEOUT_MS = 15 * 1000;
   const NATIVE_NOTIFY_TIMEOUT_MS = 10 * 1000;
   const NATIVE_REPORT_TIMEOUT_MS = 30 * 1000;
-  const MAX_DEMAND_SNAPSHOTS = 500;
   const MAX_SESSION_CANDIDATES = 10;
   const ACTIVE_RUN_RETENTION_DAYS = 62;
-  const MARKET_RAW_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-  const MARKET_TOP_PUBLISHERS = 8;
   const REPORT_DIR = 'ablesci-watcher-reports';
   const WATCHER_DAILY_LIMIT_MAX = 500;
   const DOI_FAILURE_SKIP_THRESHOLD = 5;
-  const ADVANCED_MODEL_MIN_DAYS = 2;
-  const FALLBACK_PUBLISHER_WEIGHTS = {
-    Elsevier: 2.8,
-    ScienceDirect: 2.8,
-    Wiley: 1.2,
-    Springer: 1.1,
-    Nature: 1.0,
-    Oxford: 0.9,
-    IEEE: 0.7,
-    RSC: 0.65,
-    Unknown: 0.4
-  };
   const SESSION_MODES = {
     slow: { median: 10, min: 6, max: 25, sizeWeights: [0, 1] },
     normal: { median: 6, min: 4, max: 15, sizeWeights: [0, 1] },
     fast: { median: 2, min: 1, max: 5, sizeWeights: [0, 1] }
   };
-  const ADVANCED_ITEM_GAP = { median: 3, min: 1, max: 8 };
-  const ADVANCED_COOLDOWN = { median: 18, min: 6, max: 90 };
 
   let deps = null;
   const stateRef = { autoWatcherRunning: false };
@@ -80,7 +62,6 @@
   const { sanitizeTraceValue } = globalThis.AblesciWatcherLogging;
   const { createWatcherStateApi } = globalThis.AblesciWatcherStateModule;
   const { createWatcherReportApi } = globalThis.AblesciWatcherReportModule;
-  const { createWatcherDemandApi } = globalThis.AblesciWatcherDemandModule;
   const { createWatcherCandidateApi } = globalThis.AblesciWatcherCandidateModule;
   const { createWatcherRunnerApi } = globalThis.AblesciWatcherRunnerModule;
   const { createWatcherTargetApi } = globalThis.AblesciWatcherTargetModule;
@@ -115,66 +96,21 @@
     updateActionBadge: state => updateActionBadge(state)
   });
   const {
-    monthKey,
     monthDone,
-    daysInCurrentMonth,
-    getDemandSnapshots,
-    percentileRank,
-    medianNumber,
-    sumNumbers,
-    floorTime,
-    candleFromSamples,
-    demandSnapshotDays,
-    demandRegimeFor,
-    classifyDemandSnapshotAnomaly,
-    topPublishersFromSamples,
-    minuteOfDayFromTimestamp,
-    sameSlotPercentile,
-    buildMarketDataModel,
-    workMinutesForDay,
-    workTimeProgressDetails,
-    workTimeProgressRatio,
-    monthRunCount,
-    availabilitySnapshot,
     lagThresholds,
-    speedModeFromTarget,
     calculateTargetState,
     calculateAdvancedTargetState,
-    candidateSource,
-    selectBanditCandidates,
-    recordBanditOutcome
+    candidateSource
   } = createWatcherTargetApi({
-    chromeApi: globalThis.chrome,
-    demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
-    maxDemandSnapshots: MAX_DEMAND_SNAPSHOTS,
-    marketRawRetentionMs: MARKET_RAW_RETENTION_MS,
-    marketTopPublishers: MARKET_TOP_PUBLISHERS,
-    fallbackPublisherWeights: FALLBACK_PUBLISHER_WEIGHTS,
-    advancedModelMinDays: ADVANCED_MODEL_MIN_DAYS,
     todayKey,
     normalizeText,
     clampNumber,
     formatBeijingDateTime,
     beijingMinutesNow,
     weekdayNumber,
-    demandFactorByRegime: regime => demandFactorByRegime(regime),
-    trendFactorFromModel: model => trendFactorFromModel(model),
-    riskSnapshot: (state, opts) => riskSnapshot(state, opts),
-    journalAccessRuleFor: (...args) => journalAccessRuleFor(...args)
+    riskSnapshot: (state, opts) => riskSnapshot(state, opts)
   });
-  const {
-    publisherAlias,
-    demandFactorByRegime,
-    trendFactorFromModel,
-    refreshPublisherModelFromSnapshots
-  } = createWatcherMarketApi({
-    normalizeText,
-    demandSnapshotDays,
-    getDemandSnapshots,
-    buildMarketDataModel,
-    fallbackPublisherWeights: FALLBACK_PUBLISHER_WEIGHTS,
-    advancedModelMinDays: ADVANCED_MODEL_MIN_DAYS
-  });
+  const { publisherAlias } = createWatcherMarketApi({ normalizeText });
   const {
     candidatePublisherName,
     normalizeDocumentType,
@@ -195,7 +131,6 @@
     isListCandidateDoiHighRiskByStats,
     journalAccessRuleFor,
     describeWatcherReason,
-    candidateModelScore,
     orderCandidatesForRun,
     parseAssistListPage,
     minSeekingGateForList,
@@ -210,8 +145,6 @@
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     publisherAlias: value => publisherAlias(value),
     normalizeText,
-    selectBanditCandidates: (...args) => selectBanditCandidates(...args),
-    medianNumber: (...args) => medianNumber(...args),
     journalShortNameMapKey: JOURNAL_SHORT_NAME_MAP_KEY,
     highRiskFailThreshold: HIGH_RISK_FAIL_THRESHOLD,
     doiFailureSkipThreshold: DOI_FAILURE_SKIP_THRESHOLD
@@ -245,8 +178,6 @@
     isInWorkSchedule,
     nextWorkDelayMinutes,
     logNormalMinutes,
-    weightedPickIndex,
-    weightedPickIndexWithDebug,
     maxSessionCandidates,
     dailyDownloadedFromState,
     sessionExecutionCap,
@@ -338,7 +269,6 @@
     autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
     autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
     autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
-    demandSnapshotsKey: DEMAND_SNAPSHOTS_KEY,
     journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
     alarmName: ALARM_NAME,
     doiFailureSkipThreshold: DOI_FAILURE_SKIP_THRESHOLD
@@ -416,7 +346,6 @@
     updateProcessed,
     incrementDaily,
     recordRiskEvent,
-    recordBanditOutcome,
     notifyWatcherNeedsAttention,
     getProcessedKey,
     candidateSource,
@@ -434,49 +363,11 @@
     isListCandidateDoiHighRiskByStats,
     enrichCandidateJournalFromMap
   });
-  const {
-    collectDemandIfDue
-  } = createWatcherDemandApi();
-  const {
-    sessionSize,
-    advancedSessionSize,
-    runAdvancedSchedulerSession
-  } = createWatcherSessionApi({
+  const { sessionSize } = createWatcherSessionApi({
     sessionModes: SESSION_MODES,
     maxSessionCandidates,
     sessionExecutionCap,
-    riskSnapshot,
-    weightedPickIndexWithDebug,
-    logNormalMinutes,
-    advancedItemGap: ADVANCED_ITEM_GAP,
-    advancedCooldown: ADVANCED_COOLDOWN,
-    saveWatcherState,
-    getWatcherState,
-    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    listUrlsForRun,
-    randomizeAssistListUrlWithMeta,
-    incrementDaily,
-    parseListUrl,
-    recordCfChallenge,
-    resetCfChallengeStreak,
-    enrichCandidateJournalFromMap,
-    isListCandidateAllowed,
-    describeWatcherReason,
-    isListCandidateHighRiskByStats,
-    isListCandidateDoiHighRiskByStats,
-    wasRecentlyProcessed,
-    selectBanditCandidates: (...args) => selectBanditCandidates(...args),
-    inspectDetail,
-    closeTabQuietly,
-    updateProcessed,
-    appendWatcherLog: entry => appendWatcherLog(entry),
-    isDetailAllowedForWatcher,
-    getProcessedKey,
-    candidateSource,
-    handleAllowedPayload,
-    sleepMinutes,
-    recordRiskEvent,
-    recordBanditOutcome
+    riskSnapshot
   });
   const { runAutoWatcherOnce } = createWatcherOrchestratorApi({
     depsRef,
@@ -490,7 +381,6 @@
     todayKey,
     monthDone,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    collectDemandIfDue,
     recordCfChallenge,
     isInWorkSchedule,
     formatBeijingDateTime,
@@ -498,14 +388,12 @@
     hydrateJournalAccessStatsIndex,
     isAssistDue,
     checkShortTermRateLimit,
-    refreshPublisherModelFromSnapshots,
     calculateAdvancedTargetState,
     calculateTargetState,
     mergeFrozenTargetState,
     getDailyCount,
     sessionExecutionCap,
     riskSnapshot,
-    advancedSessionSize,
     sessionSize,
     maxSessionCandidates,
     dailyDownloadedFromState,
@@ -529,7 +417,6 @@
     getProcessedKey,
     isDetailAllowedForWatcher,
     handleAllowedPayload,
-    runAdvancedSchedulerSession,
     recordRunFinish,
     scheduleNextAssistAfterRun,
     refreshAlarmAfterRun,

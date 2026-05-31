@@ -19,7 +19,6 @@
       pauseWatcherForAccessEnvironment,
       recordAccessEnvironmentSuccess,
       clearPublisherCfChallengeState,
-      recordJournalAccessResult,
       sendNativeMessage,
       formatBytes,
       formatConfiguredSize,
@@ -209,7 +208,6 @@
         }
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        await recordJournalAccessResult(payload, { ok: true });
         if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
           await recordManualWatcherDaily('uploaded').catch(() => {});
         }
@@ -250,13 +248,11 @@
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        await recordJournalAccessResult(payload, { ok: true });
         postDoneFromSiteResponse(port, parsed, '上传成功');
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        await recordJournalAccessResult(payload, { ok: true });
         post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
           html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
           recomend: false,
@@ -285,7 +281,6 @@
       isDoiUrl,
       isLikelyRscPayload,
       pauseWatcherForAccessEnvironment,
-      recordJournalAccessResult,
       saveErrorDiagnostic,
       isNonPdfAccessPageError,
       escapeHtml,

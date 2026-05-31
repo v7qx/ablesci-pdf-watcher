@@ -15,7 +15,6 @@
       todayKey,
       monthDone,
       appendWatcherTrace,
-      collectDemandIfDue,
       recordCfChallenge,
       isInWorkSchedule,
       formatBeijingDateTime,
@@ -23,14 +22,12 @@
       hydrateJournalAccessStatsIndex,
       isAssistDue,
       checkShortTermRateLimit,
-      refreshPublisherModelFromSnapshots,
       calculateAdvancedTargetState,
       calculateTargetState,
       mergeFrozenTargetState,
       getDailyCount,
       sessionExecutionCap,
       riskSnapshot,
-      advancedSessionSize,
       sessionSize,
       maxSessionCandidates,
       dailyDownloadedFromState,
@@ -52,7 +49,6 @@
       getProcessedKey,
       isDetailAllowedForWatcher,
       handleAllowedPayload,
-      runAdvancedSchedulerSession,
       recordRunFinish,
       scheduleNextAssistAfterRun,
       refreshAlarmAfterRun,
@@ -127,8 +123,6 @@
         startedAt: new Date().toISOString(),
         trigger,
         resultReason: '',
-        observeSnapshot: false,
-        observeReason: '',
         nextAssistBefore: '',
         nextAssistAfter: '',
         nextAlarmAfter: '',
@@ -203,7 +197,7 @@
         currentRunOpts = opts;
         await recordRunStart(trigger, opts);
         const initialState = await getWatcherState();
-        if (trigger === 'manual' || trigger === 'manual-observe') {
+        if (trigger === 'manual') {
           manualScheduleSnapshot = snapshotScheduleFields(initialState);
         }
         attempt.nextAssistBefore = initialState.nextAssistRunAt || '';
@@ -224,31 +218,19 @@
           });
           return finish({ ok: true, reason: 'outside_work_schedule' });
         }
-        const observeResult = await collectDemandIfDue(opts, false);
-        attempt.observeSnapshot = observeResult?.snapshot ? true : false;
-        attempt.observeReason = observeResult?.reason || '';
-        if (observeResult?.reason === 'cf_challenge') {
-          if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, opts.watcherDemandObserveUrl);
-          return finish({ ok: false, reason: 'cf_challenge' });
-        }
-        if (opts.watcherObserveMode === 'observe_only') {
-          return finish({ ok: true, reason: observeResult?.snapshot ? 'observe_only_snapshot' : 'observe_only_waiting' });
-        }
-
         const stateForTargets = await getWatcherState();
         stateForTargets.optionsSnapshot = opts;
         await hydrateJournalAccessStatsIndex(stateForTargets);
         await syncActualAssistCount(stateForTargets, opts);
         if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
           await appendWatcherTrace('run_skip_assist_not_due', {
-            reason: observeResult?.snapshot ? 'observed_then_assist_not_due' : 'assist_not_due',
+            reason: 'assist_not_due',
             trigger,
             nextAssistRunAt: stateForTargets.nextAssistRunAt || '',
             nextAssistRunAtBeijing: stateForTargets.nextAssistRunAt ? formatBeijingDateTime(stateForTargets.nextAssistRunAt) : '',
-            secondsUntilAssist: stateForTargets.nextAssistRunAt ? Math.round((new Date(stateForTargets.nextAssistRunAt).getTime() - Date.now()) / 1000) : '',
-            observeSnapshot: observeResult?.snapshot ? true : false
+            secondsUntilAssist: stateForTargets.nextAssistRunAt ? Math.round((new Date(stateForTargets.nextAssistRunAt).getTime() - Date.now()) / 1000) : ''
           });
-          return finish({ ok: true, reason: observeResult?.snapshot ? 'observed_assist_not_due' : 'assist_not_due' });
+          return finish({ ok: true, reason: 'assist_not_due' });
         }
         if (trigger !== 'manual') {
           const rateLimit = checkShortTermRateLimit(stateForTargets);
@@ -264,17 +246,11 @@
             return finish({ ok: false, reason });
           }
         }
-        if (stateForTargets.riskPausedUntil && new Date(stateForTargets.riskPausedUntil).getTime() > Date.now()) {
-          await appendWatcherTrace('run_skip_risk_budget_paused', { reason: 'risk_budget_paused', trigger, pausedUntil: stateForTargets.riskPausedUntil });
-          return finish({ ok: false, reason: 'risk_budget_paused' });
-        }
         const liveTargetState = !opts.watcherQuantSchedulerEnabled
           ? {
               schedulerModelMode: 'fixed',
               speedMode: 'fixed',
               todayTarget: 0,
-              demandFactor: 1,
-              trendFactor: 1,
               actualDone: 0,
               expectedDone: 0,
               targetError: 0,
@@ -288,7 +264,7 @@
           : null;
         const targetState = mergeFrozenTargetState(liveTargetState, frozenTargetState);
         Object.assign(stateForTargets, targetState);
-        stateForTargets.lastAssistDecisionModelData = frozenTargetState ? 'frozen_pending_assist_plan' : 'live_market_data';
+        stateForTargets.lastAssistDecisionModelData = frozenTargetState ? 'frozen_pending_assist_plan' : 'live_schedule_state';
         stateForTargets.lastAssistStrategy = opts.watcherQuantSchedulerEnabled ? 'calendar_target_lognormal' : 'fixed_interval';
         stateForTargets.lastAssistDecisionAt = new Date().toISOString();
         stateForTargets.lastAssistDecision = {
@@ -296,7 +272,6 @@
           strategy: stateForTargets.lastAssistStrategy,
           modelData: stateForTargets.lastAssistDecisionModelData,
           frozenPlanAt: stateForTargets.nextAssistPlanningData?.plannedAt || '',
-          frozenMarketDataAt: stateForTargets.nextAssistPlanningData?.marketDataAt || '',
           speedMode: targetState.speedMode,
           todayTarget: 0,
           hourTarget: 0,
@@ -307,8 +282,6 @@
           availabilityFactor: targetState.availabilityFactor || 1,
           availabilityActualWakeCount: targetState.availabilityActualWakeCount || 0,
           availabilityExpectedWakeCount: targetState.availabilityExpectedWakeCount || 0,
-          marketRegime: '',
-          recentH1DemandDelta: 0,
           riskUsed: targetState.riskUsed || 0,
           riskLimit: targetState.riskLimit || 0,
           dailyLimit: opts.watcherDailyLimit || 0
@@ -338,7 +311,6 @@
         let targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : Math.min(1, sessionCap);
         const zeroForcedToOne = !opts.watcherAllowZeroSession
           && trigger === 'alarm'
-          && opts.watcherObserveMode !== 'observe_only'
           && targetSessionSize <= 0
           && sessionCap > 0
           && (Number(opts.watcherDailyLimit || 0) <= 0 || dailyDownloadedFromState(stateForTargets) < Number(opts.watcherDailyLimit || 0));
@@ -372,9 +344,9 @@
           todayTarget: '',
           dailyLimit: opts.watcherDailyLimit || 0,
           riskRemaining: riskForSizing.remaining,
-          advanced: false
+          sessionMode: 'single'
         });
-        if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero', observeSnapshot: observeResult?.snapshot ? true : false });
+        if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero' });
 
         const runListUrls = listUrlsForRun(opts);
         await appendWatcherTrace('run_source_order', {

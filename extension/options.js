@@ -154,14 +154,7 @@ async function save(saveOptions = {}) {
   opts.watcherJournalAccessConfigPath = '';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
-  opts.watcherAdvancedSchedulerEnabled = false;
   opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
-  opts.watcherObserveMode = 'assist';
-  opts.watcherObserveOnly = false;
-  opts.watcherDemandObserveUrl = DEFAULT_OPTIONS.watcherDemandObserveUrl;
-  opts.watcherObserveTimes = DEFAULT_OPTIONS.watcherObserveTimes;
-  opts.watcherObserveIntervalMinutes = DEFAULT_OPTIONS.watcherObserveIntervalMinutes;
-  opts.watcherObserveFallbackMinutes = DEFAULT_OPTIONS.watcherObserveFallbackMinutes;
   opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
   opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
   opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);

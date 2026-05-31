@@ -305,7 +305,6 @@
         lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
         lastAttemptFinishedAt: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
         lastAttemptResult: lastAttempt.resultReason || '',
-        lastAttemptObserveSnapshot: lastAttempt.observeSnapshot === true ? 'true' : '',
         lastAttemptTargetSessionSize: lastAttempt.targetSessionSize ?? '',
         lastAttemptCheckedDelta: lastAttempt.checkedDelta ?? '',
         lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',

@@ -96,8 +96,6 @@
             'watcherIntervalMinutes',
             'watcherMinIntervalMinutes',
             'watcherMaxIntervalMinutes',
-            'watcherObserveMode',
-            'watcherObserveIntervalMinutes',
             'watcherAllowZeroSession',
             'watcherDailyLimit'
           ];

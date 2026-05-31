@@ -48,6 +48,11 @@
       try {
         const current = state || await getWatcherState();
         const opts = depsRef?.getOptions ? normalizeOptions(await depsRef.getOptions()) : {};
+        if (opts.watcherEnabled !== true) {
+          await chromeApi.action.setBadgeText({ text: '' });
+          await chromeApi.action.setTitle({ title: 'Ablesci PDF Watcher' });
+          return;
+        }
         const schedule = nextDisplaySchedule(current, opts);
         const text = countdownText(schedule.time);
         const shortText = text === 'due'

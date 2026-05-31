@@ -13,7 +13,6 @@
       basenameOf,
       extensionOf,
       getOptions,
-      recordJournalAccessResult,
       post,
       escapeHtml,
       formatTaskError
@@ -175,7 +174,6 @@
         removedDownloadFile: removed,
         removeReason
       });
-      await recordJournalAccessResult(diag, { ok: false, reason: 'html_login_or_error_page' });
       post(port, 'done', message, {
         html: escapeHtml(message),
         recomend: false,

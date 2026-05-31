@@ -12,8 +12,7 @@
     LAST_DIAGNOSTIC_KEY: 'latestDiagnostic',
     AUTO_WATCHER_STATE_KEY: 'autoWatcherState',
     AUTO_WATCHER_LOG_KEY: 'autoWatcherLogs',
-    AUTO_WATCHER_TRACE_KEY: 'autoWatcherTraceLogs',
-    DEMAND_SNAPSHOTS_KEY: 'demandSnapshots'
+    AUTO_WATCHER_TRACE_KEY: 'autoWatcherTraceLogs'
   };
 
   async function loadOptionsFromStorage(uiNormalizers = null) {

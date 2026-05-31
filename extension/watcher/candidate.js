@@ -9,10 +9,6 @@
       appendWatcherTrace,
       publisherAlias,
       normalizeText,
-      parseListUrl,
-      selectBanditCandidates,
-      medianNumber,
-      normalizeTextLocalFallback,
       journalShortNameMapKey,
       highRiskFailThreshold,
       doiFailureSkipThreshold
@@ -224,30 +220,8 @@
       return labels[code] ? `${code} - ${labels[code]}` : code;
     }
 
-    function candidateModelScore(candidate, state) {
-      const model = state?.publisherModel || {};
-      const publisher = candidatePublisherName(candidate);
-      const item = model.publishers?.[publisher] || model.publishers?.Unknown || {};
-      const doiBonus = candidate?.hasDoi ? 0.25 : 0;
-      const demandWeight = Number(item.weight || 0.4);
-      const successRate = Number(item.successRate || 0.5);
-      const accessRule = journalAccessRuleFor(candidate, state?.optionsSnapshot || {});
-      const accessBonus = accessRule.state === 'allowed' ? 0.55 : (accessRule.state === 'partial' ? 0.25 : 0);
-      return demandWeight * successRate + doiBonus + accessBonus;
-    }
-
     function orderCandidatesForRun(candidates, state, opts = {}, count = 1) {
-      const list = Array.isArray(candidates) ? candidates.slice() : [];
-      if (opts.watcherAdvancedSchedulerEnabled) return selectBanditCandidates(list, state, state.marketData, Math.max(1, count));
-      if (state?.schedulerModelMode !== 'advanced') return list;
-      const scored = list.map(candidate => candidateModelScore(candidate, state));
-      const median = medianNumber(scored) ?? 0;
-      const preferred = [];
-      const fallback = [];
-      list.forEach((candidate, index) => {
-        (scored[index] >= median ? preferred : fallback).push(candidate);
-      });
-      return preferred.concat(fallback);
+      return Array.isArray(candidates) ? candidates.slice() : [];
     }
 
     function parseAssistListPage() {
@@ -293,7 +267,7 @@
         const count = numberFromText(text(item.querySelector('.waiting-publisher-item-num')));
         if (title && Number.isFinite(count)) publisherCounts[title] = count;
       });
-      const demandSnapshot = {
+      const listStats = {
         sourceUrl: location.href,
         totalSeeking: Number.isFinite(totalSeeking) ? totalSeeking : null,
         supplementCount: Number.isFinite(supplementCount) ? supplementCount : null,
@@ -351,7 +325,7 @@
         loginLike: /登录|请先登录|login/i.test(bodyText)
       };
 
-      return { cfChallenge: false, candidates: candidates.reverse(), demandSnapshot, debug };
+      return { cfChallenge: false, candidates: candidates.reverse(), listStats, debug };
     }
 
     function minSeekingGateForList(parsed, listUrl, pagePublisher, opts = {}) {
@@ -361,7 +335,7 @@
       if (!alias || alias === 'Unknown' || /elsevier|sciencedirect/i.test(alias)) {
         return { ok: true, count: null, publisher: alias };
       }
-      const counts = parsed?.demandSnapshot?.publisherCounts || {};
+      const counts = parsed?.listStats?.publisherCounts || {};
       const count = Object.entries(counts).reduce((sum, [name, value]) => {
         return publisherAlias(name) === alias ? sum + Math.max(0, Number(value) || 0) : sum;
       }, 0);
@@ -497,7 +471,6 @@
       isListCandidateDoiHighRiskByStats,
       journalAccessRuleFor,
       describeWatcherReason,
-      candidateModelScore,
       orderCandidatesForRun,
       parseAssistListPage,
       minSeekingGateForList,

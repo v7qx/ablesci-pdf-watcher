@@ -39,7 +39,6 @@
         watcherJournalAccessRules: String(shared.watcherJournalAccessRules || '').trim(),
         watcherWorkdays: normalizeWorkdays(shared.watcherWorkdays),
         watcherWorkWindows: normalizeWorkWindows(shared.watcherWorkWindows),
-        watcherObserveTimes: [],
         watcherMaxPerSession: 1
       };
     }
@@ -82,23 +81,6 @@
       const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
       const value = median * Math.exp(0.35 * normal);
       return Math.min(max, Math.max(min, value));
-    }
-
-    function weightedPickIndex(weights) {
-      return weightedPickIndexWithDebug(weights).index;
-    }
-
-    function weightedPickIndexWithDebug(weights) {
-      const normalized = weights.map(value => Math.max(0, Number(value) || 0));
-      const total = normalized.reduce((sum, value) => sum + value, 0);
-      if (total <= 0) return { index: 0, random: 0, total, weights: normalized };
-      const random = Math.random() * total;
-      let r = random;
-      for (let i = 0; i < normalized.length; i += 1) {
-        r -= normalized[i];
-        if (r <= 0) return { index: i, random, total, weights: normalized };
-      }
-      return { index: normalized.length - 1, random, total, weights: normalized };
     }
 
     function maxSessionCandidates(opts) {
@@ -163,11 +145,6 @@
         availabilityFactor: state.availabilityFactor || 1,
         availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
         availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
-        demandFactor: 1,
-        trendFactor: 1,
-        marketRegime: '',
-        recentH1DemandDelta: 0,
-        recentD1DemandDelta: 0,
         riskUsed: state.riskUsed || 0,
         riskLimit: state.riskLimit || 0,
         riskRemaining: state.riskRemaining || 0,
@@ -188,11 +165,6 @@
         todayTarget: liveTarget.todayTarget || frozenTarget.todayTarget || 0,
         hourTarget: liveTarget.hourTarget || frozenTarget.hourTarget || 0,
         rateMultiplier: 1,
-        demandFactor: 1,
-        trendFactor: 1,
-        marketRegime: '',
-        recentH1DemandDelta: 0,
-        recentD1DemandDelta: 0,
         riskUsed: liveTarget.riskUsed ?? frozenTarget.riskUsed ?? 0,
         riskLimit: liveTarget.riskLimit || frozenTarget.riskLimit || 0,
         riskRemaining: liveTarget.riskRemaining ?? frozenTarget.riskRemaining ?? 0,
@@ -263,8 +235,6 @@
       isInWorkSchedule,
       nextWorkDelayMinutes,
       logNormalMinutes,
-      weightedPickIndex,
-      weightedPickIndexWithDebug,
       maxSessionCandidates,
       dailyDownloadedFromState,
       sessionExecutionCap,
