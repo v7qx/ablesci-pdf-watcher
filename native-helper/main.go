@@ -72,7 +72,33 @@ type Response struct {
 	Deleted  bool   `json:"deleted,omitempty"`
 }
 
+func isTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 func main() {
+	if isTerminal() {
+		fmt.Println("============================================================")
+		fmt.Println(" Ablesci PDF Watcher - 本地助手")
+		fmt.Println("============================================================")
+		fmt.Println()
+		fmt.Println("本程序由浏览器插件在后台自动运行，平时不需要手动双击打开。")
+		fmt.Println()
+		fmt.Println("【常见问题】")
+		fmt.Println("问：开始菜单里的快捷方式可以删除吗？")
+		fmt.Println("答：可以。它仅用于支持“右下角消息通知”功能。如果您不需要弹窗提醒，")
+		fmt.Println("    可以随时删除该快捷方式或文件夹，完全不会影响插件的下载和上传功能。")
+		fmt.Println()
+		fmt.Println("请按回车键退出本程序...")
+		var input string
+		fmt.Scanln(&input)
+		return
+	}
+
 	if err := run(); err != nil {
 		writeResponse(Response{OK: false, Error: err.Error()})
 		fmt.Fprintln(os.Stderr, "error:", err)
