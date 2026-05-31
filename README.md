@@ -58,7 +58,6 @@ Set-ExecutionPolicy -Scope Process Bypass
   1. 在地址栏输入 `chrome://flags` 并按回车。
   2. 搜索 `optimization-guide-on-device-model`。
   3. 将该项状态从 `Default` 修改为 **`Disabled`**。
-  4. 重启浏览器，并手动删除 Profile 目录下的 `OptGuideOnDeviceModel` 缓存文件夹以释放磁盘空间。
 
 ---
 

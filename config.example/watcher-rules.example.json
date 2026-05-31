@@ -1,8 +1,0 @@
-{
-  "note": "Reserved for future local watcher rules.",
-  "candidateFilters": {
-    "skipRemark": true,
-    "skipBookChapter": true,
-    "skipPatentReport": true
-  }
-}
