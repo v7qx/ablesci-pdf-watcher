@@ -112,7 +112,6 @@ $shortcut.TargetPath = $BrowserExe
 $shortcut.Arguments = $Arguments
 $shortcut.WorkingDirectory = Split-Path -Parent $BrowserExe
 $shortcut.Description = "Open a dedicated browser profile for Ablesci PDF Watcher"
-$shortcut.IconLocation = "shell32.dll, 13"
 $shortcut.Save()
 
 Write-Host "Dedicated browser profile prepared."
