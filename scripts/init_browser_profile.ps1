@@ -85,6 +85,9 @@ Set-ObjectProperty $download "default_directory" $DownloadDir
 Set-ObjectProperty $download "directory_upgrade" $true
 Set-ObjectProperty $download "prompt_for_download" $false
 
+$downloadBubble = Ensure-ObjectProperty $prefs "download_bubble"
+Set-ObjectProperty $downloadBubble "partial_view_enabled" $false
+
 $plugins = Ensure-ObjectProperty $prefs "plugins"
 Set-ObjectProperty $plugins "always_open_pdf_externally" $true
 
