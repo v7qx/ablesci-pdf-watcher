@@ -30,13 +30,10 @@ const {
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
   normalizeWatcherListUrls,
-  parseJournalAccessRules,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;
 const {
   LAST_DIAGNOSTIC_KEY,
-  JOURNAL_ACCESS_STATS_KEY,
-  JOURNAL_ACCESS_LOOKUP_KEY,
   loadOptionsFromStorage
 } = globalThis.AblesciWatcherStorage;
 const {
@@ -191,27 +188,9 @@ const {
 });
 
 const {
-  normalizeJournalKey,
-  journalRuleNames,
-  readJournalAccessRulesFromConfig,
-  writeJournalAccessRulesToConfig,
-  removeRuleMatchingJournal,
-  promoteJournalAccessRuleAfterSuccess,
-  journalAccessRuleSummary,
   resolveJournalAccessRulesForOptions,
-  reloadJournalAccessRulesFromConfig,
-  recordJournalAccessResult,
-  recordJournalAccessResultNow
-} = createBackgroundJournalRulesApi({
-  chromeApi: chrome,
-  parseJournalAccessRules,
-  journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
-  journalAccessLookupKey: JOURNAL_ACCESS_LOOKUP_KEY,
-  sendNativeMessage,
-  getOptions,
-  normalizeText: value => String(value || '').trim(),
-  readConfigTimeoutMs: NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS
-});
+  recordJournalAccessResult
+} = createBackgroundJournalRulesApi();
 resolveJournalAccessRulesForRuntime = resolveJournalAccessRulesForOptions;
 const {
   makeDiagnosticBase,
@@ -358,35 +337,6 @@ const {
   recordManualWatcherDaily
 });
 attachRuntimeListeners();
-
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === 'ablesciGetJournalAccessRuntimeStatus') {
-    getOptions()
-      .then(opts => sendResponse({
-        ok: true,
-        source: opts.watcherJournalAccessRulesSource || (String(opts.watcherJournalAccessRules || '').trim() ? 'chrome.storage.local cache' : ''),
-        path: opts.journalAccessConfigPath || '',
-        text: String(opts.watcherJournalAccessRules || '').trim(),
-        summary: journalAccessRuleSummary(opts.watcherJournalAccessRules || '')
-      }))
-      .catch(err => sendResponse({ ok: false, error: err?.message || String(err) }));
-    return true;
-  }
-  if (msg?.type === 'ablesciReloadJournalAccessRules') {
-    loadOptionsFromStorage()
-      .then(opts => reloadJournalAccessRulesFromConfig(opts))
-      .then(opts => sendResponse({
-        ok: true,
-        source: opts.watcherJournalAccessRulesSource || '',
-        path: opts.journalAccessConfigPath || '',
-        text: String(opts.watcherJournalAccessRules || '').trim(),
-        summary: journalAccessRuleSummary(opts.watcherJournalAccessRules || '')
-      }))
-      .catch(err => sendResponse({ ok: false, error: err?.message || String(err) }));
-    return true;
-  }
-  return false;
-});
 
 recoverUploadTaskSnapshot('service_worker_init').catch(() => {});
 cleanupOrphanPublisherTabs('service_worker_init').catch(() => {});

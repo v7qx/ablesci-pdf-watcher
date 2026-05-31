@@ -10,8 +10,6 @@
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
-      journalAccessStatsKey,
-      journalAccessLookupKey,
       loadOptions,
       watcherOptionSnapshot,
       todayKeyBeijing,
@@ -19,8 +17,6 @@
       showPill,
       setText,
       save,
-      reloadJournalAccessConfigFromNative,
-      openConfigDirFromNative,
       // PRIVATE_WATCHER_ONLY
       openLocalStorageDirFromNative
     } = deps;
@@ -110,14 +106,6 @@
       }
     }
 
-    async function reloadJournalAccessConfig() {
-      return reloadJournalAccessConfigFromNative(save, loadOptions);
-    }
-
-    async function openConfigDir() {
-      return openConfigDirFromNative();
-    }
-
     // PRIVATE_WATCHER_ONLY
     async function openLocalStorageDir() {
       return openLocalStorageDirFromNative();
@@ -129,17 +117,13 @@
         autoWatcherStateKey,
         autoWatcherLogKey,
         autoWatcherTraceKey,
-        lastDiagnosticKey,
-        journalAccessStatsKey,
-        journalAccessLookupKey
+        lastDiagnosticKey
       ]);
       const logs = Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [];
       const traceLogs = Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [];
       const state = stored[autoWatcherStateKey] || {};
       const processed = state.processed || {};
       const diagnostic = stored[lastDiagnosticKey] || null;
-      const journalAccessStats = stored[journalAccessStatsKey] || {};
-      const journalAccessLookup = stored[journalAccessLookupKey] || {};
       const manifest = chromeApi.runtime.getManifest();
 
       const payload = {
@@ -190,10 +174,6 @@
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
           currentSession: state.currentSession || null,
-          journalAccessStatsCount: Object.keys(journalAccessStats || {}).length,
-          journalAccessLookupIndexSize: Object.keys(journalAccessLookup?.index || {}).length,
-          journalAccessNoAccessCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'no_access').length,
-          journalAccessPartialCount: Object.values(journalAccessStats || {}).filter(item => item?.accessState === 'partial_access').length,
           journalShortNameMapCount: Object.keys(state.journalShortNameMap || {}).length,
           journalShortNameMapPreview: Object.entries(state.journalShortNameMap || {}).slice(0, 10).map(([key, value]) => ({
             key,
@@ -225,11 +205,6 @@
       } catch (_) {
         showPill('watcherConfigStatus', '复制失败', true);
       }
-    }
-
-    async function clearJournalAccessStats() {
-      await chromeApi.storage.local.remove(journalAccessStatsKey);
-      showText('status', '已清除本地期刊失败记录。');
     }
 
     async function runAutoWatcherNow() {
@@ -294,12 +269,9 @@
       sendRuntimeMessage,
       testNative,
       copyDiagnostic,
-      reloadJournalAccessConfig,
-      openConfigDir,
       // PRIVATE_WATCHER_ONLY
       openLocalStorageDir,
       copyAutoWatcherConfig,
-      clearJournalAccessStats,
       copyTextToClipboard,
       runAutoWatcherNow,
       testWatcherNotification,

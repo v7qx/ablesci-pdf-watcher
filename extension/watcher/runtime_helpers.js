@@ -16,8 +16,6 @@
       beijingMinutesNow,
       weekdayNumber,
       normalizeText,
-      parseJournalAccessRules,
-      nativeConfigTimeoutMs,
       countdownText,
       formatBeijingDateTime,
       todayKey,
@@ -47,28 +45,11 @@
     }
 
     async function hydrateJournalAccessRulesFromConfig(opts) {
-      if (!depsRef?.sendNativeMessage) return opts;
-      try {
-        const res = await depsRef.sendNativeMessage(opts.nativeHostName, {
-          action: 'read_config_file',
-          dir: '',
-          config_path: '',
-          filename: 'journal-access.json'
-        }, nativeConfigTimeoutMs);
-        if (!res?.body) return opts;
-        const parsed = parseJournalAccessRules(res.body);
-        const text = JSON.stringify(parsed, null, 2);
-        return {
-          ...opts,
-          watcherJournalAccessRules: text,
-          watcherJournalAccessRulesSource: res.path || 'journal-access.json'
-        };
-      } catch (_) {
-        return {
-          ...opts,
-          watcherJournalAccessRulesSource: opts.watcherJournalAccessRules ? 'chrome.storage.local cache' : ''
-        };
-      }
+      return {
+        ...opts,
+        watcherJournalAccessRules: '',
+        watcherJournalAccessRulesSource: ''
+      };
     }
 
     function isInWorkSchedule(opts, date = new Date()) {

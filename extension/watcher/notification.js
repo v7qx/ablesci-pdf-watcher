@@ -114,29 +114,6 @@
       }
     }
 
-    async function notifyCfChallengeTelegram(opts, listUrl, streak, paused) {
-      if (!opts.watcherTelegramNotifyEnabled || !deps.sendNativeMessage) return { ok: false, reason: 'telegram_disabled' };
-      const title = paused ? 'Ablesci 值守已因验证暂停' : 'Ablesci 值守遇到验证';
-      const hostPath = deps.urlHostPath(listUrl || '');
-      const message = [
-        'CF / challenge detected',
-        `streak: ${streak}`,
-        `paused: ${paused ? 'yes' : 'no'}`,
-        `url: ${hostPath?.host || ''}${hostPath?.path || ''}`
-      ].join('\n');
-      try {
-        return await deps.sendNativeMessage(opts.nativeHostName, {
-          action: 'send_telegram',
-          config_path: opts.watcherTelegramConfigPath || '',
-          title,
-          message
-        }, nativeNotifyTimeoutMs);
-      } catch (err) {
-        console.warn('[Ablesci Auto Watcher] telegram notify failed', err);
-        return { ok: false, reason: err?.message || String(err) };
-      }
-    }
-
     async function resetCfChallengeStreak() {
       const state = await getWatcherState();
       if (!state.cfChallengeStreak && !state.pausedByCfChallenge) return;
@@ -227,20 +204,11 @@
         paused: reached,
         listUrl
       });
-      const tg = await notifyCfChallengeTelegram(opts, listUrl, state.cfChallengeStreak, reached);
-      if (tg?.ok) {
-        await appendWatcherLog({
-          detailUrl: listUrl,
-          status: 'notified',
-          reason: reached ? 'telegram_cf_paused' : 'telegram_cf_challenge'
-        });
-      }
       return reached;
     }
 
     return {
       notifyWatcherNeedsAttention,
-      notifyCfChallengeTelegram,
       resetCfChallengeStreak,
       riskSnapshot,
       riskCostFor,

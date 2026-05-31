@@ -96,8 +96,6 @@ func run() error {
 		return handleDeleteFile(req)
 	case "notify_user":
 		return handleNotifyUser(req)
-	case "send_telegram":
-		return handleSendTelegram(req)
 	case "open_config_dir":
 		return handleOpenConfigDir(req)
 	case "open_local_storage":
@@ -301,105 +299,6 @@ func handleNotifyUser(req Request) error {
 	return writeResponse(Response{OK: true, Action: "notify_user"})
 }
 
-type TelegramConfig struct {
-	Enabled             bool   `json:"enabled"`
-	BotToken            string `json:"bot_token"`
-	ChatID              string `json:"chat_id"`
-	MessageThreadID     string `json:"message_thread_id"`
-	ReplyToMessageID    string `json:"reply_to_message_id"`
-	ParseMode           string `json:"parse_mode"`
-	DisableNotification bool   `json:"disable_notification"`
-}
-
-func handleSendTelegram(req Request) error {
-	cfg, err := loadTelegramConfig(req.ConfigPath)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(cfg.BotToken) == "" {
-		return errors.New("telegram bot_token is empty")
-	}
-	if strings.TrimSpace(cfg.ChatID) == "" {
-		return errors.New("telegram chat_id is empty")
-	}
-	title := limitText(firstNonEmpty(req.Title, "Ablesci PDF Watcher"), 80)
-	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 1000)
-	text := title + "\n" + message
-
-	form := url.Values{}
-	form.Set("chat_id", cfg.ChatID)
-	form.Set("text", text)
-	if cfg.MessageThreadID != "" {
-		form.Set("message_thread_id", cfg.MessageThreadID)
-	}
-	if cfg.ReplyToMessageID != "" {
-		form.Set("reply_to_message_id", cfg.ReplyToMessageID)
-	}
-	if cfg.ParseMode != "" {
-		form.Set("parse_mode", cfg.ParseMode)
-	}
-	if cfg.DisableNotification {
-		form.Set("disable_notification", "true")
-	}
-
-	endpoint := "https://api.telegram.org/bot" + cfg.BotToken + "/sendMessage"
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.PostForm(endpoint, form)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return writeResponse(Response{OK: false, Action: "send_telegram", Status: resp.StatusCode, Body: string(body), Error: fmt.Sprintf("telegram send failed: http %d", resp.StatusCode)})
-	}
-	return writeResponse(Response{OK: true, Action: "send_telegram", Status: resp.StatusCode, Body: string(body)})
-}
-
-func loadTelegramConfig(configPath string) (TelegramConfig, error) {
-	candidates := []string{}
-	if strings.TrimSpace(configPath) != "" {
-		candidates = append(candidates, configPath)
-	}
-	if env := strings.TrimSpace(os.Getenv("ABLESCI_WATCHER_TG_CONFIG")); env != "" {
-		candidates = append(candidates, env)
-	}
-	for _, dir := range configDirCandidates("") {
-		candidates = append(candidates, filepath.Join(dir, "telegram.json"))
-	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "telegram.local.json"))
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "telegram.json"))
-	}
-	candidates = append(candidates, "telegram.local.json")
-	candidates = append(candidates, "telegram.json")
-
-	for _, path := range candidates {
-		path = strings.Trim(path, "\" ")
-		if path == "" {
-			continue
-		}
-		if runtime.GOOS == "windows" {
-			path = strings.ReplaceAll(path, "/", `\`)
-		}
-		if !filepath.IsAbs(path) {
-			if abs, err := filepath.Abs(path); err == nil {
-				path = abs
-			}
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var cfg TelegramConfig
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return TelegramConfig{}, fmt.Errorf("decode telegram config failed: %w", err)
-		}
-		return cfg, nil
-	}
-	return TelegramConfig{}, errors.New("telegram config not found")
-}
-
 func handleOpenConfigDir(req Request) error {
 	dir, err := resolveConfigDir(req.Dir)
 	if err != nil {
@@ -482,7 +381,7 @@ func resolveConfigFile(req Request, forWrite bool) (string, error) {
 	}
 	filename := strings.TrimSpace(req.Filename)
 	if filename == "" {
-		filename = "journal-access.json"
+		filename = "watcher-rules.json"
 	}
 	filename = filepath.Base(filename)
 	if !allowedConfigFilename(filename) {
@@ -555,8 +454,7 @@ func configDirCandidates(explicitDir string) []string {
 
 func ensureDefaultConfigFiles(dir string) error {
 	files := map[string]string{
-		"journal-access.json": "{\n  \"blocked\": [],\n  \"allowed\": [],\n  \"partial\": []\n}\n",
-		"telegram.json":       "{\n  \"_comment\": \"Telegram 验证提醒参数。扩展设置页开关负责是否发送；不要提交本文件。\",\n  \"bot_token\": \"\",\n  \"chat_id\": \"\",\n  \"message_thread_id\": \"\",\n  \"reply_to_message_id\": \"\",\n  \"parse_mode\": \"\",\n  \"disable_notification\": false\n}\n",
+		"watcher-rules.json": "{\n  \"note\": \"reserved for future local watcher rules\"\n}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -588,7 +486,7 @@ func cleanConfigPath(path string) string {
 
 func allowedConfigFilename(filename string) bool {
 	switch strings.ToLower(filepath.Base(filename)) {
-	case "journal-access.json", "telegram.json", "telegram.local.json", "watcher-rules.json":
+	case "watcher-rules.json":
 		return true
 	default:
 		return false

@@ -136,7 +136,7 @@ Set-ExecutionPolicy -Scope Process Bypass
   3. 计算文件 MD5 与文件大小；
   4. 将通过校验的 PDF 文件上传至目标云存储（OSS）地址；
   5. 依据扩展配置自动清理已上传的 PDF 文件；
-  6. 读写本地的 `journal-access.json` 等配置文件。
+  6. 写入本地应助日报和辅助排查文件。
 
 ## 扩展图标重新生成
 

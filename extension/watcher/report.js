@@ -6,7 +6,6 @@
       chromeApi,
       deps,
       normalizeOptions,
-      hydrateJournalAccessRulesFromConfig,
       todayKey,
       flushWatcherLogs,
       flushWatcherTrace,
@@ -14,18 +13,13 @@
       formatBeijingTimeOnly,
       formatBeijingDateOnly,
       reportJson,
-      reportValueForJson,
       getWatcherState,
-      journalAccessStatsIndexFromStats,
-      parseJournalAccessRules,
       reportDir,
       nativeReportTimeoutMs,
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
-      journalAccessStatsKey,
-      alarmName,
-      doiFailureSkipThreshold
+      alarmName
     } = config;
 
     function csvEscape(value) {
@@ -50,7 +44,6 @@
       'skipped': '已跳过',
       'candidate_detail_start': '详情页评估开始',
       'candidate_skip_list_filter': '列表页过滤跳过',
-      'candidate_skip_journal_stats': '期刊状态过滤跳过',
       'candidate_skip_processed': '已处理过滤跳过',
       'run_session_size': '会话大小计算',
       'session_size_calculated': '会话大小已计算',
@@ -86,7 +79,6 @@
 
     const REASON_TRANSLATIONS = {
       'candidate_passed_list_filter': '候选通过列表筛选',
-      'journal_blocked_rule': '期刊黑名单限制',
       'session_size_calculated': '会话大小已计算',
       'already running': '已有任务在运行中',
       'already_running': '已有任务在运行中',
@@ -102,7 +94,6 @@
       'download_timeout': '下载 PDF 超时',
       'no_download_timeout': '未触发下载超时',
       'upload_failed': '上传 PDF 失败',
-      'high_risk_journal': '高风险期刊过滤',
       'supplement_pdf': '跳过补充材料(Supplement)',
       'remark_pdf': '跳过备注或勘误',
       'book_chapter': '跳过图书章节',
@@ -246,8 +237,7 @@
     }
 
     async function writeDailyReports() {
-      let opts = normalizeOptions(await deps.getOptions());
-      opts = await hydrateJournalAccessRulesFromConfig(opts);
+      const opts = normalizeOptions(await deps.getOptions());
       if (!opts.watcherDailyReportEnabled) return;
 
       const date = todayKey();
@@ -256,8 +246,7 @@
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
         autoWatcherLogKey,
-        autoWatcherTraceKey,
-        journalAccessStatsKey
+        autoWatcherTraceKey
       ]);
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[date] || {};
@@ -268,7 +257,6 @@
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
-      const journalAccessStats = stored[journalAccessStatsKey] || {};
 
       const csvHeader = [
         'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
@@ -337,163 +325,6 @@
         const row = { record_type: type, ...baseReportFields, ...values };
         return csvHeader.map(key => row[key] ?? '');
       }
-      function jsonLine(type, value = {}) {
-        return JSON.stringify(reportValueForJson({
-          record_type: type,
-          exportedAt: new Date().toISOString(),
-          dayKey: date,
-          ...value
-        }));
-      }
-      const dataRows = [
-        ...logs.map(log => {
-          const cleanTitle = log.title ? String(log.title).replace(/\s+相关领域.*$/, '').trim() : '';
-          const cleanLog = {
-            time: log.time,
-            assistId: log.assistId,
-            title: cleanTitle ? (cleanTitle.length > 80 ? cleanTitle.slice(0, 80) + '...' : cleanTitle) : undefined,
-            doi: log.doi,
-            journalName: log.journalName,
-            status: log.status,
-            reason: log.reason,
-            trigger: log.trigger,
-            sessionId: log.sessionId
-          };
-          return jsonLine('assist_event', cleanLog);
-        }),
-        ...traces.map(trace => {
-          const cleanTrace = {
-            time: trace.time,
-            step: trace.step,
-            reason: trace.reason,
-            trigger: trace.trigger,
-            sessionId: trace.sessionId,
-            details: trace.details ? {
-              assistId: trace.details.assistId,
-              doi: trace.details.doi,
-              journal: trace.details.journal || trace.details.journalName || trace.details.journalShortName,
-              title: trace.details.title ? String(trace.details.title).replace(/\s+相关领域.*$/, '').trim().slice(0, 80) : undefined,
-              targetSessionSize: trace.details.targetSessionSize,
-              currentExecutionModel: trace.details.currentExecutionModel,
-              checkedDelta: trace.details.checkedDelta,
-              downloadedDelta: trace.details.downloadedDelta
-            } : undefined
-          };
-          return jsonLine('trace', cleanTrace);
-        }),
-        ...Object.entries(journalAccessStats).map(([journalName, item]) => jsonLine('journal_access_stat', { journalName, ...item }))
-      ];
-      const detailJsonl = dataRows.join('\n') + (dataRows.length ? '\n' : '');
-      const journalAccessItems = Object.entries(journalAccessStats || {}).map(([journalName, item]) => ({
-        journalName,
-        accessState: item?.accessState || 'unknown',
-        successCount: Number(item?.successCount || 0),
-        failCount: Number(item?.failCount || 0),
-        consecutiveFailCount: Number(item?.consecutiveFailCount || 0),
-        doiFailureCount: Number(item?.doiFailureCount || 0),
-        consecutiveDoiFailureCount: Number(item?.consecutiveDoiFailureCount || 0),
-        lastReason: item?.lastReason || '',
-        lastDoi: item?.lastDoi || '',
-        lastTitle: item?.lastTitle || '',
-        lastSuccessAt: item?.lastSuccessAt || '',
-        lastFailAt: item?.lastFailAt || '',
-        aliases: Array.isArray(item?.aliases) ? item.aliases : []
-      })).sort((a, b) => (
-        Number(b.consecutiveFailCount || 0) - Number(a.consecutiveFailCount || 0)
-        || Number(b.failCount || 0) - Number(a.failCount || 0)
-        || String(a.journalName || '').localeCompare(String(b.journalName || ''))
-      ));
-      const journalAccessSummary = {
-        total: journalAccessItems.length,
-        noAccess: journalAccessItems.filter(item => item.accessState === 'no_access').length,
-        partialAccess: journalAccessItems.filter(item => item.accessState === 'partial_access').length,
-        hasAccess: journalAccessItems.filter(item => item.accessState === 'has_access').length,
-        unknown: journalAccessItems.filter(item => !item.accessState || item.accessState === 'unknown').length,
-        doiRisk: journalAccessItems.filter(item => item.successCount <= 0 && item.consecutiveDoiFailureCount >= doiFailureSkipThreshold).length
-      };
-      const journalAccessJson = JSON.stringify(reportValueForJson({
-        updatedAt: new Date().toISOString(),
-        note: '本文件用于本地排查和手动维护参考。真正生效的手动名单优先来自 Native Helper 目录中的 journal-access.json；config.local 仅保留旧版本兼容回退。',
-        source: opts.watcherJournalAccessRulesSource || 'chrome.storage.local cache',
-        summary: journalAccessSummary,
-        manualRules: parseJournalAccessRules(opts.watcherJournalAccessRules || ''),
-        items: journalAccessItems,
-        stats: journalAccessStats
-      }), null, 2) + '\n';
-      const journalAccessLookupJson = JSON.stringify(reportValueForJson({
-        updatedAt: new Date().toISOString(),
-        note: '轻量查询索引。插件运行时只需要类似结构即可判断列表页候选，不需要读取完整 stats。',
-        count: journalAccessItems.length,
-        index: journalAccessStatsIndexFromStats(journalAccessStats)
-      }), null, 2) + '\n';
-      const journalAccessCsvHeader = [
-        'journalName',
-        'accessState',
-        'successCount',
-        'failCount',
-        'consecutiveFailCount',
-        'doiFailureCount',
-        'consecutiveDoiFailureCount',
-        'lastReason',
-        'lastDoi',
-        'lastSuccessAt',
-        'lastFailAt',
-        'aliases'
-      ];
-      const journalAccessCsv = [
-        journalAccessCsvHeader,
-        ...journalAccessItems.map(item => [
-          item.journalName,
-          item.accessState,
-          item.successCount,
-          item.failCount,
-          item.consecutiveFailCount,
-          item.doiFailureCount,
-          item.consecutiveDoiFailureCount,
-          item.lastReason,
-          item.lastDoi,
-          item.lastSuccessAt ? formatBeijingDateTime(item.lastSuccessAt) : '',
-          item.lastFailAt ? formatBeijingDateTime(item.lastFailAt) : '',
-          item.aliases.join(' | ')
-        ])
-      ].map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
-      const journalAccessMd = [
-        '# Journal Access Stats',
-        '',
-        `Updated: ${formatBeijingDateTime(new Date())}`,
-        '',
-        '## Summary',
-        '',
-        `- Total: ${journalAccessSummary.total}`,
-        `- No access: ${journalAccessSummary.noAccess}`,
-        `- Partial access: ${journalAccessSummary.partialAccess}`,
-        `- Has access: ${journalAccessSummary.hasAccess}`,
-        `- Unknown: ${journalAccessSummary.unknown}`,
-        `- DOI risk: ${journalAccessSummary.doiRisk}`,
-        '',
-        '## Highest Risk',
-        '',
-        '| Journal | State | Success | Fail | Consecutive Fail | DOI Fail | Reason | Aliases |',
-        '| --- | --- | ---: | ---: | ---: | ---: | --- | --- |',
-        ...journalAccessItems.slice(0, 80).map(item => formatMarkdownTableRow([
-          item.journalName,
-          item.accessState,
-          item.successCount,
-          item.failCount,
-          item.consecutiveFailCount,
-          item.consecutiveDoiFailureCount,
-          item.lastReason,
-          item.aliases.slice(0, 6).join(', ')
-        ])),
-        '',
-        '## Files',
-        '',
-        '- `journal-access/stats.json`: full machine-readable stats.',
-        '- `journal-access/stats.csv`: sortable table for manual review.',
-        '- `journal-access/summary.md`: compact human-readable view.',
-        '- `journal-access.json`: compatibility copy at report root.',
-        ''
-      ].map(line => line.trimEnd()).join('\n');
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -612,7 +443,6 @@
         `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`,
         `- 详细事件数据 file: ${monthDir}/watcher-data-${date}.jsonl`,
-        `- 期刊权限文件: journal-access/summary.md, journal-access/stats.csv, journal-access/stats.json`,
         `- 最近会话 ID: ${state.lastSession?.id || ''}`,
         `- 最近会话目标大小: ${Number(state.lastSession?.targetSessionSize || 0)}`,
         `- 最近会话已处理数: ${Number(state.lastSession?.handledCount || 0)}`,
@@ -665,11 +495,6 @@
       await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
       await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
       // PRIVATE_WATCHER_ONLY: skipped writing .jsonl file to optimize disk space
-      await writeReportFile('journal-access/summary.md', journalAccessMd, 'text/markdown', opts);
-      await writeReportFile('journal-access/stats.csv', journalAccessCsv, 'text/csv', opts);
-      await writeReportFile('journal-access/stats.json', journalAccessJson, 'application/json', opts);
-      await writeReportFile('journal-access/index.json', journalAccessLookupJson, 'application/json', opts);
-      await writeReportFile('journal-access.json', journalAccessJson, 'application/json', opts);
     }
 
     return {

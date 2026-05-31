@@ -82,11 +82,6 @@
       return `${parts.year}-${parts.month}-${parts.day}`;
     }
 
-    function journalAccessSummary(raw) {
-      const rules = deps.parseJournalAccessRules ? deps.parseJournalAccessRules(raw) : { blocked: [], partial: [], allowed: [], unknown: [] };
-      return `blocked ${rules.blocked.length} / partial ${rules.partial.length} / allowed ${rules.allowed.length} / unknown ${rules.unknown.length}`;
-    }
-
     function sanitizeUrlForExport(value) {
       try {
         const url = new URL(value);
@@ -110,7 +105,10 @@
         'watcherObserveFallbackMinutes',
         'watcherObserveOnly',
         'watcherObserveMode',
-        'watcherAdvancedSchedulerEnabled'
+        'watcherAdvancedSchedulerEnabled',
+        'watcherJournalAccessRules',
+        'watcherJournalAccessConfigPath',
+        'watcherSkipHighRiskJournal'
       ]);
       for (const key of Object.keys(defaultOptions)) {
         if (!key.startsWith('watcher')) continue;
@@ -132,7 +130,6 @@
       normalizeWorkWindows,
       nextDisplaySchedule,
       todayKeyBeijing,
-      journalAccessSummary,
       sanitizeUrlForExport,
       watcherOptionSnapshot
     };

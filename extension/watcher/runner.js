@@ -20,8 +20,6 @@
       waitForAssistListDom,
       saveWatcherState,
       describeWatcherReason,
-      highRiskFailThreshold,
-      journalAccessStatsKey,
       isDetailAllowedForWatcher,
       isListCandidateAllowed,
       isListCandidateHighRiskByStats,
@@ -30,18 +28,7 @@
     } = config;
 
     async function isHighRiskJournal(journalName) {
-      const journal = String(journalName || '').replace(/\s+/g, ' ').trim();
-      if (!journal) return false;
-      const stored = await chromeApi.storage.local.get(journalAccessStatsKey);
-      const stats = stored[journalAccessStatsKey] || {};
-      const item = stats[journal];
-      if (!item) return false;
-      const consecutiveFailCount = Number(item.consecutiveFailCount || 0);
-      const successCount = Number(item.successCount || 0);
-      const accessState = String(item.accessState || '');
-      if (accessState === 'has_access' || accessState === 'partial_access') return false;
-      if (successCount > 0) return false;
-      return consecutiveFailCount >= highRiskFailThreshold;
+      return false;
     }
 
     async function waitForTabComplete(tabId, timeoutMs = 45000) {
@@ -385,16 +372,6 @@
         autoUpload: true,
         uploadConfirmRequired: false
       });
-
-      if (opts.watcherSkipHighRiskJournal && await isHighRiskJournal(payload.journalName, payload)) {
-        await appendWatcherTrace('candidate_skip_high_risk_journal', { reason: 'high_risk_journal', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-        await closeTabQuietly(detailTabId, 'high_risk_journal');
-        await updateProcessed(key, 'skipped', 'high_risk_journal');
-        await incrementDaily('skipped', trigger || session?.trigger || '');
-        await recordBanditOutcome(source, 'failure', 0, 'high_risk_journal');
-        await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: `本地记录连续失败达到 ${highRiskFailThreshold} 次，暂按无权限跳过` });
-        return false;
-      }
 
       if (deps.hasActiveTask()) {
         await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });

@@ -9,14 +9,11 @@ const {
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
   normalizeWatcherListUrls,
-  parseJournalAccessRules,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;
 const {
   OPTION_IDS: ids,
   LAST_DIAGNOSTIC_KEY,
-  JOURNAL_ACCESS_STATS_KEY,
-  JOURNAL_ACCESS_LOOKUP_KEY,
   AUTO_WATCHER_STATE_KEY,
   AUTO_WATCHER_LOG_KEY,
   AUTO_WATCHER_TRACE_KEY,
@@ -42,28 +39,22 @@ const {
   normalizeWorkWindows,
   nextDisplaySchedule,
   todayKeyBeijing,
-  journalAccessSummary,
   sanitizeUrlForExport,
   watcherOptionSnapshot
 } = createOptionsHelpersApi({
   defaultOptions: DEFAULT_OPTIONS,
   normalizeWorkdaysSet,
   normalizeWorkWindowsDetailed,
-  parseJournalAccessRules,
   normalizeWatcherListUrls
 });
 const { createOptionsNativeApi } = globalThis.AblesciOptionsNative;
 const {
   nativeFailureHelp,
-  renderJournalAccessConfigStatus: renderJournalAccessConfigStatusFromNative,
-  reloadJournalAccessConfig: reloadJournalAccessConfigFromNative,
-  openConfigDir: openConfigDirFromNative,
   // PRIVATE_WATCHER_ONLY
   openLocalStorageDir: openLocalStorageDirFromNative
 } = createOptionsNativeApi({
   chromeApi: chrome,
   defaultOptions: DEFAULT_OPTIONS,
-  parseJournalAccessRules,
   el,
   setText,
   showPill
@@ -86,7 +77,6 @@ async function load() {
     else node.value = opts[id] ?? '';
   }
   await renderAdvancedWatcherStatus();
-  await renderJournalAccessConfigStatusFromNative(opts, loadOptions);
 }
 
 function setText(id, value) {
@@ -116,17 +106,6 @@ function validateOptions(opts) {
     throw new Error('任务最长时间不能小于未触发下载或下载中超时时间。');
   }
   if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
-  if (String(opts.watcherJournalAccessRules || '').trim()) {
-    try {
-      const parsed = JSON.parse(opts.watcherJournalAccessRules || '{}');
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('期刊访问名单必须是 JSON 对象。');
-      for (const key of ['blocked', 'allowed', 'partial', 'unknown']) {
-        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) throw new Error(`${key} 必须是数组。`);
-      }
-    } catch (err) {
-      throw new Error('期刊访问名单 JSON 无效：' + (err?.message || String(err)));
-    }
-  }
 }
 
 async function save(saveOptions = {}) {
@@ -160,7 +139,7 @@ async function save(saveOptions = {}) {
   opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
   opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
   opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX);
-  opts.watcherSkipHighRiskJournal = opts.watcherSkipHighRiskJournal !== false;
+  opts.watcherSkipHighRiskJournal = false;
   opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled !== false;
   opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
   opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
@@ -172,9 +151,7 @@ async function save(saveOptions = {}) {
   opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);
   opts.watcherTaskTimeoutMinutes = clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180);
   opts.watcherNotifyMode = opts.watcherNotifyMode === 'native' ? 'native' : 'browser';
-  opts.watcherTelegramNotifyEnabled = opts.watcherTelegramNotifyEnabled === true;
-  opts.watcherTelegramConfigPath = String(opts.watcherTelegramConfigPath || '').trim();
-  opts.watcherJournalAccessConfigPath = String(opts.watcherJournalAccessConfigPath || '').trim();
+  opts.watcherJournalAccessConfigPath = '';
   opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
   opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
   opts.watcherAdvancedSchedulerEnabled = false;
@@ -193,7 +170,7 @@ async function save(saveOptions = {}) {
   opts.watcherMaxPerSession = 1;
   opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
   opts.watcherUseCalendarProgress = opts.watcherUseCalendarProgress !== false;
-  opts.watcherJournalAccessRules = String(opts.watcherJournalAccessRules || '').trim();
+  opts.watcherJournalAccessRules = '';
   Object.assign(opts, normalizeOptions(opts, { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition }));
 
   try {
@@ -202,6 +179,7 @@ async function save(saveOptions = {}) {
       opts.ablesciSuppressWatcherReplanUntil = Date.now() + 30 * 1000;
     }
     await chrome.storage.local.set(opts);
+    await chrome.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
     return true;
   } catch (err) {
@@ -239,12 +217,9 @@ const {
   showText,
   testNative,
   copyDiagnostic,
-  reloadJournalAccessConfig,
-  openConfigDir,
   // PRIVATE_WATCHER_ONLY
   openLocalStorageDir,
   copyAutoWatcherConfig,
-  clearJournalAccessStats,
   runAutoWatcherNow,
   testWatcherNotification,
   clearAutoWatcherState,
@@ -259,8 +234,6 @@ const {
   autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
   autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
   autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
-  journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
-  journalAccessLookupKey: JOURNAL_ACCESS_LOOKUP_KEY,
   loadOptions,
   watcherOptionSnapshot,
   todayKeyBeijing,
@@ -268,8 +241,6 @@ const {
   showPill,
   setText,
   save,
-  reloadJournalAccessConfigFromNative,
-  openConfigDirFromNative,
   // PRIVATE_WATCHER_ONLY
   openLocalStorageDirFromNative
 });
@@ -311,11 +282,8 @@ el('testNative').addEventListener('click', testNative);
 // PRIVATE_WATCHER_ONLY
 el('openLocalStorageDir')?.addEventListener('click', openLocalStorageDir);
 el('copyDiagnostic').addEventListener('click', copyDiagnostic);
-el('clearJournalAccessStats')?.addEventListener('click', clearJournalAccessStats);
 el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
-el('openWatcherConfigDir')?.addEventListener('click', openConfigDir);
-el('reloadJournalAccessConfig')?.addEventListener('click', reloadJournalAccessConfig);

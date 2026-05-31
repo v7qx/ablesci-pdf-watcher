@@ -3,7 +3,6 @@
 
   const BTN_ID = 'ablesci-native-oneclick-pdf-btn';
   const LOG_ID = 'ablesci-native-oneclick-pdf-log';
-  const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const DEFAULT_PAGE_OPTIONS = {
     smartRecommendPush: true,
     openAssistLinksInCurrentTab: false,
@@ -151,8 +150,7 @@
     if (!btn) return;
     const statusTitle = String(titleText || btn.dataset.ablesciStatusTitle || defaultButtonTitle()).trim();
     btn.dataset.ablesciStatusTitle = statusTitle;
-    const journalHint = String(btn.dataset.ablesciJournalHint || '').trim();
-    btn.title = [statusTitle, journalHint].filter(Boolean).join('\n');
+    btn.title = statusTitle;
   }
 
   function applyButtonAppearance(btn) {
@@ -190,7 +188,6 @@
         !btn.classList.contains('err')) {
       btn.textContent = idleButtonText();
     }
-    renderJournalAccessHint(btn).catch(() => {});
   }
 
   function setStatus(msg, type, extra = null) {
@@ -438,51 +435,6 @@
     return match ? cleanJournalName(match[1]) : '';
   }
 
-  async function getJournalAccessHint(journalName) {
-    const journal = cleanJournalName(journalName);
-    if (!journal) return null;
-
-    const stored = await chrome.storage.local.get(JOURNAL_ACCESS_STATS_KEY);
-    const stats = stored[JOURNAL_ACCESS_STATS_KEY] || {};
-    const item = stats[journal];
-    if (!item) return null;
-
-    const failCount = Number(item.failCount || 0);
-    const successCount = Number(item.successCount || 0);
-    const consecutiveFailCount = Number(item.consecutiveFailCount || 0);
-    const accessState = String(item.accessState || '');
-    if (accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= 10) {
-      return {
-        level: 'warn',
-        text: `本地记录：该期刊已连续失败 ${consecutiveFailCount} 次且暂无成功记录，当前按无权限处理。`
-      };
-    }
-    if (accessState === 'partial_access' && successCount > 0 && failCount > 0) {
-      return {
-        level: 'info',
-        text: `本地记录：该期刊成功 ${successCount} 次，失败 ${failCount} 次，属于部分有权限。`
-      };
-    }
-    return null;
-  }
-
-  async function renderJournalAccessHint(anchorEl) {
-    if (!anchorEl) return;
-    const journalName = extractJournalName();
-    const hint = await getJournalAccessHint(journalName);
-    const existing = document.getElementById('ablesci-journal-access-hint');
-    existing?.remove();
-    if (!hint) {
-      delete anchorEl.dataset.ablesciJournalHint;
-      setButtonTitle(anchorEl);
-      return;
-    }
-    anchorEl.dataset.ablesciJournalHint = hint.level === 'info'
-      ? '期刊权限：部分有权限'
-      : '期刊权限：连续失败较多';
-    setButtonTitle(anchorEl);
-  }
-
   function collectPayload() {
     if (isUploadBlocked()) {
       throw new Error('当前页面看起来已经有人上传、待确认、已完成或已关闭，已停止。');
@@ -622,16 +574,11 @@
     log.id = LOG_ID;
 
     placeButton(found, btn, log);
-    renderJournalAccessHint(btn).catch(() => {});
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     const keys = Object.keys(DEFAULT_PAGE_OPTIONS);
-    if (changes[JOURNAL_ACCESS_STATS_KEY]) {
-      const btn = $('#' + BTN_ID);
-      if (btn) renderJournalAccessHint(btn).catch(() => {});
-    }
     if (!keys.some(k => changes[k])) return;
     loadUiOptions().then(opts => {
       pageOptions = opts;

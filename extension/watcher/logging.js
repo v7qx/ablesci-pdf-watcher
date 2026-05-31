@@ -87,7 +87,6 @@
         if (traceLevel === 'compact') {
           const noisySteps = [
             'candidate_skip_list_filter',
-            'candidate_skip_journal_stats',
             'candidate_skip_processed',
             'session_plan_url',
             'session_plan_result',

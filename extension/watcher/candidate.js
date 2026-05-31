@@ -141,69 +141,39 @@
       });
     }
 
-    function journalAccessStatsRank(item = {}) {
-      const accessState = String(item.accessState || '');
-      if (accessState === 'no_access') return 4;
-      if (accessState === 'partial_access') return 3;
-      if (accessState === 'has_access') return 2;
-      return 1;
+    function journalAccessStatsRank() {
+      return 0;
     }
 
-    function journalAccessStatsIndexFromStats(stats = {}) {
-      const index = {};
-      for (const [journalName, item] of Object.entries(stats || {})) {
-        if (!item) continue;
-        const aliases = Array.isArray(item.aliases) ? item.aliases : [];
-        const names = [journalName, ...aliases].map(normalizeJournalKey).filter(Boolean);
-        for (const name of names) {
-          const existing = index[name];
-          if (!existing || journalAccessStatsRank(item) > journalAccessStatsRank(existing.item)) {
-            index[name] = { accessState: String(item.accessState || ''), item, journalName };
-          }
-        }
-      }
-      return index;
+    function journalAccessStatsIndexFromStats() {
+      return {};
     }
 
     async function hydrateJournalAccessStatsIndex(state = {}) {
-      const stored = await chromeApi.storage.local.get(['journalAccessLookupIndex', 'journalAccessStats']);
-      const lookup = stored.journalAccessLookupIndex;
-      const hasLookup = lookup && typeof lookup === 'object' && lookup.index && typeof lookup.index === 'object';
-      const stats = hasLookup ? null : (stored.journalAccessStats || {});
-      const index = hasLookup ? lookup.index : journalAccessStatsIndexFromStats(stats);
       Object.defineProperty(state, '__journalAccessStatsIndex', {
-        value: index,
+        value: {},
         enumerable: false,
         configurable: true
       });
       Object.defineProperty(state, '__journalAccessStatsCount', {
-        value: hasLookup ? Number(lookup.count || 0) : Object.keys(stats || {}).length,
+        value: 0,
         enumerable: false,
         configurable: true
       });
       Object.defineProperty(state, '__journalAccessStatsIndexSize', {
-        value: Object.keys(index).length,
+        value: 0,
         enumerable: false,
         configurable: true
       });
       return state;
     }
 
-    function journalAccessStatsStateFor(candidate, payload = null, state = {}) {
-      const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
-      if (!names.length) return { accessState: '', item: null, journalName: '' };
-      const index = state?.__journalAccessStatsIndex || {};
-      for (const name of names) {
-        if (index[name]) return index[name];
-      }
+    function journalAccessStatsStateFor() {
       return { accessState: '', item: null, journalName: '' };
     }
 
-    function isListCandidateHighRiskByStats(candidate, state = {}) {
-      const stat = journalAccessStatsStateFor(candidate, null, state);
-      const consecutiveFailCount = Number(stat.item?.consecutiveFailCount || 0);
-      const successCount = Number(stat.item?.successCount || 0);
-      return stat.accessState === 'no_access' && successCount <= 0 && consecutiveFailCount >= highRiskFailThreshold;
+    function isListCandidateHighRiskByStats() {
+      return false;
     }
 
     function isLikelyRscCandidate(candidate = {}) {
@@ -217,25 +187,11 @@
       return /rsc|royal society of chemistry/i.test(haystack);
     }
 
-    function isListCandidateDoiHighRiskByStats(candidate, state = {}) {
-      if (!isLikelyRscCandidate(candidate)) return false;
-      const stat = journalAccessStatsStateFor(candidate, null, state);
-      const item = stat.item || {};
-      const successCount = Number(item.successCount || 0);
-      const consecutiveDoiFailureCount = Number(item.consecutiveDoiFailureCount || 0);
-      return successCount <= 0 && consecutiveDoiFailureCount >= doiFailureSkipThreshold;
+    function isListCandidateDoiHighRiskByStats() {
+      return false;
     }
 
-    function journalAccessRuleFor(candidate, opts = {}, payload = null) {
-      const names = candidateJournalNames(candidate, payload).map(normalizeJournalKey).filter(Boolean);
-      if (!names.length) return { state: '', entry: null };
-      const rules = parseJournalAccessRules(opts.watcherJournalAccessRules || '');
-      for (const [state, list] of [['blocked', rules.blocked], ['allowed', rules.allowed], ['partial', rules.partial]]) {
-        for (const entry of list) {
-          const entryNames = journalRuleNames(entry).map(normalizeJournalKey).filter(Boolean);
-          if (entryNames.some(name => names.includes(name))) return { state, entry };
-        }
-      }
+    function journalAccessRuleFor() {
       return { state: '', entry: null };
     }
 
@@ -263,9 +219,7 @@
         detail_system_prompt_si: '详情页系统提示 DOI 可能是补充材料或并非全文，已跳过',
         detail_remark: '详情页存在备注，已按设置跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
-        journal_blocked_rule: '命中本地期刊黑名单，列表页直接跳过',
-        list_high_risk_journal: '列表页期刊短名映射到连续失败期刊，已直接跳过',
-        list_doi_failure_journal: 'RSC 期刊 DOI 连续失败较多，列表页直接跳过'
+        journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
       };
       return labels[code] ? `${code} - ${labels[code]}` : code;
     }

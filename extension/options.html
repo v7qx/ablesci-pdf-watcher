@@ -114,20 +114,15 @@
     }
 
     .watcher-action-row {
-      align-items: stretch;
-      flex-direction: column;
-      gap: 10px;
+      align-items: center;
     }
 
     .watcher-action-control {
-      display: block;
-      min-width: 0;
-      flex: 1 1 auto;
-      width: 100%;
+      min-width: 360px;
+      flex: 0 0 520px;
     }
 
-    .watcher-action-buttons,
-    .watcher-action-status {
+    .watcher-action-group {
       display: flex;
       align-items: center;
       justify-content: flex-end;
@@ -135,16 +130,12 @@
       flex-wrap: wrap;
     }
 
-    .watcher-action-buttons button {
+    .watcher-action-group button {
       white-space: nowrap;
       padding: 0 12px;
     }
 
-    .watcher-action-status {
-      margin-top: 8px;
-    }
-
-    .watcher-action-status .pill {
+    .watcher-action-group .pill {
       max-width: 120px;
       padding: 0 8px;
     }
@@ -307,14 +298,6 @@
       width: 100%;
     }
 
-    .metric-grid.journal-access-metrics {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .metric-grid.journal-access-metrics .metric-field:first-child {
-      grid-column: 1 / -1;
-    }
-
     .metric-field {
       min-width: 0;
     }
@@ -376,8 +359,7 @@
     #watcherRunStatus,
     #watcherNotifyStatus,
     #watcherConfigStatus,
-    #diagnosticStatus,
-    #journalAccessConfigStatus {
+    #diagnosticStatus {
       max-width: 100%;
     }
 
@@ -517,8 +499,7 @@
         width: 100%;
       }
 
-      .watcher-action-buttons,
-      .watcher-action-status {
+      .watcher-action-group {
         justify-content: flex-start;
       }
 
@@ -738,15 +719,6 @@
           <span id="diagnosticStatus" class="pill">未复制</span>
         </div>
       </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>本地期刊失败记录</strong>
-          <span>仅保存在本机，用于提示近期可能无权限的期刊。</span>
-        </div>
-        <div class="setting-control">
-          <button id="clearJournalAccessStats" class="secondary" type="button">清除记录</button>
-        </div>
-      </div>
     </details>
 
     <details class="card" open>
@@ -822,7 +794,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
-          <span>每行一个，可自定义其他 Ablesci 求助列表链接。Elsevier 运行时按后排优先曲线随机第 3-200 页，RSC 随机第 1-5 页。URL 中可加 `&page_min=N&page_max=M` 自定义范围；未配置 publisher 的链接按原始 URL 直接使用。</span>
+          <span>每行一个 Ablesci 求助列表链接。默认使用 ScienceDirect / Elsevier 等待列表。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherListUrls" spellcheck="false"></textarea>
@@ -888,24 +860,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>期刊访问名单</strong>
-          <span>优先读取 Native Helper 目录中的 journal-access.json；旧版 config.local 仅作为兼容回退。不在设置页展示完整大名单。列表页命中 blocked 会跳过，allowed / partial 会提高候选优先级。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <textarea id="watcherJournalAccessRules" spellcheck="false" aria-label="期刊访问名单缓存 JSON" hidden></textarea>
-          <div class="metric-grid journal-access-metrics">
-            <div class="metric-field"><label>配置文件</label><span id="journalAccessConfigSource" class="pill">Native Helper 目录</span></div>
-            <div class="metric-field"><label>文件名单</label><span id="journalAccessFileSummary" class="pill">-</span></div>
-            <div class="metric-field"><label>缓存名单</label><span id="journalAccessCacheSummary" class="pill">-</span></div>
-          </div>
-          <button id="openWatcherConfigDir" class="secondary" type="button">打开配置目录</button>
-          <button id="reloadJournalAccessConfig" class="secondary" type="button">重载名单</button>
-          <span id="journalAccessConfigStatus" class="pill">未读取</span>
-          <div class="setting-hint">点击"打开配置目录"会在 Native Helper 目录下自动创建 `journal-access.json` 和 `telegram.json` 空模板。真实配置文件不会提交到 GitHub；旧版 `config.local` 目录仅保留兼容回退读取。</div>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>任务超时</strong>
           <span>区分未触发下载、下载中超时和任务最长时间；超时会取消当前任务并释放队列。</span>
         </div>
@@ -950,30 +904,12 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>Telegram 验证提醒</strong>
-          <span>可选。遇到 CF / challenge 时通过 Native Helper 读取本地配置并发送机器人消息。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <label class="toggle-option" title="启用 Telegram 验证提醒">
-            <span class="toggle"><input id="watcherTelegramNotifyEnabled" type="checkbox"><span></span></span>
-            <span class="toggle-text">启用</span>
-          </label>
-          <input id="watcherTelegramConfigPath" type="text" placeholder="可选。留空使用 Native Helper 目录下的 telegram.json">
-          <div class="setting-hint">建议留空，直接维护 Native Helper 目录中的 `telegram.json`；只有需要临时指定其他文件时才填写路径。</div>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>失败期刊、提醒与日报</strong>
-          <span>仅当某期刊连续失败 10 次且暂无成功记录时才按无权限跳过；提醒默认走浏览器通知并带独立声音，Native Helper 仅作实验选项；日报由 Helper 直接写入本地。</span>
+          <strong>提醒与日报</strong>
+          <span>提醒默认走浏览器通知并带独立声音；日报由 Helper 直接写入本地。</span>
         </div>
         <div class="setting-control">
           <label class="toggle" title="启用提醒通知">
             <input id="watcherNotificationEnabled" type="checkbox">
-            <span></span>
-          </label>
-          <label class="toggle" title="跳过连续失败 10 次且暂无成功记录的期刊">
-            <input id="watcherSkipHighRiskJournal" type="checkbox">
             <span></span>
           </label>
           <label class="toggle" title="生成每日统计报表">
@@ -1004,15 +940,15 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>Trace 级别</strong>
-          <span>默认标准。详细模式会保留更多调试字段；关闭后只保留普通 watcher 日志。</span>
+          <span>默认关闭。需要排查时再打开，避免长期占用本地存储。</span>
         </div>
         <div class="setting-control">
           <select id="watcherTraceLevel" aria-label="Trace 级别">
             <!-- PRIVATE_WATCHER_ONLY -->
+            <option value="off">关闭</option>
             <option value="compact">简略</option>
             <option value="normal">标准</option>
             <option value="verbose">详细</option>
-            <option value="off">关闭</option>
           </select>
         </div>
       </div>
@@ -1030,14 +966,12 @@
       <div class="setting-row watcher-action-row">
         <div class="setting-copy">
           <strong>值守操作</strong>
-          <span>手动触发和复制排查配置；清理类操作放在更多设置中。</span>
+          <span>手动触发一次检查，或复制当前排查配置。</span>
         </div>
         <div class="setting-control watcher-action-control">
-          <div class="watcher-action-buttons">
+          <div class="watcher-action-group">
             <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
             <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
-          </div>
-          <div class="watcher-action-status">
             <span id="watcherRunStatus" class="pill">未检查</span>
             <span id="watcherConfigStatus" class="pill">未复制</span>
           </div>

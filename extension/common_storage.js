@@ -10,8 +10,6 @@
   const OPTION_IDS = Object.keys(DEFAULT_OPTIONS);
   const STORAGE_KEYS = {
     LAST_DIAGNOSTIC_KEY: 'latestDiagnostic',
-    JOURNAL_ACCESS_STATS_KEY: 'journalAccessStats',
-    JOURNAL_ACCESS_LOOKUP_KEY: 'journalAccessLookupIndex',
     AUTO_WATCHER_STATE_KEY: 'autoWatcherState',
     AUTO_WATCHER_LOG_KEY: 'autoWatcherLogs',
     AUTO_WATCHER_TRACE_KEY: 'autoWatcherTraceLogs',

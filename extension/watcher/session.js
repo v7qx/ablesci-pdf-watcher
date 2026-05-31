@@ -22,8 +22,6 @@
       enrichCandidateJournalFromMap,
       isListCandidateAllowed,
       describeWatcherReason,
-      isListCandidateHighRiskByStats,
-      isListCandidateDoiHighRiskByStats,
       wasRecentlyProcessed,
       selectBanditCandidates,
       inspectDetail,
@@ -125,30 +123,6 @@
               detailUrl: candidate.detailUrl,
               assistId: candidate.assistId || '',
               title: candidate.title || ''
-            });
-            continue;
-          }
-          if (opts.watcherSkipHighRiskJournal && isListCandidateHighRiskByStats(candidate, stateForTargets)) {
-            await appendWatcherTrace('candidate_skip_journal_stats', {
-              reason: 'list_high_risk_journal',
-              reasonText: describeWatcherReason('list_high_risk_journal'),
-              sessionId: session.id,
-              detailUrl: candidate.detailUrl,
-              assistId: candidate.assistId || '',
-              journalShortName: candidate.journalShortName || '',
-              journalFullName: candidate.journalFullName || ''
-            });
-            continue;
-          }
-          if (opts.watcherSkipHighRiskJournal && isListCandidateDoiHighRiskByStats(candidate, stateForTargets)) {
-            await appendWatcherTrace('candidate_skip_journal_stats', {
-              reason: 'list_doi_failure_journal',
-              reasonText: describeWatcherReason('list_doi_failure_journal'),
-              sessionId: session.id,
-              detailUrl: candidate.detailUrl,
-              assistId: candidate.assistId || '',
-              journalShortName: candidate.journalShortName || '',
-              journalFullName: candidate.journalFullName || ''
             });
             continue;
           }
