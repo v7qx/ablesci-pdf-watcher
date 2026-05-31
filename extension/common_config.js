@@ -5,8 +5,6 @@
 
   const DEFAULT_OPTIONS = {
     nativeHostName: 'com.ablesci.pdf_watcher',
-    enableDownloadSubdir: false,
-    downloadSubdir: 'AblesciPdfWatcher',
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
     deleteAfterUpload: false,
@@ -174,8 +172,6 @@
     return {
       ...opts,
       nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
-      enableDownloadSubdir: !!opts.enableDownloadSubdir,
-      downloadSubdir: sanitizePathPart(opts.downloadSubdir || 'AblesciPdfWatcher'),
       downloadMode: 'auto',
       scienceDirectTabMode: 'silent_then_visible',
       minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),

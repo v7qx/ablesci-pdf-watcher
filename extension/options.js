@@ -75,18 +75,10 @@ async function load() {
     if (node.type === 'checkbox') node.checked = !!opts[id];
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
-  }
-  updateSubdirVisibility();
   await renderAdvancedWatcherStatus();
 }
 
-function updateSubdirVisibility() {
-  const checkbox = el('enableDownloadSubdir');
-  const row = el('downloadSubdirRow');
-  if (checkbox && row) {
-    row.style.display = checkbox.checked ? '' : 'none';
-  }
-}
+
 
 function setText(id, value) {
   const node = el(id);
@@ -259,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startAdvancedCountdownTimer();
   });
 
-  el('enableDownloadSubdir')?.addEventListener('change', updateSubdirVisibility);
+
 
   // 防止快速双击/连击 summary 展开/收起时导致页面文本被全选或选中
   document.querySelectorAll('summary').forEach(summary => {

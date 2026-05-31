@@ -349,43 +349,6 @@ chrome.runtime.onInstalled.addListener(() => {
   cleanupOrphanPublisherTabs('runtime_installed').catch(() => {});
 });
 
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  let task = null;
-  if (Number.isInteger(item.tabId) && item.tabId >= 0) {
-    task = pendingPublisherTabs.get(item.tabId);
-  }
-  if (!task) {
-    for (const [tabId, t] of pendingPublisherTabs.entries()) {
-      if (item.url && (item.url === t.pdfUrl || item.url === t.articleUrl)) {
-        task = t;
-        break;
-      }
-      if (item.referrer && (item.referrer === t.articleUrl || item.referrer === t.pdfUrl)) {
-        task = t;
-        break;
-      }
-    }
-  }
-
-  if (task) {
-    const enableSubdir = task.enableDownloadSubdir;
-    const subdirName = task.downloadSubdir;
-    const baseName = basenameOf(item.filename) || 'paper.pdf';
-    const resolvedSubdir = enableSubdir ? sanitizePathPart(subdirName || 'AblesciPdfWatcher') : '';
-    
-    let suggestedName = baseName;
-    if (resolvedSubdir) {
-      suggestedName = resolvedSubdir.replace(/\/+$/g, '') + '/' + baseName;
-    }
-    
-    suggest({
-      filename: suggestedName,
-      conflictAction: 'uniquify'
-    });
-  } else {
-    suggest();
-  }
-});
 
 // AUTO_WATCHER
   importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/demand.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');

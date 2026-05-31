@@ -177,9 +177,7 @@
           tabId = tab.id;
           pendingPublisherTabs.set(tabId, {
             pdfUrl,
-            createdAt: Date.now(),
-            enableDownloadSubdir: options.enableDownloadSubdir || false,
-            downloadSubdir: options.downloadSubdir || ''
+            createdAt: Date.now()
           });
           timer = setTimeout(() => {
             cleanup();
@@ -322,8 +320,7 @@
             port,
             finishError,
             revealPublisherTab,
-            enableDownloadSubdir: options.enableDownloadSubdir || false,
-            downloadSubdir: options.downloadSubdir || '',
+
             payloadSummary: {
               assistId: options.payload?.assistId || '',
               doi: options.payload?.doi || '',
@@ -372,16 +369,14 @@
     }
 
     async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
-      const filenameRel = makeDownloadFilename(opts.enableDownloadSubdir ? opts.downloadSubdir : '', suggestedFilename);
+      const filenameRel = makeDownloadFilename('', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
       const noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
       const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || defaultOptions.watcherDownloadTimeoutMinutes) * 60 * 1000);
       const timeoutOptions = {
         noDownloadTimeoutMs,
         downloadTimeoutMs,
-        signal,
-        enableDownloadSubdir: opts.enableDownloadSubdir,
-        downloadSubdir: opts.downloadSubdir
+        signal
       };
 
       if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {
