@@ -361,7 +361,7 @@
     }
 
     async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
-      const filenameRel = makeDownloadFilename(opts.downloadSubdir, suggestedFilename);
+      const filenameRel = makeDownloadFilename(opts.enableDownloadSubdir ? opts.downloadSubdir : '', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
       const noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
       const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || defaultOptions.watcherDownloadTimeoutMinutes) * 60 * 1000);

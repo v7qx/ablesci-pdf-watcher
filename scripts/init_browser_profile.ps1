@@ -4,7 +4,7 @@ param(
 
   [string]$ProfileDir = "$env:LOCALAPPDATA\AblesciPdfWatcher\BrowserProfile",
 
-  [string]$DownloadDir = "$env:USERPROFILE\Downloads\AblesciPdfWatcher",
+  [string]$DownloadDir = "$env:USERPROFILE\Downloads",
 
   [string]$ShortcutName = "Ablesci PDF Watcher",
 

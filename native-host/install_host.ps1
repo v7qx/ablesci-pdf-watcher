@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$ExtensionId = "",
 
   [ValidateSet("Chrome", "Edge", "All")]
@@ -8,7 +8,7 @@
 
   [string]$ProfileDir = "",
 
-  [string]$DownloadDir = "$env:USERPROFILE\Downloads\AblesciPdfWatcher",
+  [string]$DownloadDir = "$env:USERPROFILE\Downloads",
 
   [string]$ExtensionDir = ""
 )

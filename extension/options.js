@@ -8,7 +8,8 @@ const {
   normalizeSchedulerMode,
   normalizeWatcherIntervals,
   normalizeWatcherListUrls,
-  normalizeOptions
+  normalizeOptions,
+  sanitizePathPart
 } = globalThis.AblesciWatcherConfig;
 const {
   OPTION_IDS: ids,
@@ -75,7 +76,16 @@ async function load() {
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
   }
+  updateSubdirVisibility();
   await renderAdvancedWatcherStatus();
+}
+
+function updateSubdirVisibility() {
+  const checkbox = el('enableDownloadSubdir');
+  const row = el('downloadSubdirRow');
+  if (checkbox && row) {
+    row.style.display = checkbox.checked ? '' : 'none';
+  }
 }
 
 function setText(id, value) {
@@ -115,7 +125,8 @@ async function save(saveOptions = {}) {
     opts[id] = node.type === 'checkbox' ? node.checked : node.value.trim();
   }
 
-  opts.downloadSubdir = '';
+  opts.enableDownloadSubdir = !!opts.enableDownloadSubdir;
+  opts.downloadSubdir = sanitizePathPart(opts.downloadSubdir || 'AblesciPdfWatcher');
   opts.moveToDir = String(opts.moveToDir || '').trim();
   opts.downloadMode = 'auto';
   opts.scienceDirectTabMode = 'silent_then_visible';
@@ -250,6 +261,8 @@ document.addEventListener('DOMContentLoaded', () => {
   load().then(() => {
     startAdvancedCountdownTimer();
   });
+
+  el('enableDownloadSubdir')?.addEventListener('change', updateSubdirVisibility);
 
   // 防止快速双击/连击 summary 展开/收起时导致页面文本被全选或选中
   document.querySelectorAll('summary').forEach(summary => {

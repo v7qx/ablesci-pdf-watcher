@@ -529,7 +529,6 @@
 <body>
   <main class="page">
     <input id="nativeHostName" type="hidden" value="com.ablesci.pdf_watcher">
-    <input id="downloadSubdir" type="hidden" value="">
     <header class="header">
       <h1>Ablesci PDF Watcher</h1>
       <p>设置下载、上传、按钮显示和低频值守。</p>
@@ -666,6 +665,27 @@
             <input id="keepDownloadHistory" type="checkbox">
             <span></span>
           </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>下载保存到子文件夹</strong>
+          <span>启用后，下载的 PDF 将保存到下载目录的子文件夹中（默认直接保存至下载目录）。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="下载保存到子文件夹">
+            <input id="enableDownloadSubdir" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row" id="downloadSubdirRow">
+        <div class="setting-copy">
+          <strong>下载子文件夹名称</strong>
+          <span>启用子文件夹时有效，默认为 AblesciPdfWatcher。</span>
+        </div>
+        <div class="setting-control">
+          <input id="downloadSubdir" type="text" placeholder="AblesciPdfWatcher">
         </div>
       </div>
       <div class="setting-row">
