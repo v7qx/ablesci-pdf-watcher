@@ -45,6 +45,15 @@ Set-ExecutionPolicy -Scope Process Bypass
 - **PDF 自动下载**：关闭“下载前询问每个文件的保存位置”，并配置 PDF 为“直接下载”（而非在浏览器内置阅读器中预览）。
   - Chrome 设置路径：`chrome://settings/downloads` 与 `chrome://settings/content/pdfDocuments`
   - Edge 设置路径：`edge://settings/downloads` 与 `edge://settings/content/pdfDocuments`
+
+  > [!WARNING]
+  > **Microsoft Edge 特别注意事项**：
+  > 
+  > Edge 浏览器的设置中明确指出：“如果 Microsoft Edge 是默认的 PDF 读取器，PDF 文件将自动打开而不下载。”
+  > 
+  > 这是因为 Edge 的该逻辑与 Windows 系统的默认文件关联（Default App Association）深度绑定。即使使用独立的隔离 Profile 启动，底层依然会检查系统的默认 PDF 关联配置。
+  > 
+  > **解决方法**：如果你想在 Edge 的专用 Profile 中实现 PDF 直接下载，**必须在 Windows 系统设置中，将默认的 PDF 打开方式（默认读取器）修改为其他非 Edge 软件**（如 Chrome、Acrobat Reader、Zotero 等）。一旦 Edge 不再是系统默认 PDF 读取器，专用 Profile 下的“始终下载 PDF”设置就会立即生效，插件也能够正常截获下载事件。
 - **禁用 Chrome 端侧 AI 模型下载**：
   Chrome 会在后台自动下载端侧生成式 AI 模型（大小约 4GB），可通过以下官方推荐的两种方式进行禁用并清理空间：
 
