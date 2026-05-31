@@ -59,7 +59,7 @@
         journalName: snapshot.journalName || '',
         error: 'service worker restarted; stale upload task was cancelled'
       }).catch(() => {});
-      console.warn('[Ablesci PDF Uploader] recovered stale upload task snapshot', { taskId: snapshot.taskId, reason });
+      console.warn('[Ablesci PDF Watcher] recovered stale upload task snapshot', { taskId: snapshot.taskId, reason });
     }
 
     return {

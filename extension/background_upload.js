@@ -202,7 +202,7 @@
       }
 
       const permit = await uploadRequest(payload, stat);
-      console.log('[Ablesci PDF Uploader] upload-request code', permit && permit.code);
+      console.log('[Ablesci PDF Watcher] upload-request code', permit && permit.code);
 
       if (permit.code === 10) {
         if (opts.deleteAfterUpload) {

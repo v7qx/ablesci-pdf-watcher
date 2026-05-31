@@ -59,7 +59,7 @@
         }
         try {
           await chromeApi.tabs.remove(tabId);
-          console.warn('[Ablesci PDF Uploader] closed orphan publisher tab', { tabId, reason });
+          console.warn('[Ablesci PDF Watcher] closed orphan publisher tab', { tabId, reason });
         } catch (_) {}
       }
       await savePublisherTabRegistry(keep);

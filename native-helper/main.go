@@ -211,7 +211,7 @@ func handleDeleteFile(req Request) error {
 }
 
 func handleNotifyUser(req Request) error {
-	brand := "Ablesci PDF Uploader"
+	brand := "Ablesci PDF Watcher"
 	title := limitText(firstNonEmpty(req.Title, brand), 80)
 	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
 	if runtime.GOOS == "windows" {
@@ -231,17 +231,18 @@ func handleNotifyUser(req Request) error {
 			`}` + "\r\n" +
 			`"@` + "\r\n" +
 			`Add-Type -TypeDefinition $setAppIDSrc;` +
-			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPDFUploader")`
+			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPDFWatcher")`
 
 		// Build script with diagnostic log header
 		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
 		logEnd := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
 
-		// Windows Toast Notification — app source icon is provided by the Start Menu shortcut.
+		// Windows Toast Notification. Windows still reserves the source icon area;
+		// without a custom shortcut icon it uses the default app icon.
 		// Sound is handled by the Toast XML <audio> element; do NOT call SystemSounds.Play() to avoid double beep.
 		toastNotify := `$escTitle = [System.Security.SecurityElement]::Escape($title); ` +
 			`$escMsg = [System.Security.SecurityElement]::Escape($msg); ` +
-			`$appID = "AblesciPDFUploader"; ` +
+			`$appID = "AblesciPDFWatcher"; ` +
 			`$toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escTitle, $escMsg); ` +
 			`$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; ` +
 			`$null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]; ` +
@@ -667,7 +668,7 @@ func handleUploadOSS(req Request) error {
 		Timeout: 180 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if err := validateOSSHost(req.URL.String()); err != nil {
-				return errors.New("OSS redirect target is not allowed")
+				return errors.New("上传存储重定向地址不在允许范围，请更新插件或检查上传链路")
 			}
 			return nil
 		},
@@ -1046,10 +1047,10 @@ func validateOSSHost(host string) error {
 		return err
 	}
 	if u.Scheme != "https" {
-		return errors.New("oss host must use https")
+		return errors.New("上传存储地址必须使用 HTTPS")
 	}
 	if isLocalOrPrivateHost(u.Hostname()) {
-		return errors.New("oss host must not be localhost or private network")
+		return errors.New("上传存储地址不能是本机或内网地址")
 	}
 	normalized, err := normalizeAllowedURL(host)
 	if err != nil {
@@ -1060,7 +1061,7 @@ func validateOSSHost(host string) error {
 		return err
 	}
 	if normalized != allowed {
-		return errors.New("OSS host is not allowed")
+		return errors.New("上传存储地址不在允许范围，请更新插件或检查上传链路")
 	}
 	return nil
 }

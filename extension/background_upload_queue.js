@@ -178,7 +178,7 @@
                 timeoutReason: failureReason
               });
             } else {
-              console.error('[Ablesci PDF Uploader Error]', err);
+              console.error('[Ablesci PDF Watcher Error]', err);
               post(port, 'error', formatTaskError(err));
             }
           }

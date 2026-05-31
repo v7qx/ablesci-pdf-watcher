@@ -219,7 +219,7 @@
       setButtonTitle(btn, titleText || defaultButtonTitle());
     }
     if (log) log.textContent = logText || '';
-    console.log('[Ablesci Native PDF Uploader]', msg);
+    console.log('[Ablesci Native PDF Watcher]', msg);
   }
 
 
@@ -600,7 +600,7 @@
     if ($('#' + BTN_ID)) return;
     const found = findButtonMount();
     if (!found.mount) {
-      console.warn('[Ablesci Native PDF Uploader] no mount point found');
+      console.warn('[Ablesci Native PDF Watcher] no mount point found');
       return;
     }
     ensureStyle();

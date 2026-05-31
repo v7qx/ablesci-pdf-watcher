@@ -19,29 +19,12 @@ if ($Output -eq "") {
 $Output = [System.IO.Path]::GetFullPath($Output)
 
 if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "未找到 Go 编译器，无法从源码构建 Helper。请先安装 Go 开发环境 (https://go.dev)。"
+  throw "未找到 Go 编译器，无法从源码构建 Helper。请先准备 Go 开发环境后重新运行本脚本。"
 }
 
 $OutDir = Split-Path -Parent $Output
 if (!(Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 $TelegramTemplate = Join-Path $ScriptDir "telegram.example.json"
-
-# Parse extension version dynamically from extension/manifest.json
-$ManifestPath = Join-Path $RepoRoot "extension\manifest.json"
-if (Test-Path $ManifestPath) {
-  $Manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
-  $VersionStr = $Manifest.version
-  $VersionParts = $VersionStr -split '\.'
-  $Major = [int]$VersionParts[0]
-  $Minor = [int]$VersionParts[1]
-  $Patch = 0
-  if ($VersionParts.Count -gt 2) { $Patch = [int]$VersionParts[2] }
-  $Build = 0
-  if ($VersionParts.Count -gt 3) { $Build = [int]$VersionParts[3] }
-} else {
-  $VersionStr = "1.0.0"
-  $Major = 1; $Minor = 0; $Patch = 0; $Build = 0
-}
 
 Push-Location $HelperDir
 try {
@@ -49,59 +32,10 @@ try {
   $env:GOARCH = $TargetArch
   $env:CGO_ENABLED = "0"
 
-  # Generate resource.syso for Windows builds
-  if ($TargetOS -eq "windows") {
-    $VersionInfoJson = Join-Path $HelperDir "versioninfo.json"
-    $IcoSrc = Join-Path $RepoRoot "extension\icons\icon.ico"
-    if (Test-Path $VersionInfoJson) {
-      Write-Host "Generating Windows resource metadata ($VersionStr)..."
-      $GoRunArgs = @()
-      if ($TargetArch -eq "amd64") {
-        $GoRunArgs += "-64"
-      }
-      $GoRunArgs += "-ver-major=$Major"
-      $GoRunArgs += "-ver-minor=$Minor"
-      $GoRunArgs += "-ver-patch=$Patch"
-      $GoRunArgs += "-ver-build=$Build"
-      $GoRunArgs += "-product-ver-major=$Major"
-      $GoRunArgs += "-product-ver-minor=$Minor"
-      $GoRunArgs += "-product-ver-patch=$Patch"
-      $GoRunArgs += "-product-ver-build=$Build"
-      $GoRunArgs += "-file-version=$VersionStr"
-      $GoRunArgs += "-product-version=$VersionStr"
-      $GoRunArgs += "-icon=$IcoSrc"
-      $GoRunArgs += "-o=resource.syso"
-      $GoRunArgs += "$VersionInfoJson"
-
-      go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.4.0 @GoRunArgs
-    }
-  }
-
-  $SysoPath = Join-Path $HelperDir "resource.syso"
-  try {
-    go build -trimpath -ldflags "-s -w" -o $Output .
-  } finally {
-    if (Test-Path $SysoPath) {
-      Remove-Item -LiteralPath $SysoPath -Force | Out-Null
-      Write-Host "Removed temporary resource.syso"
-    }
-  }
+  go build -trimpath -ldflags "-s -w" -o $Output .
 
   if (Test-Path $TelegramTemplate) {
     Copy-Item -LiteralPath $TelegramTemplate -Destination (Join-Path $OutDir "telegram.example.json") -Force
-  }
-
-  $NotifyIcon = Join-Path $RepoRoot "extension\icons\icon48.png"
-  if (Test-Path $NotifyIcon) {
-    Copy-Item -LiteralPath $NotifyIcon -Destination (Join-Path $OutDir "icon48.png") -Force
-    Write-Host "Copied notify icon: $NotifyIcon -> $OutDir\icon48.png"
-  }
-
-  # Copy the pre-generated high-resolution icon.ico
-  $IcoSrc = Join-Path $RepoRoot "extension\icons\icon.ico"
-  if (Test-Path $IcoSrc) {
-    Copy-Item -LiteralPath $IcoSrc -Destination (Join-Path $OutDir "icon.ico") -Force
-    Write-Host "Copied icon.ico to $OutDir\icon.ico"
   }
 
   Write-Host "Built: $Output"

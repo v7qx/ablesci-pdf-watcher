@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Build Chrome extension PNG icons from extension/icons/source.svg.
+"""Build Chrome extension icons.
 
-This intentionally uses only the Python standard library. The bundled source
-icon is a small, fixed SVG template, so the renderer supports the SVG subset
-used by that file: rounded rectangles, one filled path, and one stroked path.
+Default mode renders extension/icons/source.svg into the PNG sizes required by
+the extension. This intentionally uses only the Python standard library. The
+renderer supports the SVG subset used by the bundled source file: rounded
+rectangles, filled paths, and stroked paths.
+
+For custom PNG artwork, export the required icon*.png files yourself and run:
+
+    python scripts/build_icons.py --ico-only
 """
 
 from __future__ import annotations
 
+import argparse
 import math
 import re
 import struct
@@ -21,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "extension" / "icons" / "source.svg"
 OUT_DIR = ROOT / "extension" / "icons"
 SIZES = (16, 32, 48, 64, 128, 256)
+REQUIRED_PNG_SIZES = (16, 32, 48, 128)
 SUPERSAMPLE = 4
 
 
@@ -72,12 +79,12 @@ def path_to_polygons(data: str) -> list[list[tuple[float, float]]]:
     cmd = ""
 
     def close_current() -> None:
-      nonlocal current
-      if current:
-          if current[-1] != current[0]:
-              current.append(current[0])
-          polygons.append(current)
-          current = []
+        nonlocal current
+        if current:
+            if current[-1] != current[0]:
+                current.append(current[0])
+            polygons.append(current)
+            current = []
 
     while i < len(tokens):
         if re.fullmatch(r"[A-Za-z]", tokens[i]):
@@ -245,11 +252,21 @@ def write_ico(path: Path, png_data_list: list[tuple[int, bytes]]) -> None:
             f.write(data)
 
 
-def load_elements() -> list[dict[str, object]]:
-    if not SOURCE.exists():
-        raise FileNotFoundError(SOURCE)
+def load_elements(source: Path) -> list[dict[str, object]]:
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.suffix.lower() != ".svg":
+        raise ValueError(
+            f"{source} is not an SVG file. This script does not resize arbitrary images. "
+            "For PNG artwork, export icon16.png, icon32.png, icon48.png, and icon128.png, "
+            "then run with --ico-only."
+        )
 
-    root = ET.fromstring(SOURCE.read_text(encoding="utf-8"))
+    root = ET.fromstring(source.read_text(encoding="utf-8"))
+    view_box = root.attrib.get("viewBox", "").strip()
+    if view_box and view_box != "0 0 128 128":
+        raise ValueError(f"unsupported SVG viewBox {view_box!r}; expected '0 0 128 128'")
+
     ns = "{http://www.w3.org/2000/svg}"
     elements: list[dict[str, object]] = []
 
@@ -287,9 +304,65 @@ def load_elements() -> list[dict[str, object]]:
     return elements
 
 
+def read_png_size(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise ValueError(f"{path} is not a valid PNG file")
+    width, height = struct.unpack(">II", data[16:24])
+    return width, height
+
+
+def load_existing_pngs(out_dir: Path) -> list[tuple[int, bytes]]:
+    missing = [f"icon{size}.png" for size in REQUIRED_PNG_SIZES if not (out_dir / f"icon{size}.png").exists()]
+    if missing:
+        raise FileNotFoundError(
+            "missing required PNG icons: "
+            + ", ".join(missing)
+            + ". Export these files first, or run without --ico-only to render from source.svg."
+        )
+
+    png_data_list = []
+    for size in SIZES:
+        path = out_dir / f"icon{size}.png"
+        if not path.exists():
+            continue
+        width, height = read_png_size(path)
+        if width != size or height != size:
+            raise ValueError(f"{path} is {width}x{height}; expected {size}x{size}")
+        png_data_list.append((size, path.read_bytes()))
+    return png_data_list
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build extension icon PNG/ICO files.")
+    parser.add_argument(
+        "--source",
+        default=str(SOURCE),
+        help="SVG source file to render. Default: extension/icons/source.svg",
+    )
+    parser.add_argument(
+        "--ico-only",
+        action="store_true",
+        help="Build icon.ico from existing icon*.png files without rendering source.svg.",
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> int:
+    args = parse_args(sys.argv[1:])
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    elements = load_elements()
+
+    if args.ico_only:
+        png_data_list = load_existing_pngs(OUT_DIR)
+        ico_path = OUT_DIR / "icon.ico"
+        write_ico(ico_path, png_data_list)
+        print(f"wrote {ico_path.relative_to(ROOT)}")
+        return 0
+
+    source = Path(args.source)
+    if not source.is_absolute():
+        source = ROOT / source
+    elements = load_elements(source)
     png_data_list = []
     for size in SIZES:
         out = OUT_DIR / f"icon{size}.png"
@@ -306,4 +379,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1)

@@ -66,12 +66,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 #### 1. 编译可执行文件
 
-编译需要 Go 语言开发环境。请在项目根目录下执行编译脚本：
+编译需要本机已准备好 Go 语言开发环境。请在项目根目录下执行编译脚本：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
 ```
+
+如果只是使用 Chrome / Edge 扩展，通常只需要 Windows 版本的 Helper。其他平台可按需调整 `-TargetOS` 与 `-TargetArch` 重新编译。
 
 #### 2. 注册 Native Host
 
@@ -94,7 +96,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 若自动识别失败，可手动指定扩展 ID 运行安装：
 
 ```powershell
-.\native-host\install_host.ps1 -Browser Chrome -ExtensionId <您的扩展ID>
+.\native-host\install_host.ps1 -Browser Chrome -ExtensionId <你的扩展ID>
 ```
 
 ---
@@ -107,25 +109,6 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 *若提示 `Error when communicating with the native messaging host`，说明通信失败。可能原因包括：注册表未正确导入、扩展 ID 变动未重新注册、或可执行文件启动被系统拦截。此时仅本地自动上传与本地日报功能受阻，页面辅助按钮仍可工作。*
 
----
-
-## 选项配置
-
-可在选项设置页面配置以下选项：
-
-- **Native Host 名称**：默认 `com.ablesci.pdf_watcher`。
-- **最小自动上传体积**：默认 `1 MB`，小于该值时只下载不上传。
-- **最大自动上传体积**：默认 `99 MB`，大于该值时只下载不上传。
-- **保留浏览器下载记录**：控制是否在浏览器历史中保存下载痕迹。
-- **上传成功后删除本地 PDF**：默认关闭。开启后，仅自动清除已成功上传且通过校验的文献 PDF。
-- **调试模式**：仅下载并校验 PDF，不执行上传，用于验证提取与校验逻辑。
-- **智能推送**：提交成功后是否显示相关文献推荐弹窗。
-- **页面辅助按钮样式**：可自定义应助按钮的名称、颜色与挂载位置。
-- **复制最近一次诊断信息**：方便排查环境故障。
-- **实验低频值守**：默认关闭。启用后通过浏览器后台定时器低频轮询 Ablesci 求助列表，自动过滤置顶、举报、驳回及格式异常的文献候选，实现单任务自动调度。
-
----
-
 ## PDF 下载与校验上传逻辑
 
 - **链接提取**：若求助详情页提供直接 PDF 链接，优先采用该链接下载；针对 ScienceDirect、Nature 等出版商，将自动分析并请求页面中的原生 PDF 入口。
@@ -133,6 +116,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 - **异常拦截**：若下载的为 HTML、登录页、验证码或错误提示页，插件将中止后续流程，不会执行上传。
 - **安全过滤**：若命中期刊黑名单、补充材料备注、求助已驳回/举报或超出体积限制，将仅下载并校验文件，不触发自动上传。
 - **串行处理**：任务采用串行队列，同一时间仅下载/校验一个求助任务。
+- **上传地址限制**：Native Helper 会校验上传目标是否属于预期的服务端存储地址。若平台后续更换上传存储域名或接口格式，插件会停止上传并提示上传链路异常，而不是自动放宽到未知地址。
 
 ---
 
@@ -154,38 +138,32 @@ Set-ExecutionPolicy -Scope Process Bypass
   5. 依据扩展配置自动清理已上传的 PDF 文件；
   6. 读写本地的 `journal-access.json` 等配置文件。
 
----
-
-## 从源码构建 Helper
-
-在需要自主打包或修改 Helper 逻辑时，可按需重新构建 EXE 及其相关图标资源（需本地安装 Go 语言环境）：
-
-**Windows 平台编译**：
-
-```powershell
-.\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
-```
-
-**多平台交叉编译**：
-
-```powershell
-.\native-host\build_helper.ps1 -TargetOS linux -TargetArch amd64
-.\native-host\build_helper.ps1 -TargetOS linux -TargetArch arm64
-.\native-host\build_helper.ps1 -TargetOS darwin -TargetArch amd64
-.\native-host\build_helper.ps1 -TargetOS darwin -TargetArch arm64
-```
-
----
-
 ## 扩展图标重新生成
 
-图标源文件为 `extension/icons/source.svg`。若修改了 SVG 颜色或设计，需重新生成不同尺寸的 PNG 文件：
+图标源文件默认为 `extension/icons/source.svg`。如果只是修改 SVG 颜色或简单形状，可重新生成不同尺寸的 PNG 文件：
 
 ```powershell
 python .\scripts\build_icons.py
 ```
 
-脚本将自动渲染生成 `icon16.png`、`icon32.png`、`icon48.png` 和 `icon128.png`。生成后在扩展管理页重新加载即可生效。
+脚本将生成 `icon16.png`、`icon32.png`、`icon48.png`、`icon64.png`、`icon128.png`、`icon256.png` 和 `icon.ico`。默认渲染器只支持项目自带 `source.svg` 使用的简单 SVG 子集，不支持任意复杂 SVG。
+
+生成后不需要修改 `manifest.json`。在 Chrome / Edge 扩展管理页点击“重新加载”即可看到新图标；如果浏览器缓存旧图标，可关闭并重新打开专用浏览器。
+
+如果想使用 PNG 图标，请先用图片工具自行导出以下文件并放到 `extension/icons/`：
+
+- `icon16.png`
+- `icon32.png`
+- `icon48.png`
+- `icon128.png`
+
+然后运行：
+
+```powershell
+python .\scripts\build_icons.py --ico-only
+```
+
+该模式只会检查现有 PNG 尺寸并生成 `icon.ico`，不会缩放图片。
 
 ---
 
@@ -220,3 +198,13 @@ python .\scripts\build_icons.py
     ```powershell
     .\native-host\uninstall_host.ps1 -RemoveFiles
     ```
+
+---
+
+## 责任与使用边界
+
+本项目是社区维护的浏览器辅助工具，不隶属于 Ablesci、任何出版社或机构平台。使用者需要自行确认账号状态、机构订阅、文献版权、网站条款以及所在地适用规则。
+
+插件只能在浏览器和网站当前允许的范围内辅助处理 PDF 下载、校验和上传，不保证所有出版商页面长期可用。出版商页面结构、登录状态、验证码、机构认证、上传存储服务或浏览器安全策略变化，都可能导致任务跳过、暂停或失败。
+
+建议始终使用专用 Chrome / Edge Profile 运行本插件，不要在日常浏览器 Profile 中混用下载任务。

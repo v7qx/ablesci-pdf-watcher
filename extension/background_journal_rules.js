@@ -179,7 +179,7 @@
 
     async function recordJournalAccessResult(payload, result) {
       journalAccessUpdateChain = journalAccessUpdateChain
-        .catch(err => console.warn('[Ablesci PDF Uploader] previous journal access update failed', err))
+        .catch(err => console.warn('[Ablesci PDF Watcher] previous journal access update failed', err))
         .then(() => recordJournalAccessResultNow(payload, result));
       return journalAccessUpdateChain;
     }

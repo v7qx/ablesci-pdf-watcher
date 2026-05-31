@@ -98,7 +98,7 @@
     async function saveDiagnostic(diag) {
       const clean = JSON.parse(JSON.stringify(diag || {}));
       await chromeApi.storage.local.set({ [lastDiagnosticKey]: clean });
-      console.debug('[Ablesci PDF Uploader Diagnostic]', clean);
+      console.debug('[Ablesci PDF Watcher Diagnostic]', clean);
     }
 
     async function saveErrorDiagnostic(payload, err) {
@@ -141,7 +141,7 @@
 
     async function removeDownloadArtifact(item) {
       if (!canRemoveHtmlDownloadItem(item)) {
-        console.warn('[Ablesci PDF Uploader] refuse to remove non-html download artifact', sanitizeDownloadItem(item));
+        console.warn('[Ablesci PDF Watcher] refuse to remove non-html download artifact', sanitizeDownloadItem(item));
         return false;
       }
       try {

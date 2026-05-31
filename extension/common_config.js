@@ -9,7 +9,7 @@
     downloadMode: 'auto',
     scienceDirectTabMode: 'silent_then_visible',
     moveToDir: '',
-    deleteAfterUpload: true,
+    deleteAfterUpload: false,
     keepDownloadHistory: false,
     browserDownloadConfigured: false,
     minAutoUploadMB: 1,

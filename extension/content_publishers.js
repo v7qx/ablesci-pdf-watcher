@@ -220,7 +220,7 @@
   async function notifyScienceDirectReady() {
     if (!isScienceDirect()) return;
     if (!(await canControlCurrentPublisherPage())) {
-      console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending ScienceDirect task');
+      console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending ScienceDirect task');
       stopScienceDirectObserver();
       return;
     }
@@ -433,7 +433,7 @@
   async function notifyRscReady() {
     if (!isRsc() || rscPdfTriggered) return;
     if (!(await canControlCurrentPublisherPage())) {
-      console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending RSC task');
+      console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending RSC task');
       stopRscObserver();
       return;
     }
@@ -485,7 +485,7 @@
   async function notifyNatureReady() {
     if (!isNature() || naturePdfTriggered) return;
     if (!(await canControlCurrentPublisherPage())) {
-      console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending Nature task');
+      console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending Nature task');
       stopNatureObserver();
       return;
     }
@@ -527,7 +527,7 @@
   // ScienceDirect 有时先经过验证/跳转，持续等待原生 View PDF 入口；成功或超时后断开观察器，避免影响普通浏览。
   canControlCurrentPublisherPage().then(ok => {
     if (!ok) {
-      console.debug('[Ablesci PDF Uploader] publisher page ignored: no pending task for this tab');
+      console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending task for this tab');
       return;
     }
     if (isScienceDirect()) {
