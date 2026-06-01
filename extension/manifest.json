@@ -73,6 +73,10 @@
         "https://pubs.rsc.org/*"
       ],
       "js": [
+        "content/publishers_common.js",
+        "content/publisher_sciencedirect.js",
+        "content/publisher_nature.js",
+        "content/publisher_rsc.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"
