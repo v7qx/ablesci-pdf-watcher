@@ -44,12 +44,16 @@
       const date = value ? new Date(value) : null;
       if (!date || Number.isNaN(date.getTime())) return '-';
       const seconds = Math.max(0, Math.round((date.getTime() - Date.now()) / 1000));
-      if (seconds <= 0) return '到点';
+      const isEn = globalThis.watcherActiveLanguage === 'en';
+      if (seconds <= 0) return isEn ? 'Due' : '到点';
       const minutes = Math.floor(seconds / 60);
       const sec = seconds % 60;
-      if (minutes < 60) return `${minutes}分${String(sec).padStart(2, '0')}秒`;
+      if (minutes < 60) {
+        return isEn ? `${minutes}m ${String(sec).padStart(2, '0')}s` : `${minutes}分${String(sec).padStart(2, '0')}秒`;
+      }
       const hours = Math.floor(minutes / 60);
-      return `${hours}时${String(minutes % 60).padStart(2, '0')}分`;
+      const minRem = minutes % 60;
+      return isEn ? `${hours}h ${String(minRem).padStart(2, '0')}m` : `${hours}时${String(minRem).padStart(2, '0')}分`;
     }
 
     function normalizeWorkdays(value) {

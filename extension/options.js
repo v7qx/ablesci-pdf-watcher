@@ -60,6 +60,279 @@ const {
   showPill
 });
 
+const TEXT_MAP = {
+  "安装检查": "Installation Check",
+  "设置下载、上传、按钮显示和低频值守。": "Configure download, upload, button styles, and auto watcher.",
+  "浏览器下载设置": "Browser Download Settings",
+  "请手动关闭\"下载前询问保存位置\"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。": "Please manually disable \"Ask where to save each file before downloading\" and configure PDFs to download directly; otherwise, PDFs may open in the browser's built-in viewer and halt the plugin.",
+  "Native Helper": "Native Helper",
+  "测试本地 Helper 是否可用。": "Test if the local helper is available.",
+  "打开本地目录": "Open Directory",
+  "测试": "Test",
+  "未测试": "Untested",
+  "测试中": "Testing",
+  "返回异常": "Response Exception",
+  "正常：": "OK: ",
+
+  "上传规则": "Upload Rules",
+  "自动上传范围": "Auto Upload Range",
+  "超出范围时只下载和校验。最大值填 0 表示不限制。": "Only download and verify when out of range. 0 means unlimited.",
+  "最小体积": "Min Size",
+  "最大体积": "Max Size",
+  "0 为不限": "0 for unlimited",
+  "到": "to",
+  "上传完成后删除本地 PDF": "Delete PDF After Upload",
+  "关闭时会保留本地 PDF。": "Keep local PDF when disabled.",
+  "调试模式": "Debug Mode",
+  "只下载并校验 PDF，不自动上传；完成时显示准备上传的文件信息。": "Download and verify PDF only, do not upload; show details when done.",
+  "智能推送": "Smart Recommendations",
+  "提交成功后，按网站返回结果决定是否显示相关文献的智能推送提示。": "Display paper recommendation popups after successful upload based on response.",
+
+  "更多设置": "More Settings",
+  "按钮显示名称": "Button Label",
+  "显示在 Ablesci 页面按钮上的文字。": "Label displayed on the button in Ablesci details page.",
+  "按钮颜色": "Button Color",
+  "默认状态下的按钮背景和文字颜色。": "Background and text color of the button.",
+  "背景": "BG",
+  "文字": "Text",
+  "按钮显示位置": "Button Position",
+  "没有快捷应助区域时，回退到 DOI 区域最后。": "Fallback to end of DOI section if assist area is missing.",
+  "现有快捷应助按钮之后": "After existing assist buttons",
+  "现有快捷应助按钮之前": "Before existing assist buttons",
+  "显示语言": "Display Language",
+  "设置插件配置页和应助按钮的显示语言。": "Set the language for both options page and injected buttons.",
+  "跟随浏览器系统 (Auto)": "System Default (Auto)",
+  "简体中文 (Chinese)": "简体中文 (Chinese)",
+  "English": "English",
+  "保留浏览器下载记录": "Keep Browser Download History",
+  "异常 HTML 下载会保留记录，便于确认。": "Keep download history for failed HTML pages for debugging.",
+  "求助链接当前窗口打开": "Open Links in Current Tab",
+  "开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。": "Open helper list and recommended links in the current tab; Ctrl/Cmd/middle click still use browser default behavior.",
+  "自动删除 HTML 错误页": "Auto Remove HTML Error Pages",
+  "默认关闭。开启后，下载到 HTML/登录页/错误页时会尝试删除本地异常文件。": "Disabled by default. When enabled, attempts to delete local downloaded HTML/login/error pages.",
+  "每日应助上限": "Daily Assist Limit",
+  "按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。": "Counted by PDF download/assist attempts. 0 means unlimited.",
+  "诊断信息": "Diagnostic Info",
+  "复制最近一次脱敏诊断信息。": "Copy the latest anonymized diagnostic information.",
+  "复制": "Copy",
+  "未复制": "Not Copied",
+
+  "运行数据": "Running Status",
+  "值守状态": "Watcher Status",
+  "从本地 watcher 状态读取，仅用于排查。": "Retrieved from local watcher state, for debugging only.",
+  "实际 / 预计": "Actual / Expected",
+  "网页总应助": "Web Total Assists",
+  "目标差额": "Target Deficit",
+  "运行模式": "Running Mode",
+  "下次应助": "Next Run",
+  "计划应助": "Planned Run",
+  "应助倒计时": "Countdown",
+  "今日应助计数": "Today Assists",
+
+  "实验：低频值守": "Experimental: Auto Watcher",
+  "基础设置": "Basic Settings",
+  "启用低频值守": "Enable Auto Watcher",
+  "默认关闭。只在浏览器运行且扩展启用时按低频 alarm 检查。": "Disabled by default. Periodically checks via low-frequency alarm when browser is running.",
+  "值守速度模式": "Watcher Speed Mode",
+  "控制自动值守的运行速率。极速与快速模式下将获得更密集的应助响应。": "Controls the execution rate of the auto watcher. Faster modes run checks more frequently.",
+  "自适应 (中位数 2~6 分钟)": "Adaptive (Median 2~6 min)",
+  "极速模式 (中位数 2 分钟)": "Fast Mode (Median 2 min)",
+  "快速模式 (中位数 6 分钟)": "Normal Mode (Median 6 min)",
+  "普通慢速 (中位数 10 分钟)": "Slow Mode (Median 10 min)",
+  "月目标": "Monthly Target",
+  "按本月时间进度估算当前应完成量，用于自适应模式下计算调度间隔。": "Target used to compute dynamic scheduling interval based on monthly progress.",
+
+  "候选筛选": "Candidate Filter",
+  "列表 URL": "List URLs",
+  "每行一个 Ablesci 求助列表链接。默认 Elsevier 在 3~200 页随机；也可追加 <code>&amp;page_min=1&amp;page_max=5</code> 自定义范围。": "One Ablesci helper list link per line. Defaults to random pages 3~200 for Elsevier. Add query parameters for custom range.",
+  "非 SD 最低求助量": "Min Non-SD Requests",
+  "除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。": "Min waiting count required to parse non-SD pages. 0 to disable, defaults to 200.",
+  "控制哪些求助在列表页和详情页被跳过。": "Control which requests are skipped on list and details pages.",
+  "有 DOI": "Has DOI",
+  "举报": "Reported",
+  "驳回": "Rejected",
+  "补充材料": "Supplement",
+  "备注": "Has Remarks",
+  "书籍章节": "Book Chapter",
+  "专利/报告": "Patent/Report",
+  "异常文本": "Risk Text",
+
+  "任务超时": "Task Timeout",
+  "区分未触发下载、下载中超时和任务最长时间；超时会取消当前任务并释放队列。": "Set different timeouts. Unresponsive tasks will be cancelled and queue released.",
+  "未触发下载": "No Download Initiated",
+  "下载中": "Downloading",
+  "单任务最长": "Max Per Task",
+
+  "报告与通知": "Report & Notification",
+  "连续遇阻自动暂停（实验）": "Auto Pause on CF Challenge",
+  "启用后，当连续遇到人机验证页面达到设定次数时，自动暂停值守，以防频繁撞墙被封。": "When enabled, automatically pauses the watcher after consecutive Cloudflare/challenges to prevent IP bans.",
+  "连续遇阻": "Pause after",
+  "次后暂停": "consecutive blocks",
+  "CF 提醒": "CF Alert",
+  "提醒与日报": "Alert & Daily Report",
+  "提醒默认走浏览器通知并带独立声音；日报由 Helper 直接写入本地。": "Alerts use browser notifications with sound. Daily reports are written locally by the Go Helper.",
+  "图标倒计时": "Badge Countdown",
+  "浏览器通知": "Browser Notification",
+  "Native Helper（实验）": "Native Helper (Exp)",
+  "测试提醒": "Test Alert",
+  "日报目录": "Report Directory",
+  "可选绝对路径。留空时 Native Helper 写入用户 Downloads 下的 ablesci-watcher-reports。": "Optional absolute path. If empty, Go Helper writes to ablesci-watcher-reports under user Downloads.",
+  "Trace 级别": "Trace Level",
+  "默认关闭。需要排查时再打开，避免长期占用本地存储。": "Off by default. Enable only for debugging to save local storage.",
+  "关闭": "Off",
+  "简略": "Compact",
+  "标准": "Normal",
+  "详细": "Verbose",
+
+  "本地记录维护": "Local Cache Cleanup",
+  "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
+  "清除已处理": "Clear Processed Cache",
+  "清除日志/Trace": "Clear Logs & Traces",
+
+  "值守操作": "Watcher Actions",
+  "手动触发一次检查，或复制当前排查配置。": "Run a manual check or copy troubleshooting config.",
+  "立即检查": "Run Watcher Now",
+  "复制配置": "Copy Config",
+
+  "值守已关闭": "Watcher Disabled",
+  "已停止": "Stopped",
+  "发送中": "Sending",
+
+  "保存": "Save",
+
+  // Background/Watcher errors & status messages for options display
+  "当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。": "The publisher page shows no full-text subscription access. This task has been skipped and the journal permission status recorded.",
+  "ScienceDirect 需要登录或机构访问后才能继续。插件已保留这次为登录阻塞，不计入无权限期刊；完成登录后可重新触发。": "ScienceDirect requires login or institutional access. The plugin has flagged this as login blocked, which is excluded from no-access journals; you can retry after logging in.",
+  "检测到出版商验证页，已中断本次任务并计入验证次数；达到阈值后会自动暂停低频值守。": "Publisher verification page (Cloudflare) detected. Task aborted and challenge count incremented; auto watcher will pause if threshold is reached.",
+  "DOI 解析失败或不存在，已跳过本次任务。": "DOI resolution failed or does not exist. Task skipped.",
+  "已排队：等待当前 PDF 任务完成；关闭本页可取消。": "Queued: Waiting for current PDF task to complete; close this page to cancel.",
+  "已跳过": "Skipped",
+  "current task skipped": "Current task skipped",
+  "当前任务已跳过": "Current task skipped",
+  "上传成功": "Upload Successful",
+  "上传失败": "Upload Failed",
+  "仅下载完成": "Downloaded Only",
+
+  // Additional translations
+  "未检查": "Never checked",
+  "检查中": "Checking...",
+  "已完成": "Completed",
+
+  // Candidate Filter hover tooltips
+  "只处理有 DOI 的求助": "Only process requests with DOI",
+  "跳过举报": "Skip reported requests",
+  "跳过驳回": "Skip rejected requests",
+  "跳过补充材料": "Skip supplement materials",
+  "跳过存在备注的求助": "Skip requests with remarks",
+  "跳过书籍章节": "Skip book chapters",
+  "跳过专利或报告类": "Skip patents or reports",
+  "跳过异常文本": "Skip abnormal text",
+
+  // Watcher Status card metric grid hover tooltips
+  "实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。": "Actual: Assists done since first sync of this month; Expected: Calculated based on elapsed month duration, deducting elapsed proportion upon first sync.",
+  "从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。": "Total cumulative assists synced silently from Ablesci profile (includes other devices and manual assists).",
+  "本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。": "Difference between expected and actual assists for this month (Expected - Actual). Positive means behind schedule, negative means ahead.",
+  "当前生效的定时调度逻辑与决策模式。": "Currently active scheduling logic and decision model.",
+  "下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。": "Next scheduled automatic assist run time (Beijing time).",
+  "与下次应助保持同一时间口径，便于复制和核对。": "Matches the time scale of the next run for easy comparison and copying.",
+  "距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。": "Time remaining before the next auto assist run.",
+  "当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。": "Current daily assist limit. Shows total limit only.",
+  "今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。": "Assists processed today. Uses download counts matching daily limit criteria."
+};
+
+function getActualLanguage(langOption) {
+  if (langOption === 'zh') return 'zh';
+  if (langOption === 'en') return 'en';
+  const browserLang = (navigator.language || '').toLowerCase();
+  return browserLang.startsWith('zh') ? 'zh' : 'en';
+}
+
+function translateTextNodes(node, map) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const trimmed = node.nodeValue.trim();
+    if (map[trimmed]) {
+      const match = node.nodeValue.match(/^(\s*)(.*?)(\s*)$/);
+      if (match) {
+        node.nodeValue = match[1] + map[trimmed] + match[3];
+      } else {
+        node.nodeValue = map[trimmed];
+      }
+    }
+  } else {
+    if (node.placeholder && map[node.placeholder.trim()]) {
+      node.placeholder = map[node.placeholder.trim()];
+    }
+    if (node.title && map[node.title.trim()]) {
+      node.title = map[node.title.trim()];
+    }
+    if (node.getAttribute && node.getAttribute('aria-label') && map[node.getAttribute('aria-label').trim()]) {
+      node.setAttribute('aria-label', map[node.getAttribute('aria-label').trim()]);
+    }
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+      translateTextNodes(child, map);
+    }
+  }
+}
+
+function t(msg) {
+  const trimmed = String(msg || '').trim();
+  const isEn = globalThis.watcherActiveLanguage === 'en';
+  if (isEn) {
+    if (trimmed === 'quant / quant_rules') return 'Adaptive Monthly Target';
+    if (trimmed === 'quant / fixed_interval') return 'Fixed Interval';
+    if (trimmed === 'quant / quant_rules (值守已关闭)') return 'Adaptive Monthly Target (Disabled)';
+    if (trimmed === 'quant / fixed_interval (值守已关闭)') return 'Fixed Interval (Disabled)';
+    if (TEXT_MAP[trimmed]) return TEXT_MAP[trimmed];
+
+    if (trimmed.startsWith('正常：')) {
+      const rest = trimmed.substring(3).trim();
+      return 'OK: ' + t(rest);
+    }
+    if (trimmed.startsWith('失败：')) {
+      const rest = trimmed.substring(3).trim();
+      return 'Failed: ' + t(rest);
+    }
+    if (trimmed.startsWith('正常: ')) {
+      const rest = trimmed.substring(4).trim();
+      return 'OK: ' + t(rest);
+    }
+    if (trimmed.startsWith('失败: ')) {
+      const rest = trimmed.substring(4).trim();
+      return 'Failed: ' + t(rest);
+    }
+    if (trimmed.startsWith('自动: ')) {
+      return trimmed.replace('自动:', 'Auto:').replace('手动:', 'Manual:');
+    }
+    if (trimmed.startsWith('自动:')) {
+      return trimmed.replace('自动:', 'Auto:').replace('手动:', 'Manual:');
+    }
+    if (trimmed.includes('已保存')) {
+      return 'Saved. Opened Ablesci pages will auto-update, or refresh to apply.';
+    }
+
+    const m = trimmed.match(/^短时间内连续出现\s*(\d+)\s*次无正文权限，且涉及\s*(\d+)\s*个期刊。已暂停值守，请检查代理、登录态或机构访问环境。$/);
+    if (m) {
+      return `Consecutive no-access occurred ${m[1]} times in a short period, involving ${m[2]} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
+    }
+    const mCf = trimmed.match(/^连续\s*(\d+)\s*次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。$/);
+    if (mCf) {
+      return `Encountered publisher verification page for ${mCf[1]} consecutive times. Auto watcher paused. Please re-enable manually after resolving in browser.`;
+    }
+    const mCfW = trimmed.match(/^检测到出版商验证页（第\s*(\d+)\s*次）。请恢复浏览器窗口并完成验证；达到\s*(\d+)\s*次后会自动暂停值守。$/);
+    if (mCfW) {
+      return `Publisher verification page detected (${mCfW[1]} times). Please resolve in browser; auto watcher will pause after ${mCfW[2]} times.`;
+    }
+  } else {
+    if (trimmed === 'quant / quant_rules') return '月目标自适应调度';
+    if (trimmed === 'quant / fixed_interval') return '固定间隔调度';
+    if (trimmed === 'quant / quant_rules (值守已关闭)') return '月目标自适应调度 (值守已关闭)';
+    if (trimmed === 'quant / fixed_interval (值守已关闭)') return '固定间隔调度 (值守已关闭)';
+  }
+  return msg;
+}
+
+globalThis.t = t;
+
 function el(id) { return document.getElementById(id); }
 
 async function loadOptions() {
@@ -69,6 +342,9 @@ async function loadOptions() {
 
 async function load() {
   const opts = await loadOptions();
+  const activeLang = getActualLanguage(opts.watcherLanguage);
+  globalThis.watcherActiveLanguage = activeLang;
+
   for (const id of ids) {
     const node = el(id);
     if (!node) continue;
@@ -76,16 +352,25 @@ async function load() {
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
   }
+
+  if (activeLang === 'en') {
+    translateTextNodes(document.body, TEXT_MAP);
+    document.title = 'Ablesci PDF Watcher Settings';
+    const descNode = el('watcherListUrlsDesc');
+    if (descNode) {
+      descNode.innerHTML = 'One Ablesci list link per line. Elseviers default to random 3~200 pages; append <code>&amp;page_min=1&amp;page_max=5</code> to customize.';
+    }
+  }
+
   await renderAdvancedWatcherStatus();
 }
-
-
 
 function setText(id, value) {
   const node = el(id);
   if (node) {
-    node.textContent = value;
-    node.title = String(value ?? '');
+    const val = typeof value === 'string' ? t(value) : value;
+    node.textContent = val;
+    node.title = String(val ?? '');
   }
 }
 
@@ -170,6 +455,11 @@ async function save(saveOptions = {}) {
     await chrome.storage.local.set(opts);
     await chrome.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
+    const activeLangBefore = globalThis.watcherActiveLanguage;
+    const activeLangAfter = getActualLanguage(opts.watcherLanguage);
+    if (activeLangBefore !== activeLangAfter) {
+      setTimeout(() => { location.reload(); }, 1200);
+    }
     return true;
   } catch (err) {
     showText('status', err.message || String(err), true);
@@ -179,8 +469,9 @@ async function save(saveOptions = {}) {
 
 function showPill(id, msg, isErr) {
   const node = el(id);
-  node.textContent = msg;
-  node.title = msg || '';
+  const val = t(msg);
+  node.textContent = val;
+  node.title = val || '';
   node.classList.toggle('ok', !isErr);
   node.classList.toggle('error', !!isErr);
 }

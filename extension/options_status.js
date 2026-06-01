@@ -20,8 +20,13 @@
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
         'watcherEnabled',
-        'watcherDailyLimit'
+        'watcherDailyLimit',
+        'watcherLanguage'
       ]);
+      const lang = stored.watcherLanguage || 'auto';
+      if (typeof globalThis.getActualLanguage === 'function') {
+        globalThis.watcherActiveLanguage = globalThis.getActualLanguage(lang);
+      }
       const state = stored[autoWatcherStateKey] || {};
       const isEnabled = stored.watcherEnabled !== false;
       const daily = state.daily?.[todayKeyBeijing()] || {};

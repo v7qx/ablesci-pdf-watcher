@@ -1,5 +1,7 @@
 # Ablesci PDF Watcher
 
+[English](README_en.md)
+
 Chrome / Edge 扩展 + Go Native Messaging Helper，用于在 Ablesci 求助详情页辅助完成正文 PDF 的下载、校验与上传。
 
 ## 安装与配置
@@ -207,3 +209,4 @@ python .\scripts\build_icons.py --ico-only
 插件只能在浏览器和网站当前允许的范围内辅助处理 PDF 下载、校验和上传，不保证所有出版商页面长期可用。出版商页面结构、登录状态、验证码、机构认证、上传存储服务或浏览器安全策略变化，都可能导致任务跳过、暂停或失败。
 
 建议始终使用专用 Chrome / Edge Profile 运行本插件，不要在日常浏览器 Profile 中混用下载任务。
+

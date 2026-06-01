@@ -23,7 +23,8 @@
 
     function showText(id, msg, isErr) {
       const node = el(id);
-      node.textContent = msg;
+      const val = typeof globalThis.t === 'function' ? globalThis.t(msg) : msg;
+      node.textContent = val;
       node.style.color = isErr ? 'var(--danger)' : 'var(--ok)';
       setTimeout(() => { node.textContent = ''; }, 7000);
     }

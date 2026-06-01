@@ -70,8 +70,45 @@
     }
 
     async function notifyWatcherNeedsAttention(reason, url, notifyOptions = {}) {
-      const message = normalizeText(reason || '低频值守需要人工处理。').slice(0, 160);
       const opts = await deps.getOptions();
+      const lang = opts.watcherLanguage || 'auto';
+      const isEn = (lang === 'en') || (lang === 'auto' && !(navigator.language || '').toLowerCase().startsWith('zh'));
+
+      let rawMessage = String(reason || '低频值守需要人工处理。');
+      if (isEn) {
+        if (rawMessage.startsWith('自动值守已暂停：PDF 已下载但上传链路异常')) {
+          rawMessage = 'Auto watcher paused: PDF downloaded but upload failed. Please check Ablesci login status, Native Helper, and OSS configuration before re-enabling.';
+        } else if (rawMessage.startsWith('这是一条低频值守测试提醒')) {
+          rawMessage = 'This is an auto watcher test notification, no checks will be executed.';
+        } else if (rawMessage.startsWith('低频值守已排队下载并校验')) {
+          rawMessage = 'Auto watcher has queued and verified a candidate.';
+        } else if (rawMessage.startsWith('低频值守已排队处理')) {
+          rawMessage = 'Auto watcher has queued a candidate for processing.';
+        } else if (rawMessage.includes('连续') && rawMessage.includes('次遇到 Ablesci 验证页，已暂停低频值守')) {
+          const streak = rawMessage.match(/\d+/)?.[0] || '';
+          rawMessage = `Encountered Ablesci verification page for ${streak} consecutive times. Auto watcher has been paused. Please re-enable after manually resolving.`;
+        } else if (rawMessage.includes('检测到 Ablesci 验证页')) {
+          const streak = rawMessage.match(/\d+/)?.[0] || '';
+          rawMessage = `Ablesci verification page detected (${streak} times). Please resolve in browser; if it continues, the watcher will pause automatically.`;
+        } else if (rawMessage.includes('连续出现') && rawMessage.includes('次无正文权限')) {
+          const matches = rawMessage.match(/\d+/g) || [];
+          const count = matches[0] || '';
+          const journals = matches[1] || '';
+          rawMessage = `Consecutive no-access occurred ${count} times in a short period, involving ${journals} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
+        } else if (rawMessage.includes('连续') && rawMessage.includes('次遇到出版商验证页，已暂停低频值守')) {
+          const streak = rawMessage.match(/\d+/)?.[0] || '';
+          rawMessage = `Encountered publisher verification page for ${streak} consecutive times. Auto watcher has been paused. Please re-enable after manually resolving in browser.`;
+        } else if (rawMessage.includes('检测到出版商验证页') && rawMessage.includes('次')) {
+          const matches = rawMessage.match(/\d+/g) || [];
+          const streak = matches[0] || '';
+          const threshold = matches[1] || '';
+          rawMessage = `Publisher verification page detected (${streak} times). Please resolve in browser; watcher will auto pause after ${threshold} times.`;
+        } else if (rawMessage === '低频值守需要人工处理。') {
+          rawMessage = 'Auto watcher requires manual action.';
+        }
+      }
+
+      const message = normalizeText(rawMessage).slice(0, 160);
       if (!opts.watcherNotificationEnabled) {
         if (url) console.warn('[Ablesci Auto Watcher] notification disabled, skip:', message, deps.urlHostPath(url));
         return { ok: false, mode: 'disabled', reason: 'notification_disabled' };

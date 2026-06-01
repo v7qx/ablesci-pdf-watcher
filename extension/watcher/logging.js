@@ -64,8 +64,12 @@
         } else {
           await chromeApi.action.setBadgeText({ text: '' });
         }
+        const lang = opts.watcherLanguage || 'auto';
+        const isEn = (lang === 'en') || (lang === 'auto' && !(navigator.language || '').toLowerCase().startsWith('zh'));
+        const label = isEn ? 'Next Run' : (schedule.label || '下一次应助');
+        const countdownLabel = isEn ? 'Countdown' : '倒计时';
         const title = text
-          ? `Ablesci PDF Watcher\n${schedule.label}：${formatBeijingDateTime(schedule.time)}\n倒计时：${text}`
+          ? `Ablesci PDF Watcher\n${label}: ${formatBeijingDateTime(schedule.time)}\n${countdownLabel}: ${text}`
           : 'Ablesci PDF Watcher';
         await chromeApi.action.setTitle({ title });
       } catch (_) {}

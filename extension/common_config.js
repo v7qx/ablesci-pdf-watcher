@@ -69,7 +69,8 @@
     watcherMaxDailyTarget: WATCHER_DAILY_LIMIT_MAX,
     watcherMaxPerSession: 1,
     watcherAllowZeroSession: false,
-    watcherUseCalendarProgress: true
+    watcherUseCalendarProgress: true,
+    watcherLanguage: 'auto'
   };
 
   function sanitizePathPart(s) {
@@ -193,7 +194,8 @@
       watcherMaxDailyTarget: WATCHER_DAILY_LIMIT_MAX,
       watcherMaxPerSession: 1,
       watcherAllowZeroSession: opts.watcherAllowZeroSession === true,
-      watcherUseCalendarProgress: opts.watcherUseCalendarProgress !== false
+      watcherUseCalendarProgress: opts.watcherUseCalendarProgress !== false,
+      watcherLanguage: ['auto', 'zh', 'en'].includes(opts.watcherLanguage) ? opts.watcherLanguage : 'auto'
     };
   }
 

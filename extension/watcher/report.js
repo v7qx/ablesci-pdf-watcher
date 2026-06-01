@@ -77,6 +77,44 @@
       'sync_web_assist_count': '同步网页应助数'
     };
 
+    const STEP_TRANSLATIONS_EN = {
+      'failed': 'Failed',
+      'skipped': 'Skipped',
+      'candidate_detail_start': 'Detail Evaluation Start',
+      'candidate_skip_list_filter': 'List Page Filter Skipped',
+      'candidate_skip_processed': 'Processed Filter Skipped',
+      'run_session_size': 'Session Size Calculation',
+      'session_size_calculated': 'Session Size Calculated',
+      'session_start': 'Session Start',
+      'session_done': 'Session Done',
+      'session_plan_result': 'Session Plan Result',
+      'session_plan_done': 'Session Plan Done',
+      'candidate_skip_detail_filter': 'Detail Page Filter Skipped',
+      'candidate_payload_allowed': 'Candidate Allowed',
+      'candidate_enqueue': 'Enqueue Upload Task',
+      'queue_message_done': 'Upload Queue Done',
+      'queue_message_error': 'Upload Queue Error',
+      'queue_message_blocked': 'Upload Queue Blocked',
+      'run_skip_already_running': 'Skipped (Already Running)',
+      'detail_extract_failed': 'Detail Extraction Failed',
+      'detail_extract_result': 'Detail Extraction Result',
+      'detail_extract_error': 'Detail Extraction Error',
+      'watcher_paused_after_download_failure': 'Watcher Paused After Download Failure',
+      'session_stopped_after_candidate_failure': 'Session Stopped After Candidate Failure',
+      'detail_tab_closed_cancel_task': 'Tab Closed Cancel Task',
+      'tab_open_request': 'Tab Open Request',
+      'tab_opened': 'Tab Opened',
+      'tab_complete': 'Tab Loaded',
+      'tab_close_request': 'Tab Close Request',
+      'tab_closed': 'Tab Closed',
+      'alarm_refresh_start': 'Alarm Refresh Start',
+      'alarm_cleared': 'Alarm Cleared',
+      'alarm_disabled': 'Alarm Disabled',
+      'alarm_scheduled': 'Alarm Scheduled',
+      'assist_next_scheduled': 'Next Run Scheduled',
+      'sync_web_assist_count': 'Sync Web Assist Count'
+    };
+
     const REASON_TRANSLATIONS = {
       'candidate_passed_list_filter': '候选通过列表筛选',
       'session_size_calculated': '会话大小已计算',
@@ -110,13 +148,112 @@
       'rate_limited_retry': '触发滑动窗口频控限制(将快速重试)'
     };
 
-    function translateStep(step) {
+    const REASON_TRANSLATIONS_EN = {
+      'candidate_passed_list_filter': 'Candidate passed list filter',
+      'session_size_calculated': 'Session size calculated',
+      'already running': 'Task already running',
+      'already_running': 'Task already running',
+      'no_candidate': 'No valid candidate found',
+      'risk_budget_limit': 'Daily risk budget exceeded',
+      'daily_limit_reached': 'Daily assist limit reached',
+      'outside_work_window': 'Outside work time window',
+      'not_due': 'Not due yet',
+      'no_cookie': 'No valid credentials detected',
+      'no_credential': 'No valid credentials detected',
+      'cf_challenge': 'Cloudflare verification challenge triggered',
+      'cloudflare_challenge': 'Cloudflare verification challenge triggered',
+      'download_timeout': 'Download PDF timeout',
+      'no_download_timeout': 'No download triggered timeout',
+      'upload_failed': 'Upload PDF failed',
+      'supplement_pdf': 'Skip supplementary materials',
+      'remark_pdf': 'Skip remarks or corrigenda',
+      'book_chapter': 'Skip book chapters',
+      'patent_report': 'Skip patent reports',
+      'risk_text': 'Skip risk text match',
+      'doi_missing': 'DOI missing',
+      'reported': 'Already reported/handled',
+      'rejected': 'Already rejected',
+      'no_access': 'No subscription access',
+      'between_candidates': 'Cooldown delay between candidates',
+      'session_completed': 'Session completed successfully',
+      'quota_reset': 'Quota reset',
+      'rate_limited_': 'Rate limit triggered (will retry soon)',
+      'rate_limited_retry': 'Rate limit triggered (will retry soon)',
+      '上传成功': 'Upload Successful',
+      '上传失败': 'Upload Failed'
+    };
+
+    function translateStep(step, isEn) {
       const s = String(step || '').trim();
+      if (isEn) {
+        return STEP_TRANSLATIONS_EN[s] || s;
+      }
       return STEP_TRANSLATIONS[s] || s;
     }
 
-    function translateReason(reason) {
+    function translateReason(reason, isEn) {
       const r = String(reason || '').trim();
+      if (isEn) {
+        if (REASON_TRANSLATIONS_EN[r]) {
+          return REASON_TRANSLATIONS_EN[r];
+        }
+        if (r.startsWith('rate_limited_')) {
+          return REASON_TRANSLATIONS_EN['rate_limited_'];
+        }
+        if (r.startsWith('storage_changed:')) {
+          const keysStr = r.substring('storage_changed:'.length);
+          const keys = keysStr.split(',').filter(Boolean);
+          if (keys.length > 2) {
+            return `Settings changed (${keys.slice(0, 2).join(', ')} etc. ${keys.length} items)`;
+          }
+          return `Settings changed (${keysStr})`;
+        }
+        if (r.startsWith('失败: ')) {
+          return 'Failed: ' + translateReason(r.substring(4), isEn);
+        }
+        if (r.startsWith('失败：')) {
+          return 'Failed: ' + translateReason(r.substring(3), isEn);
+        }
+        if (r.includes('当前出版商页面显示无正文订阅权限')) {
+          return 'No full-text subscription access. Task skipped.';
+        }
+        if (r.includes('需要登录或机构访问')) {
+          return 'Login or institutional access required. Task marked as login blocked.';
+        }
+        if (r.includes('检测到出版商验证页')) {
+          return 'Publisher verification page detected. Task aborted.';
+        }
+        if (r.includes('已取消当前任务')) {
+          return 'Current task cancelled.';
+        }
+        if (r.includes('已仅下载并校验 PDF') && r.includes('小于')) {
+          const sizeMatch = r.match(/小于\s*([^（，]+)[（,](当前\s*[^）)]+)[）)]/);
+          const limitSize = sizeMatch ? sizeMatch[1].trim() : '1 MB';
+          const currentSize = sizeMatch ? sizeMatch[2].trim() : '';
+          return `Downloaded and verified PDF, not uploaded. PDF file is smaller than ${limitSize} (${currentSize}).`;
+        }
+        if (r.includes('已仅下载并校验 PDF') && r.includes('大于')) {
+          const sizeMatch = r.match(/大于\s*([^（，]+)[（,](当前\s*[^）)]+)[）)]/);
+          const limitSize = sizeMatch ? sizeMatch[1].trim() : '20 MB';
+          const currentSize = sizeMatch ? sizeMatch[2].trim() : '';
+          return `Downloaded and verified PDF, not uploaded. PDF file is larger than ${limitSize} (${currentSize}) and exceeds limit.`;
+        }
+        if (r.includes('已仅下载并校验 PDF')) {
+          return 'Downloaded and verified PDF, not uploaded.';
+        }
+        if (r.includes('调试模式已开启')) {
+          const fileMatch = r.match(/准备上传文件：(.*)$/);
+          const file = fileMatch ? fileMatch[1].trim() : 'file';
+          return `Debug mode enabled, auto-upload skipped. Prepared file: ${file}`;
+        }
+        if (r.includes('当前求助缺少可识别的 PDF 链接')) {
+          return 'No recognizable PDF link found, skipped.';
+        }
+        if (r.includes('OSS 上传完成')) {
+          return 'OSS upload completed. Please check Ablesci page status.';
+        }
+        return r;
+      }
       if (REASON_TRANSLATIONS[r]) {
         return REASON_TRANSLATIONS[r];
       }
@@ -241,6 +378,8 @@
       if (!opts.watcherDailyReportEnabled) return;
 
       const date = todayKey();
+      const lang = opts.watcherLanguage || 'auto';
+      const isEn = (lang === 'en') || (lang === 'auto' && !(navigator.language || '').toLowerCase().startsWith('zh'));
       await flushWatcherLogs().catch(() => {});
       await flushWatcherTrace().catch(() => {});
       const stored = await chromeApi.storage.local.get([
@@ -292,7 +431,7 @@
         currentStrategy: state.lastAssistStrategy || state.currentExecutionModel || '',
         nextAssistRunAt: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
         nextAssistStrategy: state.nextAssistStrategy || '',
-        nextAssistReason: state.nextAssistReason || '',
+        nextAssistReason: translateReason(state.nextAssistReason || '', isEn),
         nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
         nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
         nextAssistGuardMinutes: state.nextAssistGuardMinutes || '',
@@ -304,7 +443,7 @@
         chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
         lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
         lastAttemptFinishedAt: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
-        lastAttemptResult: lastAttempt.resultReason || '',
+        lastAttemptResult: translateReason(lastAttempt.resultReason || '', isEn),
         lastAttemptTargetSessionSize: lastAttempt.targetSessionSize ?? '',
         lastAttemptCheckedDelta: lastAttempt.checkedDelta ?? '',
         lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',
@@ -349,7 +488,7 @@
         }),
         reportRow('last_attempt', {
           time: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
-          status: lastAttempt.resultReason || '',
+          status: translateReason(lastAttempt.resultReason || '', isEn),
           reason: reportJson(lastAttempt || {}),
           trigger: lastAttempt.trigger || '',
           url: lastAttempt.pickedListUrl || ''
@@ -362,8 +501,8 @@
           doi: log.doi || '',
           journalName: log.journalName || '',
           detailUrl: reportDetailValue(log),
-          status: log.status || '',
-          reason: log.reason || ''
+          status: translateStep(log.status || '', isEn),
+          reason: translateReason(log.reason || '', isEn)
         }))
       ];
       const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
@@ -374,13 +513,13 @@
             const cleanDetail = reportDetailValue(log) || log.journalName || log.doi || '';
             let formattedDetail = cleanDetail;
             if (cleanDetail.startsWith('http://') || cleanDetail.startsWith('https://')) {
-              formattedDetail = `[点击查看详情](${cleanDetail})`;
+              formattedDetail = isEn ? `[Click for details](${cleanDetail})` : `[点击查看详情](${cleanDetail})`;
             }
             return {
               time: log.time,
               trigger: log.trigger || '',
-              step: translateStep(log.status || ''),
-              reason: translateReason(log.reason || ''),
+              step: translateStep(log.status || '', isEn),
+              reason: translateReason(log.reason || '', isEn),
               detail: formattedDetail
             };
           }),
@@ -389,8 +528,8 @@
           .map(trace => ({
             time: trace.time,
             trigger: trace.trigger || '',
-            step: translateStep(trace.step || ''),
-            reason: translateReason(trace.reason || ''),
+            step: translateStep(trace.step || '', isEn),
+            reason: translateReason(trace.reason || '', isEn),
             detail: formatTraceDetail(trace.details)
           }))
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 30);
@@ -398,12 +537,61 @@
       const monthDir = date.slice(0, 7);
       const reportStem = `${monthDir}/${date}`;
       const isTraceCompact = opts.watcherTraceLevel === 'compact' || opts.watcherTraceLevel === 'off';
-      const summaryLines = isTraceCompact ? [
+      const summaryLines = isTraceCompact ? (isEn ? [
+        `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
+        `- Latest Selected List Link: ${lastAttempt.pickedListUrl ? `[Click here](${lastAttempt.pickedListUrl})` : 'None'}`,
+        `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
+        `- Risk Budget Used today / Limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- Target Assists Today: ${Number(state.todayTarget || 0)}`
+      ] : [
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- 最近一次选中的列表页链接: ${lastAttempt.pickedListUrl ? `[点击跳转](${lastAttempt.pickedListUrl})` : '无'}`,
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
         `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`
+      ]) : (isEn ? [
+        `- Checked Candidate Count: ${Number(daily.checked || 0)}`,
+        `- Downloaded or Queued Count: ${Number(daily.downloaded || 0)}`,
+        `- Successfully Uploaded Count: ${Number(daily.uploaded || 0)}`,
+        `- Skipped Candidate Count: ${Number(daily.skipped || 0)}`,
+        `- Failed Task Count: ${Number(daily.failed || 0)}`,
+        `- Notifications Sent: ${Number(daily.notified || 0)}`,
+        `- Watcher Speed Mode: ${state.speedMode === 'adaptive' ? 'Adaptive' : (state.speedMode === 'slow' ? 'Slow' : (state.speedMode === 'fast' ? 'Fast' : 'Normal'))}`,
+        `- Scheduler Mode: ${state.schedulerModelMode || 'simple'}`,
+        `- Runtime Strategy Mode: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
+        `- Current Assist Strategy: ${state.lastAssistStrategy || ''}`,
+        `- Next Wake Time: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
+        `- Next Assist Attempt Time: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
+        `- Next Assist Strategy & Reason: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
+        `- Next Assist Planning Info: plannedTime=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
+        `- Next Assist modelDelay/guard/finalDelay: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} mins`,
+        `- Next Assist Guard Config: mode=${state.nextAssistGuardMode || 'none'}, liftMinutes=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
+        `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
+        `- Latest Run Trigger & Result: trigger=${state.lastRunTrigger || ''}, result=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
+        `- Latest Attempt Time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
+        `- Latest Attempt Trigger: ${lastAttempt.trigger || ''}`,
+        `- Latest Attempt Execution Result: ${translateReason(lastAttempt.resultReason || '', isEn)}`,
+        `- Latest Session Target Downloads: ${lastAttempt.targetSessionSize ?? ''}`,
+        `- Latest Checked Paper Delta: ${lastAttempt.checkedDelta ?? ''}`,
+        `- Latest Downloaded Paper Delta: ${lastAttempt.downloadedDelta ?? ''}`,
+        `- Latest List Scan Triggered: ${lastAttempt.listScanStarted === true ? 'Yes' : 'No'}`,
+        `- Latest Selected List Link: ${lastAttempt.pickedListUrl ? `[Link](${lastAttempt.pickedListUrl})` : ''}`,
+        `- Latest Random Eval Result: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, randomValue=${lastAttempt.randomValue ?? ''}`,
+        `- Assist Trend Coefficient: ${Number(state.trendFactor || 1).toFixed(2)}`,
+        `- Work Time Progress Ratio: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
+        `- Active Progress / Availability Factor: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
+        `- Active Wake Count (Expected / Actual): ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
+        `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
+        `- Rate Multiplier Coefficient: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
+        `- Target Assists This Hour: ${Number(state.hourTarget || 0)}`,
+        `- Risk Budget Used today / Limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- Target Assists Today: ${Number(state.todayTarget || 0)}`,
+        `- Details File: ${monthDir}/watcher-data-${date}.jsonl`,
+        `- Recent Session ID: ${state.lastSession?.id || ''}`,
+        `- Recent Session Target Size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
+        `- Recent Session Handled Count: ${Number(state.lastSession?.handledCount || 0)}`,
+        `- Recent Session Duration (sec): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
+        `- Trace Event Count: ${traces.length}`
       ] : [
         `- 已检查候选数: ${Number(daily.checked || 0)}`,
         `- 下载或排队数: ${Number(daily.downloaded || 0)}`,
@@ -417,15 +605,15 @@
         `- 当前应助策略: ${state.lastAssistStrategy || ''}`,
         `- 下一次唤醒时间: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- 下一次应助尝试时间: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
-        `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '')}`,
+        `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
         `- 下一次应助规划数据: 规划时间=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
         `- 下一次应助延迟模型/守卫/最终延迟: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} 分钟`,
         `- 下一次应助守卫配置: 守卫模式=${state.nextAssistGuardMode || 'none'}, 抬升时间=${Number(state.nextAssistGuardLiftMinutes || 0)}m, 权重=${Number(state.nextAssistGuardWeight || 0)}`,
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- 最近一次运行原因与结果: 触发方式=${state.lastRunTrigger || ''}, 结果=${translateReason(state.lastRunResult?.reason || '')}`,
+        `- 最近一次运行原因与结果: 触发方式=${state.lastRunTrigger || ''}, 结果=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
         `- 最近一次尝试时间: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- 最近一次尝试触发方式: ${lastAttempt.trigger || ''}`,
-        `- 最近一次尝试执行结果: ${translateReason(lastAttempt.resultReason || '')}`,
+        `- 最近一次尝试执行结果: ${translateReason(lastAttempt.resultReason || '', isEn)}`,
         `- 最近一次会话目标下载数: ${lastAttempt.targetSessionSize ?? ''}`,
         `- 最近一次检查文献增量: ${lastAttempt.checkedDelta ?? ''}`,
         `- 最近一次下载文献增量: ${lastAttempt.downloadedDelta ?? ''}`,
@@ -447,10 +635,10 @@
         `- 最近会话已处理数: ${Number(state.lastSession?.handledCount || 0)}`,
         `- 最近会话执行时长 (秒): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
         `- Trace 事件记录数: ${traces.length}`
-      ];
+      ]);
 
       const md = [
-        `# 科研通值守日报 ${date}`,
+        isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
         '## Summary',
         '',
@@ -458,11 +646,11 @@
         '',
         '## Skips And Decisions',
         '',
-        '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
+        isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
         '| --- | --- | --- | --- | --- | --- |',
         ...skipDecisionRows.map(row => formatMarkdownTableRow([
           formatBeijingTimeOnly(row.time),
-          row.trigger === 'alarm' ? '自动' : (row.trigger === 'manual' ? '手动' : row.trigger),
+          row.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (row.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : row.trigger),
           row.step,
           row.reason,
           row.detail,
@@ -471,18 +659,18 @@
         '',
         '## Recent Events',
         '',
-        '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
+        isEn ? '| Time | Trigger | Status | Reason | Journal | DOI | Detail |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
         '| --- | --- | --- | --- | --- | --- | --- |',
         ...logs.filter(log => log.status !== 'queued_upload' && log.status !== 'queued_download_only').slice(0, 12).map(log => {
           let detailVal = reportDetailValue(log);
           if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
-            detailVal = `[点击查看详情](${detailVal})`;
+            detailVal = isEn ? `[Click for details](${detailVal})` : `[点击查看详情](${detailVal})`;
           }
           return formatMarkdownTableRow([
             formatBeijingDateTime(log.time),
-            log.trigger === 'alarm' ? '自动' : (log.trigger === 'manual' ? '手动' : log.trigger),
-            translateStep(log.status || ''),
-            translateReason(log.reason || ''),
+            log.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (log.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : log.trigger),
+            translateStep(log.status || '', isEn),
+            translateReason(log.reason || '', isEn),
             log.journalName || '',
             log.doi || '',
             detailVal
