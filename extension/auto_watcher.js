@@ -309,7 +309,8 @@
     riskSnapshot,
     nextWorkDelayMinutes,
     targetStateSnapshot,
-    nextRateLimitClearDelayMinutes
+    nextRateLimitClearDelayMinutes,
+    calculateTargetState
   });
   const {
     waitForTabComplete,

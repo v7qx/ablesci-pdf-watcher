@@ -160,10 +160,7 @@
       const progress = opts?.watcherUseCalendarProgress ? calendarProgressDetails() : workTimeProgressDetails(opts);
       const availability = availabilitySnapshot(state, opts, progress);
       const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
-      const firstSyncRatio = firstSyncProgressRatio(state);
-      const expectedDone = firstSyncRatio > 0
-        ? effectiveTarget
-        : Math.round(monthlyTarget * Math.min(1, effectiveProgress));
+      const expectedDone = effectiveTarget;
       const lag = expectedDone - done;
 
       const key = todayKey();

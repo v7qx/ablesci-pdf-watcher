@@ -19,7 +19,8 @@
       quotaResetDelayMinutes,
       nextWorkDelayMinutes,
       targetStateSnapshot,
-      nextRateLimitClearDelayMinutes
+      nextRateLimitClearDelayMinutes,
+      calculateTargetState
     } = config;
 
     function quotaHoldPlan(opts, state = {}) {
@@ -297,6 +298,10 @@
       state.currentSchedulerMode = opts.watcherSchedulerMode;
       state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
       state.lastAlarmRefreshReason = reason;
+      if (calculateTargetState) {
+        const targetState = calculateTargetState(state, opts);
+        Object.assign(state, targetState);
+      }
       await saveWatcherState(state);
       await chromeApi.alarms.create(alarmName, { delayInMinutes: delay });
       const alarm = await chromeApi.alarms.get(alarmName).catch(() => null);
