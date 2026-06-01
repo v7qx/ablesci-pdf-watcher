@@ -5,19 +5,19 @@ importScripts(
   'common/common_storage.js',
   'common/common_logging.js',
   'common/common_worktime.js',
-  'background/background_publishers.js',
-  'background/background_port_utils.js',
-  'background/background_native.js',
-  'background/background_file_utils.js',
-  'background/background_diagnostics.js',
-  'background/background_upload_guards.js',
-  'background/background_download_agent.js',
-  'background/background_publisher_messages.js',
-  'background/background_upload_queue.js',
-  'background/background_upload_client.js',
-  'background/background_upload.js',
-  'background/background_task_snapshot.js',
-  'background/background_tab_registry.js'
+  'background/publishers.js',
+  'background/port_utils.js',
+  'background/native.js',
+  'background/file_utils.js',
+  'background/diagnostics.js',
+  'background/upload_guards.js',
+  'background/download_agent.js',
+  'background/publisher_messages.js',
+  'background/upload_queue.js',
+  'background/upload_client.js',
+  'background/upload.js',
+  'background/task_snapshot.js',
+  'background/tab_registry.js'
 );
 
 const {
