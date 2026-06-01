@@ -1,23 +1,23 @@
 'use strict';
 
 importScripts(
-  'common_config.js',
-  'common_storage.js',
-  'common_logging.js',
-  'common_worktime.js',
-  'background_publishers.js',
-  'background_port_utils.js',
-  'background_native.js',
-  'background_file_utils.js',
-  'background_diagnostics.js',
-  'background_upload_guards.js',
-  'background_download_agent.js',
-  'background_publisher_messages.js',
-  'background_upload_queue.js',
-  'background_upload_client.js',
-  'background_upload.js',
-  'background_task_snapshot.js',
-  'background_tab_registry.js'
+  'common/common_config.js',
+  'common/common_storage.js',
+  'common/common_logging.js',
+  'common/common_worktime.js',
+  'background/background_publishers.js',
+  'background/background_port_utils.js',
+  'background/background_native.js',
+  'background/background_file_utils.js',
+  'background/background_diagnostics.js',
+  'background/background_upload_guards.js',
+  'background/background_download_agent.js',
+  'background/background_publisher_messages.js',
+  'background/background_upload_queue.js',
+  'background/background_upload_client.js',
+  'background/background_upload.js',
+  'background/background_task_snapshot.js',
+  'background/background_tab_registry.js'
 );
 
 const {
@@ -337,7 +337,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'auto_watcher.js');
+  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

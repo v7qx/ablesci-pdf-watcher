@@ -139,7 +139,7 @@
 
       await chromeApi.scripting.executeScript({
         target: { tabId },
-        files: ['adapters.js', 'content_ablesci.js']
+        files: ['content/adapters.js', 'content/content_ablesci.js']
       });
       await new Promise(resolve => setTimeout(resolve, 500));
       return await sendDetailMessage(tabId);

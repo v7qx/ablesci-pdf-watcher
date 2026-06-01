@@ -48,7 +48,7 @@
         "https://ablesci.com/assist*"
       ],
       "js": [
-        "content_ablesci_navigation.js"
+        "content/content_ablesci_navigation.js"
       ],
       "run_at": "document_start"
     },
@@ -58,8 +58,8 @@
         "https://ablesci.com/assist/detail*"
       ],
       "js": [
-        "adapters.js",
-        "content_ablesci.js"
+        "content/adapters.js",
+        "content/content_ablesci.js"
       ],
       "run_at": "document_idle"
     },
@@ -73,7 +73,7 @@
         "https://pubs.rsc.org/*"
       ],
       "js": [
-        "content_publishers.js"
+        "content/content_publishers.js"
       ],
       "run_at": "document_idle"
     }
