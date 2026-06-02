@@ -12,8 +12,13 @@
       extractScienceDirectPii,
       isDoiHost,
       isNatureUrl,
+      isSpringerUrl,
       isRscUrl,
       isAipUrl,
+      isWileyUrl,
+      isAcsUrl,
+      isIeeeUrl,
+      isOxfordUrl,
       isIopUrl,
       isScienceDirectAssetPdfUrl,
       isExpectedPublisherPage,
@@ -35,11 +40,11 @@
       }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url) || isAipUrl(url) || isIopUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
         pending.articleUrl = url;
         pending.publisher = isScienceDirectUrl(url)
           ? 'sciencedirect'
-          : (isNatureUrl(url) ? 'nature' : (isRscUrl(url) ? 'rsc' : (isAipUrl(url) ? 'aip' : 'iop')));
+          : (isNatureUrl(url) ? 'nature' : (isSpringerUrl(url) ? 'springer' : (isRscUrl(url) ? 'rsc' : (isWileyUrl(url) ? 'wiley' : (isAipUrl(url) ? 'aip' : (isAcsUrl(url) ? 'acs' : (isIeeeUrl(url) ? 'ieee' : (isOxfordUrl(url) ? 'oxford' : 'iop'))))))));
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -177,6 +182,21 @@
         post(pending.port, 'progress', '已从 RSC 文章页取得 Download this article PDF 链接，正在打开下载链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_rsc_pdf', pdfUrl: msg.pdfUrl }))
+          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+      }
+      if (['springer', 'wiley', 'acs', 'ieee', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
+        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+          sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });
+          return false;
+        }
+        pending.lastNativePdfUrl = msg.pdfUrl;
+        if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
+        pending.publisher = msg.publisher;
+        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        post(pending.port, 'progress', `已从 ${msg.publisher} 文章页取得正文 PDF 链接，正在打开下载链接。`);
+        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
+          .then(() => sendResponse({ ok: true, action: `navigate_to_${msg.publisher}_pdf`, pdfUrl: msg.pdfUrl }))
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }

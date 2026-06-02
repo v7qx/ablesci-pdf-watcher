@@ -20,6 +20,10 @@
     return /:\/\/(?:www\.)?nature\.com\//i.test(String(url || ''));
   }
 
+  function isSpringerUrl(url) {
+    return /:\/\/link\.springer\.com\//i.test(String(url || ''));
+  }
+
   function isRscDirectPdfUrl(url) {
     return /:\/\/pubs\.rsc\.org\/.*\/articlepdf\//i.test(String(url || ''));
   }
@@ -33,10 +37,17 @@
     return /:\/\/(?:[^/]+\.)?(?:aip\.org|scitation\.org)\//i.test(s);
   }
 
+  function isWileyUrl(url) {
+    return /:\/\/onlinelibrary\.wiley\.com\//i.test(String(url || ''));
+  }
+
   function aipArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
     if (/\/article-pdf\//i.test(s)) {
       return s.replace(/\/article-pdf\//i, '/article/');
+    }
+    if (/\/doi\/(?:pdf|epdf)\//i.test(s)) {
+      return s.replace(/\/doi\/(?:pdf|epdf)\//i, '/doi/');
     }
     return '';
   }
@@ -54,11 +65,28 @@
     return '';
   }
 
+  function isAcsUrl(url) {
+    return /:\/\/pubs\.acs\.org\//i.test(String(url || ''));
+  }
+
+  function isIeeeUrl(url) {
+    return /:\/\/ieeexplore\.ieee\.org\//i.test(String(url || ''));
+  }
+
+  function isOxfordUrl(url) {
+    return /:\/\/academic\.oup\.com\//i.test(String(url || ''));
+  }
+
   function publisherForUrl(url) {
     if (isScienceDirectUrl(url)) return 'sciencedirect';
     if (isNatureUrl(url)) return 'nature';
+    if (isSpringerUrl(url)) return 'springer';
     if (isRscUrl(url)) return 'rsc';
+    if (isWileyUrl(url)) return 'wiley';
     if (isAipUrl(url)) return 'aip';
+    if (isAcsUrl(url)) return 'acs';
+    if (isIeeeUrl(url)) return 'ieee';
+    if (isOxfordUrl(url)) return 'oxford';
     if (isIopUrl(url)) return 'iop';
     return '';
   }
@@ -101,6 +129,24 @@
     return match ? match[1] : '';
   }
 
+  function springerArticleUrlFromPdfUrl(url) {
+    const s = String(url || '');
+    const match = s.match(/^https?:\/\/link\.springer\.com\/content\/pdf\/(10\.[^?#]+?)(?:\.pdf)?(?:[?#].*)?$/i);
+    return match ? `https://link.springer.com/article/${match[1]}` : '';
+  }
+
+  function wileyArticleUrlFromPdfUrl(url) {
+    const s = String(url || '');
+    const match = s.match(/^https?:\/\/onlinelibrary\.wiley\.com\/doi\/(?:pdf|epdf|pdfdirect)\/(10\.[^?#]+)(?:[?#].*)?$/i);
+    return match ? `https://onlinelibrary.wiley.com/doi/full/${match[1]}` : '';
+  }
+
+  function acsArticleUrlFromPdfUrl(url) {
+    const s = String(url || '');
+    const match = s.match(/^https?:\/\/pubs\.acs\.org\/doi\/(?:pdf|epdf)\/(10\.[^?#]+)(?:[?#].*)?$/i);
+    return match ? `https://pubs.acs.org/doi/full/${match[1]}` : '';
+  }
+
   function scienceDirectArticleUrlFromPdfUrl(url) {
     const pii = extractScienceDirectPii(url);
     if (!pii) return '';
@@ -109,12 +155,12 @@
 
   function publisherArticleUrlFromPdfUrl(url) {
     if (isDoiUrl(url)) return url;
-    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
+    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || springerArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || wileyArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || acsArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
   }
 
   function looksLikePdfDownloadUrl(url) {
     const value = String(url || '');
-    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/articlepdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf/i.test(value);
+    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stamp\/stamp\.jsp/i.test(value);
   }
 
   function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
@@ -145,8 +191,13 @@
     if (!publisher || !url) return false;
     if (publisher === 'sciencedirect') return isScienceDirectUrl(url) || isScienceDirectAssetPdfUrl(url);
     if (publisher === 'nature') return isNatureUrl(url);
+    if (publisher === 'springer') return isSpringerUrl(url);
     if (publisher === 'rsc') return isRscUrl(url);
+    if (publisher === 'wiley') return isWileyUrl(url);
     if (publisher === 'aip') return isAipUrl(url);
+    if (publisher === 'acs') return isAcsUrl(url);
+    if (publisher === 'ieee') return isIeeeUrl(url);
+    if (publisher === 'oxford') return isOxfordUrl(url);
     if (publisher === 'iop') return isIopUrl(url);
     return false;
   }
@@ -156,19 +207,27 @@
     extractScienceDirectPii,
     isDoiHost,
     isNatureUrl,
+    isSpringerUrl,
     isRscDirectPdfUrl,
     isRscUrl,
     isAipUrl,
+    isWileyUrl,
     aipArticleUrlFromPdfUrl,
     isIopUrl,
     iopArticleUrlFromPdfUrl,
+    isAcsUrl,
+    isIeeeUrl,
+    isOxfordUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,
     isDoiUrl,
     isScienceDirectRelatedHost,
     isScienceDirectAssetPdfUrl,
     natureArticleUrlFromPdfUrl,
+    springerArticleUrlFromPdfUrl,
     rscArticleUrlFromPdfUrl,
+    wileyArticleUrlFromPdfUrl,
+    acsArticleUrlFromPdfUrl,
     scienceDirectArticleUrlFromPdfUrl,
     publisherArticleUrlFromPdfUrl,
     looksLikePdfDownloadUrl,

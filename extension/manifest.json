@@ -30,13 +30,17 @@
     "https://sciencedirect.com/*",
     "https://*.elsevier.com/*",
     "https://elsevier.com/*",
-    "https://www.nature.com/*",
-    "https://nature.com/*",
     "https://pubs.rsc.org/*",
     "https://xlink.rsc.org/*",
     "https://link.springer.com/*",
     "https://pubs.acs.org/*",
-    "https://onlinelibrary.wiley.com/*"
+    "https://onlinelibrary.wiley.com/*",
+    "https://academic.oup.com/*",
+    "https://*.aip.org/*",
+    "https://*.scitation.org/*",
+    "https://aip.org/*",
+    "https://scitation.org/*",
+    "https://ieeexplore.ieee.org/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -68,23 +72,23 @@
         "https://www.sciencedirect.com/*",
         "https://sciencedirect.com/*",
         "https://linkinghub.elsevier.com/*",
-        "https://www.nature.com/*",
-        "https://nature.com/*",
         "https://pubs.rsc.org/*",
+        "https://link.springer.com/*",
+        "https://pubs.acs.org/*",
+        "https://onlinelibrary.wiley.com/*",
+        "https://academic.oup.com/*",
         "https://*.aip.org/*",
         "https://*.scitation.org/*",
         "https://aip.org/*",
         "https://scitation.org/*",
-        "https://*.iop.org/*",
-        "https://iop.org/*"
+        "https://ieeexplore.ieee.org/*"
       ],
       "js": [
         "content/publishers_common.js",
         "content/publisher_sciencedirect.js",
-        "content/publisher_nature.js",
+        "content/publisher_direct_pdf.js",
         "content/publisher_rsc.js",
         "content/publisher_aip.js",
-        "content/publisher_iop.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"

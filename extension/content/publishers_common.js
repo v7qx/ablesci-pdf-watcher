@@ -13,12 +13,32 @@
     return /(^|\.)nature\.com$/i.test(host);
   }
 
+  function isSpringer() {
+    return host === 'link.springer.com';
+  }
+
   function isRsc() {
     return /(^|\.)pubs\.rsc\.org$/i.test(host);
   }
 
+  function isWiley() {
+    return host === 'onlinelibrary.wiley.com';
+  }
+
   function isAip() {
     return /(^|\.)aip\.org$/i.test(host) || /(^|\.)scitation\.org$/i.test(host);
+  }
+
+  function isAcs() {
+    return host === 'pubs.acs.org';
+  }
+
+  function isIeee() {
+    return host === 'ieeexplore.ieee.org';
+  }
+
+  function isOxford() {
+    return host === 'academic.oup.com';
   }
 
   function isIop() {
@@ -28,8 +48,13 @@
   function currentPublisher() {
     if (isScienceDirect()) return 'sciencedirect';
     if (isNature()) return 'nature';
+    if (isSpringer()) return 'springer';
     if (isRsc()) return 'rsc';
+    if (isWiley()) return 'wiley';
     if (isAip()) return 'aip';
+    if (isAcs()) return 'acs';
+    if (isIeee()) return 'ieee';
+    if (isOxford()) return 'oxford';
     if (isIop()) return 'iop';
     return '';
   }
@@ -103,8 +128,13 @@
   window.AblesciPublisherCommon = {
     isScienceDirect,
     isNature,
+    isSpringer,
     isRsc,
+    isWiley,
     isAip,
+    isAcs,
+    isIeee,
+    isOxford,
     isIop,
     currentPublisher,
     canControlCurrentPublisherPage,

@@ -15,9 +15,14 @@
       isScienceDirectUrl,
       isDoiUrl,
       isNatureUrl,
+      isSpringerUrl,
       isRscDirectPdfUrl,
       isRscUrl,
       isAipUrl,
+      isWileyUrl,
+      isAcsUrl,
+      isIeeeUrl,
+      isOxfordUrl,
       isIopUrl,
       publisherForUrl,
       publisherArticleUrlFromPdfUrl,
@@ -380,6 +385,7 @@
         downloadTimeoutMs,
         signal
       };
+      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl);
 
       if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {
         const sdMode = opts.scienceDirectTabMode || 'silent_then_visible';
@@ -454,6 +460,10 @@
         post(port, 'progress', '通过 chrome.downloads 下载...');
         return await downloadByDownloadsAPI(pdfUrl, filenameRel, signal, { downloadTimeoutMs });
       } catch (err) {
+        if (canUsePublisherPageFallback) {
+          post(port, 'progress', '直接下载失败，尝试打开出版商文章页查找 PDF 按钮：' + (err.message || err));
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        }
         post(port, 'progress', '直接下载失败，尝试后台标签页：' + (err.message || err));
         return await downloadByBackgroundTab(pdfUrl, timeoutOptions);
       }

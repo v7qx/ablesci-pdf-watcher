@@ -84,6 +84,8 @@
     if (h.includes('pubs.acs.org')) return `https://pubs.acs.org/doi/pdf/${enc}`;
     if (h.includes('link.springer.com')) return `https://link.springer.com/content/pdf/${enc}.pdf`;
     if (h.includes('onlinelibrary.wiley.com')) return `https://onlinelibrary.wiley.com/doi/pdf/${enc}`;
+    if (h.includes('academic.oup.com')) return hintUrl;
+    if (h.includes('ieeexplore.ieee.org')) return hintUrl;
     if (h.includes('frontiersin.org') && /^10\.3389\//i.test(doi)) return `https://www.frontiersin.org/articles/${enc}/pdf`;
     if (h.includes('iopscience.iop.org')) return `https://iopscience.iop.org/article/${enc}/pdf`;
     if (h.includes('nature.com')) return hintUrl;

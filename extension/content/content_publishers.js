@@ -18,6 +18,10 @@
       window.AblesciNaturePublisher?.start();
       return;
     }
+    if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isIeee() || common.isOxford()) {
+      window.AblesciDirectPdfPublisher?.start();
+      return;
+    }
     if (common.isRsc()) {
       window.AblesciRscPublisher?.start();
       return;
