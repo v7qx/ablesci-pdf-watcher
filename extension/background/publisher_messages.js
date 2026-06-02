@@ -13,6 +13,7 @@
       isDoiHost,
       isNatureUrl,
       isRscUrl,
+      isAipUrl,
       isScienceDirectAssetPdfUrl,
       isExpectedPublisherPage,
       recordPublisherCfChallenge
@@ -33,11 +34,11 @@
       }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isRscUrl(url) || isAipUrl(url))) {
         pending.articleUrl = url;
         pending.publisher = isScienceDirectUrl(url)
           ? 'sciencedirect'
-          : (isNatureUrl(url) ? 'nature' : 'rsc');
+          : (isNatureUrl(url) ? 'nature' : (isRscUrl(url) ? 'rsc' : 'aip'));
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -175,6 +176,27 @@
         post(pending.port, 'progress', '已从 RSC 文章页取得 Download this article PDF 链接，正在打开下载链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_rsc_pdf', pdfUrl: msg.pdfUrl }))
+          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+      }
+      if (msg.publisher === 'aip' && msg.pdfUrl) {
+        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+          sendResponse({ ok: true, ignored: true, reason: 'same aip pdf url already handled' });
+          return false;
+        }
+        pending.lastNativePdfUrl = msg.pdfUrl;
+        if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
+        pending.publisher = 'aip';
+        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (msg.clicked) {
+          pending.armDownloadCapture?.(msg.pdfUrl);
+          post(pending.port, 'progress', '已在 AIP 文章页触发原生正文 PDF 下载按钮，继续监听浏览器下载。');
+          sendResponse({ ok: true, action: 'clicked_aip_pdf', pdfUrl: msg.pdfUrl });
+          return false;
+        }
+        post(pending.port, 'progress', '已从 AIP 文章页取得正文 PDF 下载链接，正在打开该链接。');
+        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
+          .then(() => sendResponse({ ok: true, action: 'navigate_to_aip_pdf', pdfUrl: msg.pdfUrl }))
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }

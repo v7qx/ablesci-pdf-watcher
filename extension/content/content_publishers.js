@@ -20,6 +20,10 @@
     }
     if (common.isRsc()) {
       window.AblesciRscPublisher?.start();
+      return;
+    }
+    if (common.isAip()) {
+      window.AblesciAipPublisher?.start();
     }
   });
 })();

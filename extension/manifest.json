@@ -70,13 +70,18 @@
         "https://linkinghub.elsevier.com/*",
         "https://www.nature.com/*",
         "https://nature.com/*",
-        "https://pubs.rsc.org/*"
+        "https://pubs.rsc.org/*",
+        "https://*.aip.org/*",
+        "https://*.scitation.org/*",
+        "https://aip.org/*",
+        "https://scitation.org/*"
       ],
       "js": [
         "content/publishers_common.js",
         "content/publisher_sciencedirect.js",
         "content/publisher_nature.js",
         "content/publisher_rsc.js",
+        "content/publisher_aip.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"

@@ -17,10 +17,15 @@
     return /(^|\.)pubs\.rsc\.org$/i.test(host);
   }
 
+  function isAip() {
+    return /(^|\.)aip\.org$/i.test(host) || /(^|\.)scitation\.org$/i.test(host);
+  }
+
   function currentPublisher() {
     if (isScienceDirect()) return 'sciencedirect';
     if (isNature()) return 'nature';
     if (isRsc()) return 'rsc';
+    if (isAip()) return 'aip';
     return '';
   }
 
@@ -94,6 +99,7 @@
     isScienceDirect,
     isNature,
     isRsc,
+    isAip,
     currentPublisher,
     canControlCurrentPublisherPage,
     decodeHtmlUrl,
