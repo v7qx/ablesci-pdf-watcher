@@ -1,6 +1,7 @@
 node_modules/
 __pycache__/
 docs/
+tools/zotero/
 dist/
 build/
 release/

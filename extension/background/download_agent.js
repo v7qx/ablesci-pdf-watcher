@@ -212,7 +212,7 @@
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
-        const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl);
+        const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl;
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();
 

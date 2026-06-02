@@ -48,8 +48,8 @@
 
   function iopArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
-    if (/\/article\/([^/]+\/[^/]+)\/pdf/i.test(s)) {
-      return s.replace(/\/pdf/i, '');
+    if (/\/article\/10\.\d{4,9}\/.+\/pdf(?:[?#].*)?$/i.test(s)) {
+      return s.replace(/\/pdf(?:[?#].*)?$/i, '');
     }
     return '';
   }
