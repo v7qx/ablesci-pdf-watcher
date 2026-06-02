@@ -223,7 +223,7 @@
 
   function setButtonTitle(btn, titleText = '') {
     if (!btn) return;
-    const statusTitle = String(titleText || btn.dataset.ablesciStatusTitle || defaultButtonTitle()).trim();
+    const statusTitle = String(titleText || defaultButtonTitle()).trim();
     btn.dataset.ablesciStatusTitle = statusTitle;
     btn.title = statusTitle;
   }
@@ -262,6 +262,17 @@
         !btn.classList.contains('warn') &&
         !btn.classList.contains('err')) {
       btn.textContent = idleButtonText();
+      setButtonTitle(btn, defaultButtonTitle());
+    } else if (btn.classList.contains('busy')) {
+      btn.textContent = getActiveLanguage() === 'en' ? 'Processing/Cancel' : '处理中/取消';
+    } else if (btn.classList.contains('ok')) {
+      btn.textContent = getActiveLanguage() === 'en' ? 'Upload Successful' : '上传成功';
+      setButtonTitle(btn, getActiveLanguage() === 'en' ? 'Upload Successful' : '上传成功');
+    } else if (btn.classList.contains('warn')) {
+      btn.textContent = getActiveLanguage() === 'en' ? 'Stopped' : '已停止';
+    } else if (btn.classList.contains('err')) {
+      btn.textContent = getActiveLanguage() === 'en' ? 'Upload Failed' : '上传失败';
+      setButtonTitle(btn, getActiveLanguage() === 'en' ? 'Upload Failed' : '上传失败');
     }
   }
 

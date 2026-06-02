@@ -214,6 +214,10 @@
         if (r.startsWith('失败：')) {
           return 'Failed: ' + translateReason(r.substring(3), isEn);
         }
+        const mAnomaly = r.match(/^短时间内连续出现\s*(\d+)\s*次无正文权限，且涉及\s*(\d+)\s*个期刊。已暂停值守，请检查代理、登录态或机构访问环境。$/);
+        if (mAnomaly) {
+          return `Consecutive no-access occurred ${mAnomaly[1]} times in a short period, involving ${mAnomaly[2]} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
+        }
         if (r.includes('当前出版商页面显示无正文订阅权限')) {
           return 'No full-text subscription access. Task skipped.';
         }

@@ -199,6 +199,65 @@
     };
   }
 
+  const CONFIG_SCHEMA = {
+    minAutoUploadMB: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
+      message: '最小体积必须大于或等于 0。'
+    },
+    maxAutoUploadMB: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
+      message: '最大体积必须大于或等于 0。'
+    },
+    watcherDailyLimit: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
+      message: '每日应助上限不能小于 0。'
+    },
+    watcherMinNonSdSeekingCount: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) >= 0,
+      message: '非 SD 最低求助量不能小于 0。'
+    },
+    watcherNoDownloadTimeoutMinutes: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+      message: '任务超时时间必须大于 0。'
+    },
+    watcherDownloadTimeoutMinutes: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+      message: '任务超时时间必须大于 0。'
+    },
+    watcherTaskTimeoutMinutes: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) > 0,
+      message: '任务超时时间必须大于 0。'
+    }
+  };
+
+  function validateOptions(opts) {
+    for (const [key, rule] of Object.entries(CONFIG_SCHEMA)) {
+      if (opts[key] !== undefined && !rule.validate(opts[key])) {
+        throw new Error(rule.message);
+      }
+    }
+
+    const minValue = Number(opts.minAutoUploadMB);
+    const maxValue = Number(opts.maxAutoUploadMB);
+    const unitFactor = unit => normalizeSizeUnit(unit) === 'KB' ? 1024 : 1024 * 1024;
+    const minBytes = Math.round(minValue * unitFactor(opts.minAutoUploadUnit));
+    const maxBytes = Math.round(maxValue * unitFactor(opts.maxAutoUploadUnit));
+    if (maxBytes > 0 && minBytes > maxBytes) {
+      throw new Error('最小体积不能大于最大体积。');
+    }
+
+    if (opts.watcherTaskTimeoutMinutes < opts.watcherNoDownloadTimeoutMinutes ||
+        opts.watcherTaskTimeoutMinutes < opts.watcherDownloadTimeoutMinutes) {
+      throw new Error('任务最长时间不能小于未触发下载或下载中超时时间。');
+    }
+
+    const rawUrls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls : String(opts.watcherListUrls || '').split(/\r?\n/);
+    const validUrls = rawUrls.map(s => String(s || '').trim()).filter(Boolean);
+    if (!validUrls.length) {
+      throw new Error('低频值守列表 URL 不能为空。');
+    }
+  }
+
   globalThis.AblesciWatcherConfig = {
     DEFAULT_OPTIONS,
     WATCHER_DAILY_LIMIT_MAX,
@@ -209,6 +268,7 @@
     normalizeWatcherIntervals,
     normalizeWatcherListUrls,
     parseJournalAccessRules,
-    normalizeOptions
+    normalizeOptions,
+    validateOptions
   };
 })();

@@ -89,6 +89,52 @@
     return String(value);
   }
 
+  class Logger {
+    constructor(prefix = '[Ablesci PDF Watcher]') {
+      this.prefix = prefix;
+    }
+
+    format(args) {
+      const helpers = {
+        normalizeText: (s) => String(s || '').replace(/\s+/g, ' ').trim()
+      };
+      return args.map(arg => {
+        if (typeof arg === 'string') {
+          return redactLocalPaths(arg);
+        }
+        if (arg instanceof Error) {
+          return redactLocalPaths(arg.stack || arg.message || String(arg));
+        }
+        if (typeof arg === 'object' && arg !== null) {
+          try {
+            return sanitizeTraceValue(arg, 0, 'normal', helpers);
+          } catch (_) {
+            return arg;
+          }
+        }
+        return arg;
+      });
+    }
+
+    log(...args) {
+      console.log(this.prefix, ...this.format(args));
+    }
+
+    warn(...args) {
+      console.warn(this.prefix, ...this.format(args));
+    }
+
+    error(...args) {
+      console.error(this.prefix, ...this.format(args));
+    }
+
+    debug(...args) {
+      console.debug(this.prefix, ...this.format(args));
+    }
+  }
+
+  const logger = new Logger();
+
   globalThis.AblesciWatcherLogging = {
     hostnameOf,
     urlHostPath,
@@ -96,6 +142,8 @@
     redactLocalPaths,
     compactTraceCandidate,
     sanitizeTraceUrl,
-    sanitizeTraceValue
+    sanitizeTraceValue,
+    Logger,
+    logger
   };
 })();

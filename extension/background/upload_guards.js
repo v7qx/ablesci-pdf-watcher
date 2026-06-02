@@ -5,8 +5,8 @@
   const ACCESS_ENV_ANOMALY_KEY = 'watcherAccessEnvironmentAnomaly';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const ACCESS_ENV_WINDOW_MS = 15 * 60 * 1000;
-  const ACCESS_ENV_THRESHOLD = 3;
-  const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 3;
+  const ACCESS_ENV_THRESHOLD = 10;
+  const ACCESS_ENV_DISTINCT_JOURNALS_THRESHOLD = 10;
   const ACCESS_ENV_NOTIFICATION_ICON_URL = 'icons/icon128.png';
 
   function createBackgroundUploadGuardsApi(deps = {}) {
@@ -90,7 +90,12 @@
         [ACCESS_ENV_ANOMALY_KEY]: nextState
       });
       await chromeApi.alarms.clear('ablesciAutoWatcher');
-      const message = `短时间内连续出现 ${recent.length} 次无正文权限，且涉及 ${distinctJournals.size} 个期刊。已暂停值守，请检查代理、登录态或机构访问环境。`;
+      const opts = typeof getOptions === 'function' ? await getOptions() : {};
+      const lang = opts.watcherLanguage || 'auto';
+      const isEn = (lang === 'en') || (lang === 'auto' && !(navigator.language || '').toLowerCase().startsWith('zh'));
+      const message = isEn
+        ? `Consecutive no-access occurred ${recent.length} times in a short period, involving ${distinctJournals.size} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`
+        : `短时间内连续出现 ${recent.length} 次无正文权限，且涉及 ${distinctJournals.size} 个期刊。已暂停值守，请检查代理、登录态或机构访问环境。`;
       await notifyAccessEnvironmentAnomaly(message);
       return {
         paused: true,
@@ -102,17 +107,11 @@
     }
 
     async function recordAccessEnvironmentSuccess(payload) {
-      const stored = await chromeApi.storage.local.get(ACCESS_ENV_ANOMALY_KEY);
-      const current = stored[ACCESS_ENV_ANOMALY_KEY] || {};
-      const journalKey = payloadJournalKey(payload);
       const publisherKey = payloadPublisherKey(payload);
-      const recent = Array.isArray(current.events)
-        ? current.events.filter(item => item && item.journal !== journalKey && item.publisher !== publisherKey)
-        : [];
       await chromeApi.storage.local.set({
         [ACCESS_ENV_ANOMALY_KEY]: {
           updatedAt: new Date().toISOString(),
-          events: recent.slice(-10),
+          events: [],
           lastPublisher: publisherKey,
           paused: false
         }

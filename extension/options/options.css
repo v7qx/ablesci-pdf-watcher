@@ -117,8 +117,7 @@ body {
 }
 
 #watcherSpeedMode {
-  text-align: right;
-  text-align-last: right;
+  max-width: 240px;
 }
 
 .watcher-action-row {
@@ -132,8 +131,8 @@ body {
 }
 
 .watcher-status-panel #watcherRunStatus {
-  display: block;
-  width: 100%;
+  display: inline-block;
+  width: auto;
   max-width: 100%;
   border-radius: 6px;
   padding: 8px 12px;

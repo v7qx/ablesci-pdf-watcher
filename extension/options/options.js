@@ -9,7 +9,8 @@ const {
   normalizeWatcherIntervals,
   normalizeWatcherListUrls,
   normalizeOptions,
-  sanitizePathPart
+  sanitizePathPart,
+  validateOptions
 } = globalThis.AblesciWatcherConfig;
 const {
   OPTION_IDS: ids,
@@ -237,7 +238,33 @@ const TEXT_MAP = {
   "与下次应助保持同一时间口径，便于复制和核对。": "Matches the time scale of the next run for easy comparison and copying.",
   "距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。": "Time remaining before the next auto assist run.",
   "当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。": "Current daily assist limit. Shows total limit only.",
-  "今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。": "Assists processed today. Uses download counts matching daily limit criteria."
+  "今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。": "Assists processed today. Uses download counts matching daily limit criteria.",
+
+  // Watcher outcome translations
+  "candidate_handled": "Candidate assist processed successfully",
+  "session_candidates_handled": "All session candidates processed successfully",
+  "disabled": "Auto watcher is disabled",
+  "already_running": "Watcher is already running",
+  "active_task": "Another assist task is currently active",
+  "outside_work_schedule": "Outside configured working hours",
+  "assist_not_due": "Next check is not due yet",
+  "daily_limit": "Reached daily assist limit",
+  "session_size_zero": "Target session size is zero",
+  "cf_challenge": "Cloudflare challenge or verification page encountered",
+  "session_target_reached": "Session target reached",
+  "no_candidate": "No waiting candidates found",
+  "upload_failed_stop_run": "Upload failed, run terminated",
+  "manual_run_preserve_existing_schedule": "Manual check trigger preserving existing schedule",
+
+  // Options validation errors translations
+  "最小体积必须大于或等于 0。": "Min size must be greater than or equal to 0.",
+  "最大体积必须大于或等于 0。": "Max size must be greater than or equal to 0.",
+  "最小体积不能大于最大体积。": "Min size cannot be greater than max size.",
+  "每日应助上限不能小于 0。": "Daily assist limit cannot be less than 0.",
+  "非 SD 最低求助量不能小于 0。": "Min non-SD requests cannot be less than 0.",
+  "任务超时时间必须大于 0。": "Task timeout must be greater than 0.",
+  "任务最长时间不能小于未触发下载或下载中超时时间。": "Max task time cannot be less than download or idle timeouts.",
+  "低频值守列表 URL 不能为空。": "List URLs cannot be empty."
 };
 
 function getActualLanguage(langOption) {
@@ -327,6 +354,24 @@ function t(msg) {
     if (trimmed === 'quant / fixed_interval') return '固定间隔调度';
     if (trimmed === 'quant / quant_rules (值守已关闭)') return '月目标自适应调度 (值守已关闭)';
     if (trimmed === 'quant / fixed_interval (值守已关闭)') return '固定间隔调度 (值守已关闭)';
+
+    const zhMap = {
+      "candidate_handled": "候选求助处理完成",
+      "session_candidates_handled": "本次值守所有候选处理完成",
+      "disabled": "低频值守未启用",
+      "already_running": "值守检查已在运行中",
+      "active_task": "存在其他活动中的应助任务",
+      "outside_work_schedule": "当前处于非工作时间段",
+      "assist_not_due": "未到下一次检查时间点",
+      "daily_limit": "已达到今日应助上限",
+      "session_size_zero": "本次调度预计应助数为 0",
+      "cf_challenge": "遇到人机验证/验证码，已跳过",
+      "session_target_reached": "已达到本次应助目标数",
+      "no_candidate": "未在列表页发现待应助的候选",
+      "upload_failed_stop_run": "上传失败，检查中止",
+      "manual_run_preserve_existing_schedule": "手动触发并保留现有日程调度"
+    };
+    if (zhMap[trimmed]) return zhMap[trimmed];
   }
   return msg;
 }
@@ -374,26 +419,7 @@ function setText(id, value) {
   }
 }
 
-function validateOptions(opts) {
-  const minValue = Number(opts.minAutoUploadMB);
-  const maxValue = Number(opts.maxAutoUploadMB);
-  if (!Number.isFinite(minValue) || minValue < 0) throw new Error('最小体积必须大于或等于 0。');
-  if (!Number.isFinite(maxValue) || maxValue < 0) throw new Error('最大体积必须大于或等于 0。');
-  const unitFactor = unit => normalizeSizeUnit(unit) === 'KB' ? 1024 : 1024 * 1024;
-  const minBytes = Math.round(minValue * unitFactor(opts.minAutoUploadUnit));
-  const maxBytes = Math.round(maxValue * unitFactor(opts.maxAutoUploadUnit));
-  if (maxBytes > 0 && minBytes > maxBytes) throw new Error('最小体积不能大于最大体积。');
-
-  if (opts.watcherDailyLimit < 0) throw new Error('每日应助上限不能小于 0。');
-  if (opts.watcherMinNonSdSeekingCount < 0) throw new Error('非 SD 最低求助量不能小于 0。');
-  if (opts.watcherNoDownloadTimeoutMinutes <= 0 || opts.watcherDownloadTimeoutMinutes <= 0 || opts.watcherTaskTimeoutMinutes <= 0) {
-    throw new Error('任务超时时间必须大于 0。');
-  }
-  if (opts.watcherTaskTimeoutMinutes < opts.watcherNoDownloadTimeoutMinutes || opts.watcherTaskTimeoutMinutes < opts.watcherDownloadTimeoutMinutes) {
-    throw new Error('任务最长时间不能小于未触发下载或下载中超时时间。');
-  }
-  if (!opts.watcherListUrls.length) throw new Error('低频值守列表 URL 不能为空。');
-}
+// validateOptions is imported from globalThis.AblesciWatcherConfig
 
 async function save(saveOptions = {}) {
   const opts = await loadOptions();
