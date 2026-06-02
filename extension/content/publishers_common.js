@@ -21,11 +21,16 @@
     return /(^|\.)aip\.org$/i.test(host) || /(^|\.)scitation\.org$/i.test(host);
   }
 
+  function isIop() {
+    return /(^|\.)iop\.org$/i.test(host);
+  }
+
   function currentPublisher() {
     if (isScienceDirect()) return 'sciencedirect';
     if (isNature()) return 'nature';
     if (isRsc()) return 'rsc';
     if (isAip()) return 'aip';
+    if (isIop()) return 'iop';
     return '';
   }
 
@@ -100,6 +105,7 @@
     isNature,
     isRsc,
     isAip,
+    isIop,
     currentPublisher,
     canControlCurrentPublisherPage,
     decodeHtmlUrl,

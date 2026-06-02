@@ -74,7 +74,9 @@
         "https://*.aip.org/*",
         "https://*.scitation.org/*",
         "https://aip.org/*",
-        "https://scitation.org/*"
+        "https://scitation.org/*",
+        "https://*.iop.org/*",
+        "https://iop.org/*"
       ],
       "js": [
         "content/publishers_common.js",
@@ -82,6 +84,7 @@
         "content/publisher_nature.js",
         "content/publisher_rsc.js",
         "content/publisher_aip.js",
+        "content/publisher_iop.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"

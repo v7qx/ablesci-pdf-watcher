@@ -18,6 +18,7 @@
       isRscDirectPdfUrl,
       isRscUrl,
       isAipUrl,
+      isIopUrl,
       publisherForUrl,
       publisherArticleUrlFromPdfUrl,
       looksLikePdfDownloadUrl,
@@ -410,6 +411,15 @@
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'AIP 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+      }
+
+      if (isIopUrl(pdfUrl)) {
+        if (mode === 'publisher_tab') {
+          post(port, 'progress', 'IOP 使用可见文章页原生 PDF 下载模式。');
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
+        }
+        post(port, 'progress', 'IOP 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
         return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 

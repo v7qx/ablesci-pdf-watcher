@@ -24,6 +24,10 @@
     }
     if (common.isAip()) {
       window.AblesciAipPublisher?.start();
+      return;
+    }
+    if (common.isIop()) {
+      window.AblesciIopPublisher?.start();
     }
   });
 })();

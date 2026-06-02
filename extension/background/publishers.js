@@ -41,11 +41,25 @@
     return '';
   }
 
+  function isIopUrl(url) {
+    const s = String(url || '');
+    return /:\/\/(?:[^/]+\.)?iop\.org\//i.test(s);
+  }
+
+  function iopArticleUrlFromPdfUrl(url) {
+    const s = String(url || '');
+    if (/\/article\/([^/]+\/[^/]+)\/pdf/i.test(s)) {
+      return s.replace(/\/pdf/i, '');
+    }
+    return '';
+  }
+
   function publisherForUrl(url) {
     if (isScienceDirectUrl(url)) return 'sciencedirect';
     if (isNatureUrl(url)) return 'nature';
     if (isRscUrl(url)) return 'rsc';
     if (isAipUrl(url)) return 'aip';
+    if (isIopUrl(url)) return 'iop';
     return '';
   }
 
@@ -95,7 +109,7 @@
 
   function publisherArticleUrlFromPdfUrl(url) {
     if (isDoiUrl(url)) return url;
-    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || '';
+    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
   }
 
   function looksLikePdfDownloadUrl(url) {
@@ -133,6 +147,7 @@
     if (publisher === 'nature') return isNatureUrl(url);
     if (publisher === 'rsc') return isRscUrl(url);
     if (publisher === 'aip') return isAipUrl(url);
+    if (publisher === 'iop') return isIopUrl(url);
     return false;
   }
 
@@ -145,6 +160,8 @@
     isRscUrl,
     isAipUrl,
     aipArticleUrlFromPdfUrl,
+    isIopUrl,
+    iopArticleUrlFromPdfUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,
     isDoiUrl,
