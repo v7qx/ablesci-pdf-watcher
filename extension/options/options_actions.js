@@ -90,6 +90,11 @@
     }
 
     async function copyDiagnostic() {
+      const opts = await loadOptions();
+      if (opts.diagnosticsEnabled !== true) {
+        showPill('diagnosticStatus', '诊断未开启', true);
+        return;
+      }
       const stored = await chromeApi.storage.local.get(lastDiagnosticKey);
       const diagnostic = stored[lastDiagnosticKey];
       if (!diagnostic) {
@@ -97,7 +102,8 @@
         return;
       }
 
-      const text = JSON.stringify(diagnostic, null, 2);
+      const clean = JSON.parse(JSON.stringify(diagnostic, (key, value) => key === '_signature' ? undefined : value));
+      const text = JSON.stringify(clean, null, 2);
       try {
         const ok = await copyTextToClipboard(text);
         if (!ok) throw new Error('copy_failed');

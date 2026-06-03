@@ -32,6 +32,25 @@
       };
     }
 
+    function traceSignature(entry = {}) {
+      return [
+        entry.step || '',
+        entry.publisher || '',
+        entry.reason || '',
+        entry.source || '',
+        entry.downloadId || '',
+        entry.expectedHost || '',
+        entry.sourceUrl || '',
+        entry.itemUrl || '',
+        entry.finalUrl || '',
+        entry.pdfUrl || ''
+      ].map(value => String(value || '')).join('|');
+    }
+
+    function diagnosticEnabled(opts) {
+      return opts?.diagnosticsEnabled === true;
+    }
+
     function classifyJournalAccessFailureReason(err) {
       const raw = String(err?.message || err || '');
       if (!raw) return '';
@@ -43,8 +62,9 @@
       if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
       if (/publisher.*challenge|出版商.*验证|Cloudflare|Just a moment|captcha|security check/i.test(raw)) return 'cf_challenge';
       if (/明确返回无正文订阅权限|does not subscribe to this content on ScienceDirect/i.test(raw)) return 'explicit_no_subscription';
-      if (/ScienceDirect 当前页面没有正文订阅权限|当前页面没有正文订阅权限/i.test(raw)) return 'no_access';
+      if (/ScienceDirect 当前页面没有正文订阅权限|当前页面没有正文订阅权限|页面明确显示无正文访问权限|无正文访问权限|无访问权限/i.test(raw)) return 'no_access';
       if (/等待 ScienceDirect 登录\/机构访问超时|需要登录或机构访问|ScienceDirect 需要登录/i.test(raw)) return 'login_required';
+      if (/暂不支持；当前规则只处理 \/article\/ 期刊文献|当前出版商页面类型不支持|Springer .*页面暂不支持|publisher unsupported/i.test(raw)) return 'publisher_unsupported';
       if (/未触发 PDF 下载超时|等待出版商页面触发 PDF 下载超时|后台标签页没有触发 PDF 下载/i.test(raw)) return 'download_not_triggered_timeout';
       if (/下载中超时|下载超时/i.test(raw)) return 'download_timeout';
       if (/任务总超时|单任务最长时间/i.test(raw)) return 'task_timeout';
@@ -95,9 +115,46 @@
     }
 
     async function saveDiagnostic(diag) {
+      try {
+        const opts = await getOptions();
+        if (!diagnosticEnabled(opts)) return;
+      } catch (_) {
+        return;
+      }
       const clean = JSON.parse(JSON.stringify(diag || {}));
       await chromeApi.storage.local.set({ [lastDiagnosticKey]: clean });
       console.debug('[Ablesci PDF Watcher Diagnostic]', clean);
+    }
+
+    async function appendDiagnosticTrace(payload, entry) {
+      try {
+        const opts = await getOptions();
+        if (!diagnosticEnabled(opts)) return;
+        const stored = await chromeApi.storage.local.get(lastDiagnosticKey);
+        const previous = stored[lastDiagnosticKey] || {};
+        const currentAssistId = maskId(payload?.assistId);
+        const base = previous && previous.assistId === currentAssistId
+          ? { ...previous }
+          : makeDiagnosticBase(payload, opts);
+        const trace = Array.isArray(base.publisherTrace) ? base.publisherTrace.slice(-29) : [];
+        const next = {
+          time: new Date().toISOString(),
+          ...(entry || {})
+        };
+        const last = trace[trace.length - 1];
+        if (last && last._signature && last._signature === traceSignature(next)) {
+          last.time = next.time;
+          last.repeatCount = Number(last.repeatCount || 1) + 1;
+        } else {
+          trace.push({
+            ...next,
+            _signature: traceSignature(next)
+          });
+        }
+        await saveDiagnostic({ ...base, publisherTrace: trace });
+      } catch (err) {
+        console.warn('[Ablesci PDF Watcher] append diagnostic trace failed', err);
+      }
     }
 
     async function saveErrorDiagnostic(payload, err) {
@@ -191,6 +248,7 @@
       formatTimeoutDoneMessage,
       sanitizeDownloadItem,
       saveDiagnostic,
+      appendDiagnosticTrace,
       saveErrorDiagnostic,
       isNonPdfAccessPageError,
       isHtmlDownloadItem,

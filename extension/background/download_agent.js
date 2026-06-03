@@ -31,7 +31,8 @@
       registerPublisherTab,
       unregisterPublisherTab,
       makeDownloadFilename,
-      isHtmlDownloadItem
+      isHtmlDownloadItem,
+      appendDiagnosticTrace
     } = deps;
 
     function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
@@ -218,8 +219,40 @@
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
         const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl;
+        const payloadSummary = {
+          assistId: options.payload?.assistId || '',
+          doi: options.payload?.doi || '',
+          journalName: options.payload?.journalName || '',
+          title: options.payload?.title || options.payload?.suggestedFilename || '',
+          pageUrl: options.payload?.pageUrl || '',
+          pdfUrl: options.payload?.pdfUrl || pdfUrl,
+          pdfUrlSource: options.payload?.pdfUrlSource || ''
+        };
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();
+
+        function traceUrl(url) {
+          const raw = String(url || '');
+          if (!raw) return '';
+          try {
+            const parsed = new URL(raw);
+            const value = `${parsed.hostname}${parsed.pathname}`;
+            return value.length > 220 ? `${value.slice(0, 220)}...` : value;
+          } catch (_) {
+            const value = raw.replace(/^https?:\/\//i, '').split(/[?#]/)[0];
+            return value.length > 220 ? `${value.slice(0, 220)}...` : value;
+          }
+        }
+
+        function tracePublisherStep(step, details = {}) {
+          appendDiagnosticTrace?.(payloadSummary, {
+            ...details,
+            step,
+            publisher: publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || '',
+            articleUrl: traceUrl(articleUrl),
+            pdfUrl: traceUrl(pdfUrl)
+          });
+        }
 
         function cleanup(closeTab = true) {
           if (noDownloadTimer) clearTimeout(noDownloadTimer);
@@ -275,12 +308,33 @@
 
         function acceptCandidate(item, source) {
           if (settled || !item || seenIds.has(item.id)) return;
-          if (!downloadArmed) return;
-          if (isHtmlDownloadItem(item)) return;
-          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) return;
-          if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) return;
+          if (!downloadArmed) {
+            tracePublisherStep('download-candidate-ignored', { source, reason: 'download_not_armed', downloadId: item.id });
+            return;
+          }
+          if (isHtmlDownloadItem(item)) {
+            tracePublisherStep('download-candidate-ignored', { source, reason: 'html_download_item', downloadId: item.id });
+            return;
+          }
+          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
+            tracePublisherStep('download-candidate-ignored', { source, reason: 'tab_mismatch', downloadId: item.id, itemTabId: item.tabId, publisherTabId: tabId });
+            return;
+          }
+          if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) {
+            tracePublisherStep('download-candidate-ignored', {
+              source,
+              reason: 'url_mismatch',
+              downloadId: item.id,
+              expectedHost,
+              sourceUrl: traceUrl(sourceUrlForMatching),
+              itemUrl: traceUrl(item.url),
+              finalUrl: traceUrl(item.finalUrl)
+            });
+            return;
+          }
           seenIds.add(item.id);
           downloadId = item.id;
+          tracePublisherStep('download-candidate-accepted', { source, downloadId: item.id });
           if (noDownloadTimer) {
             clearTimeout(noDownloadTimer);
             noDownloadTimer = null;
@@ -318,6 +372,7 @@
             signal.addEventListener('abort', abortListener, { once: true });
           }
           chromeApi.downloads.onCreated.addListener(onCreated);
+          tracePublisherStep('publisher-tab-open', { active, revealAfterMs, downloadArmed, expectedHost });
           const tab = await chromeApi.tabs.create({ url: articleUrl, active });
           tabId = tab.id;
           pendingPublisherTabs.set(tabId, {
@@ -328,12 +383,7 @@
             finishError,
             revealPublisherTab,
 
-            payloadSummary: {
-              assistId: options.payload?.assistId || '',
-              doi: options.payload?.doi || '',
-              journalName: options.payload?.journalName || '',
-              title: options.payload?.title || options.payload?.suggestedFilename || ''
-            },
+            payloadSummary,
             publisher: publisherForUrl(articleUrl),
             lastNativePdfUrl: '',
             extendNoDownloadTimeout(timeoutMs, message) {
@@ -345,11 +395,20 @@
                 expectedHost = hostnameOf(sourceUrlForMatching);
               }
               downloadArmed = true;
+              tracePublisherStep('download-capture-armed', {
+                expectedHost,
+                sourceUrl: traceUrl(sourceUrlForMatching)
+              });
             },
             setExpectedDownloadUrl(url) {
               sourceUrlForMatching = url || sourceUrlForMatching;
               expectedHost = hostnameOf(sourceUrlForMatching);
               if (looksLikePdfDownloadUrl(sourceUrlForMatching)) downloadArmed = true;
+              tracePublisherStep('expected-download-url-set', {
+                downloadArmed,
+                expectedHost,
+                sourceUrl: traceUrl(sourceUrlForMatching)
+              });
             }
           });
           registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
@@ -387,6 +446,12 @@
       };
       const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl);
 
+      function isUnsupportedSpringerBookPdfUrl(url) {
+        const s = String(url || '');
+        return /:\/\/link\.springer\.com\/content\/pdf\/10\.[^/]+\/978-[^?#]+(?:\.pdf)?(?:[?#].*)?$/i.test(s) ||
+          /:\/\/link\.springer\.com\/content\/pdf\/10\.[^?#]+_[^/?#]+(?:\.pdf)?(?:[?#].*)?$/i.test(s);
+      }
+
       if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {
         const sdMode = opts.scienceDirectTabMode || 'silent_then_visible';
         const label = isDoiUrl(pdfUrl) ? 'DOI 跳转' : 'ScienceDirect';
@@ -408,6 +473,18 @@
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'Nature 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+      }
+
+      if (isSpringerUrl(pdfUrl)) {
+        if (isUnsupportedSpringerBookPdfUrl(pdfUrl)) {
+          throw new Error('Springer 书籍或章节 PDF 暂不支持；当前规则只处理 /article/ 期刊文献。');
+        }
+        if (mode === 'publisher_tab') {
+          post(port, 'progress', 'Springer 使用可见文章页校验模式；仅支持 /article/ 期刊文献。');
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
+        }
+        post(port, 'progress', 'Springer 使用后台文章页校验模式；仅支持 /article/ 期刊文献，不直接下载书籍或章节链接。');
         return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 

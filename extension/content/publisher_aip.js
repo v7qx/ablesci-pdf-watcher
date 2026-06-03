@@ -40,6 +40,16 @@
     common.sendPublisherMessage('aip', payload);
   }
 
+  function hasAipAccessDeniedPage() {
+    const accessMarker = document.querySelector('#UserHasAccess[data-userhasaccess="False"]');
+    if (accessMarker) return true;
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    if (/You do not currently have access to this content/i.test(text)) return true;
+    if (/Pay-Per-View Access/i.test(text)) return true;
+    if (document.querySelector('.article-top-info-user-restricted-options, .paywall')) return true;
+    return false;
+  }
+
   function stopObserver() {
     if (observer) {
       observer.disconnect();
@@ -67,6 +77,17 @@
           source: 'aip_challenge_page'
         });
       }
+      return;
+    }
+    if (hasAipAccessDeniedPage()) {
+      pdfTriggered = true;
+      sendAipMessage({
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'AIP 页面明确显示无正文访问权限，已停止本次下载。',
+        source: 'aip_access_denied_page'
+      });
+      stopObserver();
       return;
     }
     const found = findAipArticlePdfLink();

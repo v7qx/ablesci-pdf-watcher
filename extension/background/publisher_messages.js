@@ -22,8 +22,36 @@
       isIopUrl,
       isScienceDirectAssetPdfUrl,
       isExpectedPublisherPage,
-      recordPublisherCfChallenge
+      recordPublisherCfChallenge,
+      appendDiagnosticTrace
     } = deps;
+
+    function shortUrl(url) {
+      return String(url || '').replace(/^https?:\/\//i, '');
+    }
+
+    function tracePublisherStep(pending, step, details = {}) {
+      appendDiagnosticTrace?.(pending.payloadSummary || {}, {
+        ...details,
+        step,
+        publisher: pending.publisher || details.publisher || '',
+        articleUrl: shortUrl(details.articleUrl || pending.articleUrl || ''),
+        pdfUrl: shortUrl(details.pdfUrl || pending.lastNativePdfUrl || pending.pdfUrl || '')
+      });
+    }
+
+    function markPublisherChallengePassed(pending) {
+      if (!pending?.publisherChallengeSeen) return;
+      pending.publisherChallengePassed = true;
+    }
+
+    function schedulePublisherChallengeReveal(pending, token, delayMs = 10000) {
+      setTimeout(() => {
+        if (!pending || pending.publisherChallengeToken !== token) return;
+        if (pending.publisherChallengePassed || pending.lastNativePdfUrl) return;
+        pending.revealPublisherTab?.('检测到出版商验证页，后台等待 10 秒后仍未自动通过，已切到前台；请完成验证。');
+      }, delayMs);
+    }
 
     function handlePublisherTabUpdated(tabId, changeInfo, tab) {
       const pending = pendingPublisherTabs.get(tabId);
@@ -82,6 +110,19 @@
         return false;
       }
 
+      if (!msg.publisherChallenge) markPublisherChallengePassed(pending);
+
+      if (msg.publisherDiagnostic) {
+        tracePublisherStep(pending, 'publisher-page-diagnostic', {
+          publisher: msg.publisher || pending.publisher || '',
+          articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+          source: msg.source || '',
+          diagnostics: msg.diagnostics || null
+        });
+        sendResponse({ ok: true, action: 'publisher_diagnostic_recorded' });
+        return false;
+      }
+
       if (msg.publisher === 'sciencedirect' && msg.noSubscription) {
         pending.finishError(new Error('ScienceDirect 明确返回无正文订阅权限（does not subscribe to this content on ScienceDirect）。'));
         sendResponse({ ok: true, action: 'science_direct_no_subscription' });
@@ -93,9 +134,11 @@
           return false;
         }
         pending.publisherChallengeSeen = true;
+        pending.publisherChallengePassed = false;
+        pending.publisherChallengeToken = Date.now();
+        const challengeToken = pending.publisherChallengeToken;
         recordPublisherCfChallenge(msg.pageUrl || pending.articleUrl || pending.pdfUrl || '')
           .then(result => {
-            pending.revealPublisherTab?.('检测到出版商验证页，已尝试恢复浏览器窗口并切到前台；请完成验证。');
             if (result.paused) {
               pending.finishError(new Error(`检测到出版商验证页，连续达到阈值 ${result.threshold}，已暂停低频值守。`));
               return;
@@ -104,15 +147,17 @@
               5 * 60 * 1000,
               '等待出版商验证超时；请完成验证后重新触发，或检查浏览器是否被最小化。'
             );
-            post(pending.port, 'progress', `检测到出版商验证页，已计入第 ${result.streak} 次验证并延长等待。`);
+            post(pending.port, 'progress', `检测到出版商验证页，已计入第 ${result.streak} 次验证；先在后台等待 10 秒，若未自动通过再切到前台。`);
+            schedulePublisherChallengeReveal(pending, challengeToken, 10000);
           })
           .catch(err => {
             console.warn('[Ablesci PDF Watcher] record publisher challenge failed', err);
-            pending.revealPublisherTab?.('检测到出版商验证页，已切到前台；请完成验证。');
             pending.extendNoDownloadTimeout?.(
               5 * 60 * 1000,
               '等待出版商验证超时；请完成验证后重新触发，或检查浏览器是否被最小化。'
             );
+            post(pending.port, 'progress', '检测到出版商验证页；先在后台等待 10 秒，若未自动通过再切到前台。');
+            schedulePublisherChallengeReveal(pending, challengeToken, 10000);
           });
         sendResponse({ ok: true, action: 'publisher_challenge_detected' });
         return false;
@@ -120,6 +165,18 @@
       if (msg.publisher === 'sciencedirect' && msg.error) {
         pending.finishError(new Error(msg.error));
         sendResponse({ ok: true, action: 'science_direct_error' });
+        return false;
+      }
+      if (msg.accessDenied || msg.unsupported) {
+        const reason = msg.error || (msg.accessDenied ? '出版商页面明确显示无正文访问权限。' : '当前出版商页面类型不支持。');
+        tracePublisherStep(pending, msg.accessDenied ? 'publisher-access-denied' : 'publisher-unsupported', {
+          publisher: msg.publisher || pending.publisher || '',
+          articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+          source: msg.source || '',
+          error: reason
+        });
+        pending.finishError(new Error(reason));
+        sendResponse({ ok: true, action: msg.accessDenied ? 'publisher_access_denied' : 'publisher_unsupported' });
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.loginRequired) {
@@ -139,6 +196,7 @@
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: 'same native pdf url already handled' });
           return false;
@@ -152,6 +210,7 @@
         return true;
       }
       if (msg.publisher === 'nature' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: 'same native pdf url already handled' });
           return false;
@@ -171,6 +230,7 @@
         return true;
       }
       if (msg.publisher === 'rsc' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: 'same rsc pdf url already handled' });
           return false;
@@ -186,6 +246,7 @@
         return true;
       }
       if (['springer', 'wiley', 'acs', 'ieee', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });
           return false;
@@ -194,6 +255,14 @@
         if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
         pending.publisher = msg.publisher;
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        pending.armDownloadCapture?.(msg.pdfUrl);
+        tracePublisherStep(pending, 'publisher-pdf-url-received', {
+          publisher: msg.publisher,
+          articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+          pdfUrl: msg.pdfUrl,
+          source: msg.source || '',
+          diagnostics: msg.diagnostics || null
+        });
         post(pending.port, 'progress', `已从 ${msg.publisher} 文章页取得正文 PDF 链接，正在打开下载链接。`);
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: `navigate_to_${msg.publisher}_pdf`, pdfUrl: msg.pdfUrl }))
@@ -201,6 +270,7 @@
         return true;
       }
       if (msg.publisher === 'aip' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: 'same aip pdf url already handled' });
           return false;
@@ -215,6 +285,7 @@
           sendResponse({ ok: true, action: 'clicked_aip_pdf', pdfUrl: msg.pdfUrl });
           return false;
         }
+        pending.armDownloadCapture?.(msg.pdfUrl);
         post(pending.port, 'progress', '已从 AIP 文章页取得正文 PDF 下载链接，正在打开该链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_aip_pdf', pdfUrl: msg.pdfUrl }))

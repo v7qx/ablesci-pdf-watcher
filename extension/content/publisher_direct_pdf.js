@@ -9,6 +9,7 @@
   let observer = null;
   let stopTimer = null;
   let challengePrompted = false;
+  let lastNoCandidateDiagnosticAt = 0;
 
   function normalize(href) {
     return common.normalizeUrl(common.decodeHtmlUrl(href || ''), location.href);
@@ -27,11 +28,55 @@
   }
 
   function isSupplementary(marker) {
-    return /supplement|supporting information|appendix|permissions|copyright|reprint|correction|erratum|figure|slide|image|video|dataset/i.test(marker);
+    return /supplementary|supplemental|supporting information|appendix|permissions|copyright|reprint|correction|erratum|figure|slide|image|video|dataset/i.test(marker);
+  }
+
+  function springerContentType() {
+    const path = location.pathname || '';
+    const pathMatch = path.match(/^\/([^/?#]+)\//);
+    if (pathMatch) return pathMatch[1].toLowerCase();
+    const canonical = document.querySelector('link[rel="canonical"][href]')?.href || '';
+    const canonicalPath = (() => {
+      try { return new URL(canonical).pathname || ''; } catch (_) { return canonical; }
+    })();
+    const canonicalMatch = canonicalPath.match(/^\/([^/?#]+)\//);
+    if (canonicalMatch) return canonicalMatch[1].toLowerCase();
+    return '';
+  }
+
+  function rejectUnsupportedSpringerPage() {
+    if (common.currentPublisher() !== 'springer') return false;
+    const type = springerContentType();
+    if (!type || type === 'article') return false;
+    pdfTriggered = true;
+    common.sendPublisherMessage('springer', {
+      articleUrl: location.href,
+      unsupported: true,
+      error: `Springer ${type} 页面暂不支持；当前规则只处理 /article/ 期刊文献。`,
+      source: `springer_${type}_page`
+    });
+    stopObserver();
+    return true;
+  }
+
+  function extractWileyPdfDirectUrl(value) {
+    const match = String(value || '').match(/(\/doi\/pdfdirect\/10\.\d{4,9}\/[^"'<>\s&)]+)/i);
+    return match ? normalize(match[1]) : null;
+  }
+
+  function findWileyPdfViewerDirectUrl() {
+    if (common.currentPublisher() !== 'wiley') return null;
+    if (!/\/doi\/(?:pdf|epdf)\//i.test(location.pathname || '')) return null;
+    const iframeSrc = document.querySelector('iframe#pdf-iframe[src], iframe[src*="/doi/pdfdirect/"]')?.getAttribute('src') || '';
+    const iframePdfDirectUrl = extractWileyPdfDirectUrl(iframeSrc);
+    if (iframePdfDirectUrl) return iframePdfDirectUrl;
+
+    const scripts = Array.from(document.scripts).map(script => script.textContent || '').join('\n');
+    return extractWileyPdfDirectUrl(scripts);
   }
 
   function isPdfHref(href) {
-    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\/|\/stamp\/stamp\.jsp/i.test(href || '');
+    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdfdirect\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\/|\/stamp\/stamp\.jsp/i.test(href || '');
   }
 
   function directPdfSelectors() {
@@ -40,6 +85,7 @@
       'meta[property="citation_pdf_url"]',
       'a.article-pdfLink[href]',
       'a[href*="/content/pdf/"]',
+      'a[href*="/doi/pdfdirect/"]',
       'a[href*="/doi/pdf/"]',
       'a[href*="/doi/epdf/"]',
       'a[href*="/article-pdf/"]',
@@ -51,7 +97,8 @@
   }
 
   function findPdfLink() {
-    const candidates = Array.from(document.querySelectorAll(directPdfSelectors().join(',')))
+    const publisher = common.currentPublisher();
+    const allCandidates = Array.from(document.querySelectorAll(directPdfSelectors().join(',')))
       .map(el => {
         const raw = el.getAttribute('content') || el.getAttribute('href') || el.href || '';
         const href = normalize(raw);
@@ -59,11 +106,33 @@
         const visible = el.tagName === 'META' || common.isVisible(el);
         const textScore = /\b(pdf|download pdf|full text pdf)\b/i.test(marker) ? 2 : 0;
         const hrefScore = isPdfHref(href) ? 3 : 0;
-        return { el, href, marker, visible, score: hrefScore + textScore };
-      })
-      .filter(item => item.href && item.visible && item.score > 0 && !isSupplementary(item.marker));
+        const publisherScore = publisher === 'wiley'
+          ? (/\/doi\/pdfdirect\//i.test(href || '') ? 6 : (/\/doi\/pdf\//i.test(href || '') ? 4 : 0))
+          : 0;
+        const supplementary = isSupplementary(marker);
+        return { el, href, marker, visible, score: hrefScore + textScore + publisherScore, supplementary };
+      });
+    const candidates = allCandidates
+      .filter(item => item.href && item.visible && item.score > 0 && !item.supplementary);
     candidates.sort((left, right) => right.score - left.score);
-    return candidates[0] || null;
+    const selected = candidates[0] || null;
+    const sample = allCandidates.slice(0, 6).map(item => ({
+      href: item.href,
+      tag: item.el.tagName,
+      visible: item.visible,
+      score: item.score,
+      supplementary: item.supplementary,
+      text: (item.el.innerText || item.el.textContent || item.el.getAttribute('aria-label') || item.el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+    }));
+    return {
+      selected,
+      diagnostics: {
+        selectorCount: allCandidates.length,
+        eligibleCount: candidates.length,
+        rejectedSupplementaryCount: allCandidates.filter(item => item.supplementary).length,
+        sample
+      }
+    };
   }
 
   function stopObserver() {
@@ -85,6 +154,7 @@
       stopObserver();
       return;
     }
+    if (rejectUnsupportedSpringerPage()) return;
     if (common.hasPublisherChallengePage()) {
       if (!challengePrompted) {
         challengePrompted = true;
@@ -96,13 +166,42 @@
       }
       return;
     }
-    const found = findPdfLink();
-    if (!found) return;
+    const wileyPdfDirectUrl = findWileyPdfViewerDirectUrl();
+    if (wileyPdfDirectUrl) {
+      pdfTriggered = true;
+      common.sendPublisherMessage(publisher, {
+        articleUrl: location.href,
+        pdfUrl: wileyPdfDirectUrl,
+        source: 'wiley_pdf_viewer_pdfdirect',
+        diagnostics: {
+          pagePath: location.pathname,
+          source: document.querySelector('iframe#pdf-iframe[src], iframe[src*="/doi/pdfdirect/"]') ? 'iframe' : 'script'
+        }
+      });
+      stopObserver();
+      return;
+    }
+    const result = findPdfLink();
+    const found = result.selected;
+    if (!found) {
+      const now = Date.now();
+      if (now - lastNoCandidateDiagnosticAt > 5000) {
+        lastNoCandidateDiagnosticAt = now;
+        common.sendPublisherMessage(publisher, {
+          articleUrl: location.href,
+          publisherDiagnostic: true,
+          source: `${publisher}_pdf_candidate_scan`,
+          diagnostics: result.diagnostics
+        });
+      }
+      return;
+    }
     pdfTriggered = true;
     common.sendPublisherMessage(publisher, {
       articleUrl: location.href,
       pdfUrl: found.href,
-      source: `${publisher}_article_pdf_link`
+      source: `${publisher}_article_pdf_link`,
+      diagnostics: result.diagnostics
     });
     stopObserver();
   }

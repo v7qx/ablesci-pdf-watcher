@@ -109,6 +109,20 @@
     return /(^|\.)sciencedirect\.com$/i.test(s) || /(^|\.)sciencedirectassets\.com$/i.test(s) || /(^|\.)elsevier\.com$/i.test(s);
   }
 
+  function isOxfordRelatedDownloadHost(h) {
+    const s = String(h || '');
+    return /^academic\.oup\.com$/i.test(s) || /(^|\.)silverchair-cdn\.com$/i.test(s);
+  }
+
+  function isAipRelatedDownloadHost(h) {
+    const s = String(h || '');
+    return /(^|\.)pubs\.aip\.org$/i.test(s) ||
+      /(^|\.)aip\.scitation\.org$/i.test(s) ||
+      /(^|\.)scitation\.org$/i.test(s) ||
+      /(^|\.)silverchair\.com$/i.test(s) ||
+      /(^|\.)silverchair-cdn\.com$/i.test(s);
+  }
+
   function isScienceDirectAssetPdfUrl(url) {
     try {
       return /(^|\.)sciencedirectassets\.com$/i.test(new URL(String(url || '')).hostname);
@@ -160,7 +174,7 @@
 
   function looksLikePdfDownloadUrl(url) {
     const value = String(url || '');
-    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stamp\/stamp\.jsp/i.test(value);
+    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/doi\/pdfdirect\/|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stamp\/stamp\.jsp/i.test(value);
   }
 
   function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
@@ -181,6 +195,8 @@
     if (sourcePii && actualPii && sourcePii !== actualPii) return false;
     if (expected && finalHost.toLowerCase() === expected) return true;
     if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return true;
+    if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return true;
+    if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return true;
     if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return true;
     return false;
   }

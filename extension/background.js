@@ -200,6 +200,7 @@ const {
   formatTimeoutDoneMessage,
   sanitizeDownloadItem,
   saveDiagnostic,
+  appendDiagnosticTrace,
   saveErrorDiagnostic,
   isNonPdfAccessPageError,
   isHtmlDownloadItem,
@@ -274,7 +275,8 @@ const { downloadPdf } = createBackgroundDownloadAgentApi({
   registerPublisherTab,
   unregisterPublisherTab,
   makeDownloadFilename,
-  isHtmlDownloadItem
+  isHtmlDownloadItem,
+  appendDiagnosticTrace
 });
 const {
   handlePublisherTabUpdated,
@@ -298,7 +300,8 @@ const {
   isIopUrl,
   isScienceDirectAssetPdfUrl,
   isExpectedPublisherPage,
-  recordPublisherCfChallenge
+  recordPublisherCfChallenge,
+  appendDiagnosticTrace
 });
 const {
   enqueueUpload,

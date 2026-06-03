@@ -69,35 +69,28 @@
       return url;
     }
 
-    if (lower.includes('/doi/pdf/') || lower.includes('/doi/epdf/') || lower.includes('/content/pdf/') || lower.includes('/pdfft') || lower.includes('.pdf')) {
+    if (lower.includes('/doi/pdfdirect/') || lower.includes('/doi/pdf/') || lower.includes('/doi/epdf/') || lower.includes('/content/pdf/') || lower.includes('/pdfft') || lower.includes('.pdf')) {
       return url;
     }
 
     return null;
   }
 
-  function urlFromDoiAndHost(doi, hintUrl) {
-    if (!doi) return null;
-    const h = hostOf(hintUrl || '');
-    const enc = doi;
-
-    if (h.includes('pubs.acs.org')) return `https://pubs.acs.org/doi/pdf/${enc}`;
-    if (h.includes('link.springer.com')) return `https://link.springer.com/content/pdf/${enc}.pdf`;
-    if (h.includes('onlinelibrary.wiley.com')) return `https://onlinelibrary.wiley.com/doi/pdf/${enc}`;
-    if (h.includes('academic.oup.com')) return hintUrl;
-    if (h.includes('ieeexplore.ieee.org')) return hintUrl;
-    if (h.includes('frontiersin.org') && /^10\.3389\//i.test(doi)) return `https://www.frontiersin.org/articles/${enc}/pdf`;
-    if (h.includes('iopscience.iop.org')) return `https://iopscience.iop.org/article/${enc}/pdf`;
-    if (h.includes('nature.com')) return hintUrl;
-    if (h.includes('pubs.rsc.org')) return hintUrl;
-    if (h.includes('sciencedirect.com')) return null;
-    if (/^10\.1016\//i.test(doi)) return `https://doi.org/${enc}`;
-
-    return null;
-  }
-
   function pickPdfUrlFromDocument(doc) {
     doc = doc || document;
+    const doi = getFullDoiFromDocument(doc);
+    for (const a of Array.from(doc.querySelectorAll('a.direct-pdf[href]'))) {
+      const href = normalizeUrl(a.getAttribute('href') || a.href, location.href);
+      if (/^https?:\/\/onlinelibrary\.wiley\.com\/doi\/pdfdirect\/10\.\d{4,9}\//i.test(href || '')) {
+        return { url: href, source: 'wiley-direct-pdf-button' };
+      }
+    }
+    if (doi && /^10\.1002\//i.test(doi)) {
+      return { url: `https://onlinelibrary.wiley.com/doi/pdfdirect/${doi}`, source: 'wiley-doi-pdfdirect-first' };
+    }
+    if (doi) {
+      return { url: `https://doi.org/${doi}`, source: 'doi-first' };
+    }
 
     for (const a of Array.from(doc.querySelectorAll('a.direct-pdf[href]'))) {
       const href = normalizeUrl(a.getAttribute('href') || a.href, location.href);
@@ -106,6 +99,7 @@
     }
 
     const strongSelectors = [
+      'a[href*="/doi/pdfdirect/"]',
       'a[href*="/doi/pdf/"]',
       'a[href*="/doi/epdf/"]',
       'a[href*="/content/pdf/"]',
@@ -128,17 +122,6 @@
       const href = normalizeUrl(a.getAttribute('href') || a.href, location.href);
       const pdf = convertKnownUrlToPdf(href);
       if (pdf) return { url: pdf, source: 'assist-link-converted' };
-    }
-
-    const doi = getFullDoiFromDocument(doc);
-    for (const a of assistLinks) {
-      const href = normalizeUrl(a.getAttribute('href') || a.href, location.href);
-      const pdf = urlFromDoiAndHost(doi, href);
-      if (pdf) return { url: pdf, source: 'doi-plus-publisher-host' };
-    }
-
-    if (/^10\.1016\//i.test(doi || '')) {
-      return { url: `https://doi.org/${doi}`, source: 'elsevier-doi-fallback' };
     }
 
     return { url: null, source: 'not-found' };

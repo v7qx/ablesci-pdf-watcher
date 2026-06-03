@@ -115,6 +115,9 @@ const TEXT_MAP = {
   "按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。": "Counted by PDF download/assist attempts. 0 means unlimited.",
   "诊断信息": "Diagnostic Info",
   "复制最近一次脱敏诊断信息。": "Copy the latest anonymized diagnostic information.",
+  "默认关闭。开启后才记录最近一次诊断和出版商链路。": "Off by default. Records the latest diagnostic and publisher trace only when enabled.",
+  "记录诊断信息": "Record diagnostic information",
+  "诊断未开启": "Diagnostics disabled",
   "复制": "Copy",
   "未复制": "Not Copied",
 
@@ -479,6 +482,9 @@ async function save(saveOptions = {}) {
       opts.ablesciSuppressWatcherReplanUntil = Date.now() + 30 * 1000;
     }
     await chrome.storage.local.set(opts);
+    if (opts.diagnosticsEnabled !== true) {
+      await chrome.storage.local.remove(LAST_DIAGNOSTIC_KEY);
+    }
     await chrome.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
     const activeLangBefore = globalThis.watcherActiveLanguage;

@@ -196,9 +196,13 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>诊断信息</strong>
-          <span>复制最近一次脱敏诊断信息。</span>
+          <span>默认关闭。开启后才记录最近一次诊断和出版商链路。</span>
         </div>
         <div class="setting-control">
+          <label class="toggle" title="记录诊断信息">
+            <input id="diagnosticsEnabled" type="checkbox">
+            <span></span>
+          </label>
           <button id="copyDiagnostic" class="secondary" type="button">复制</button>
           <span id="diagnosticStatus" class="pill">未复制</span>
         </div>

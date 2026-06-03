@@ -104,13 +104,26 @@
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
-          if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription']);
+          if (!normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});
           }
 
           if (!task.cancelled || !task.silentCancel) {
-            await saveErrorDiagnostic(payload, err);
-            if (isNonPdfAccessPageError(err)) {
+            if (!normalSkipReasons.has(failureReason)) {
+              await saveErrorDiagnostic(payload, err);
+            }
+            if (failureReason === 'publisher_unsupported') {
+              const message = formatTaskError(err) || '当前出版商页面类型不支持，已按正常情况跳过本次任务。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                skipped: true,
+                skipReason: 'publisher_unsupported'
+              });
+            } else if (isNonPdfAccessPageError(err)) {
               post(port, 'done', htmlDownloadMessage, {
                 html: escapeHtml(htmlDownloadMessage),
                 recomend: false,
