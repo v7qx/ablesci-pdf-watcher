@@ -79,7 +79,7 @@
     pdfCleanerTimeoutSeconds: 60,
     pdfCleanerOnError: 'upload_original',
     watcherSkipCorrigendum: true,
-    watcherEnableBlacklist: true,
+    watcherEnableBlacklist: false,
     watcherBlacklistPath: ''
   };
 
@@ -214,7 +214,7 @@
       pdfCleanerTimeoutSeconds: clampNumber(opts.pdfCleanerTimeoutSeconds, 60, 5, 300),
       pdfCleanerOnError: ['upload_original', 'stop_upload'].includes(opts.pdfCleanerOnError) ? opts.pdfCleanerOnError : 'upload_original',
       watcherSkipCorrigendum: opts.watcherSkipCorrigendum !== false,
-      watcherEnableBlacklist: opts.watcherEnableBlacklist !== false,
+      watcherEnableBlacklist: opts.watcherEnableBlacklist === true,
       watcherBlacklistPath: String(opts.watcherBlacklistPath !== undefined ? opts.watcherBlacklistPath : DEFAULT_OPTIONS.watcherBlacklistPath).trim()
     };
   }

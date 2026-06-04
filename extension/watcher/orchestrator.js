@@ -431,6 +431,11 @@
               }
             } catch (err) {
               console.error('[Blacklist] failed to read blacklist file in auto watcher:', err);
+              await appendWatcherTrace('blacklist_read_error_ignored', {
+                reason: 'blacklist_read_error_ignored',
+                trigger,
+                error: err.message || String(err)
+              });
             }
           }
 

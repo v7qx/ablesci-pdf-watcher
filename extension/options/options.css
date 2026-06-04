@@ -92,6 +92,24 @@ body {
   font-size: 12px;
 }
 
+.browser-settings-links {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b5563;
+}
+
+.settings-link-code {
+  user-select: all;
+  -webkit-user-select: all;
+  display: inline-block;
+  background: #f1f5f9;
+  border-radius: 4px;
+  color: #334155;
+  font: inherit;
+  padding: 2px 6px;
+}
+
 .setting-control {
   display: flex;
   align-items: center;

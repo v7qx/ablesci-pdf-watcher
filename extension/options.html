@@ -18,10 +18,10 @@
         <div class="setting-copy">
           <strong>浏览器下载设置</strong>
           <span>请手动关闭"下载前询问保存位置"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。</span>
-          <div style="margin-top: 8px; font-size: 12px; line-height: 1.5; color: #4b5563;">
-            <code style="user-select: all; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-family: monospace;">chrome://settings/downloads</code>
+          <div class="browser-settings-links">
+            <code class="settings-link-code">chrome://settings/downloads</code>
             &nbsp;&nbsp;&nbsp;&nbsp;
-            <code style="user-select: all; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-family: monospace;">chrome://settings/content/pdfDocuments</code>
+            <code class="settings-link-code">chrome://settings/content/pdfDocuments</code>
           </div>
         </div>
       </div>
@@ -413,10 +413,10 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>黑名单文件路径</strong>
-          <span>设置本地黑名单 .txt 文件的绝对路径（留空默认读取并生成“本地目录”下的 blacklist.txt）。多个 ID 用逗号、空格或换行分隔。</span>
+          <span>可选。开启黑名单后，留空会读取并自动生成 Helper 本地目录下的 blacklist.txt；填写路径时若 .txt 不存在也会自动创建。读取失败时本次会跳过黑名单检查，不阻断应助。</span>
         </div>
         <div class="setting-control setting-control-wide">
-          <input id="watcherBlacklistPath" type="text" placeholder="例如：D:\path\to\blacklist.txt" style="font-family: monospace;">
+          <input id="watcherBlacklistPath" type="text" placeholder="例如：D:\path\to\blacklist.txt">
         </div>
       </div>
       <div class="setting-row">

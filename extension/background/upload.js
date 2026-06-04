@@ -143,18 +143,8 @@
             }
           }
         } catch (err) {
-          await saveDiagnostic({ ...diag, stage: 'skipped-blacklist-error', error: `读取本地黑名单文件失败: ${err.message || err}` });
-          post(port, 'done', '读取黑名单失败', {
-            html: `读取本地黑名单文件失败，请检查路径是否正确：<br>${escapeHtml(opts.watcherBlacklistPath || '（本地目录默认 blacklist.txt）')}<br>错误: ${escapeHtml(err.message || err)}`,
-            recomend: false,
-            reload: false,
-            downloadOnly: true,
-            blocked: true,
-            skipped: true,
-            skipReason: 'blacklist_error',
-            message: `读取本地黑名单文件失败，请核对设置页面中的路径。`
-          });
-          return;
+          await saveDiagnostic({ ...diag, stage: 'blacklist-read-error-ignored', error: `读取本地黑名单文件失败，已跳过本次黑名单检查: ${err.message || err}` });
+          post(port, 'progress', `读取本地黑名单文件失败，已跳过本次黑名单检查并继续应助：${err.message || err}`);
         }
 
         if (isBlacklisted) {

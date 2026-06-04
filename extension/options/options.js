@@ -163,6 +163,7 @@ const TEXT_MAP = {
   "求助人黑名单": "Requester Blacklist",
   "黑名单文件路径": "Blacklist File Path",
   "设置本地黑名单 .txt 文件的绝对路径（留空默认读取并生成“本地目录”下的 blacklist.txt）。多个 ID 用逗号、空格或换行分隔。": "Specify the absolute path of the local blacklist .txt file (leave empty to default to blacklist.txt under local directory). IDs separated by commas, spaces, or newlines.",
+  "可选。开启黑名单后，留空会读取并自动生成 Helper 本地目录下的 blacklist.txt；填写路径时若 .txt 不存在也会自动创建。读取失败时本次会跳过黑名单检查，不阻断应助。": "Optional. When enabled, leaving this empty reads and auto-creates blacklist.txt in the Helper local directory; a custom .txt path is also auto-created if missing. Read failures skip blacklist checking for the current task and do not block assisting.",
   "例如：D:\\path\\to\\blacklist.txt": "e.g., D:\\path\\to\\blacklist.txt",
 
 

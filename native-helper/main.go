@@ -365,15 +365,18 @@ func handleReadTextFile(req Request) error {
 		return errors.New("refuse to read non-txt file")
 	}
 
-	// 自动创建默认文件（如果不存在）
-	if p == "" {
-		if _, err := os.Stat(resolved); os.IsNotExist(err) {
-			template := `# 示例求助人 ID 黑名单文件
+	// 自动创建黑名单文件（如果不存在）。空路径使用 Helper 本地目录，显式路径使用用户配置的位置。
+	if _, err := os.Stat(resolved); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(resolved), 0755); err != nil {
+			return err
+		}
+		template := `# 示例求助人 ID 黑名单文件
 # 每行一个用户 ID，也可在 ID 后使用 # 或 // 添加拉黑备注说明
 # 
 AAAAAAA # 示例用户，拉黑原因备注，例如：2026-06-04 临时测试使用
 `
-			_ = os.WriteFile(resolved, []byte(template), 0644)
+		if err := os.WriteFile(resolved, []byte(template), 0644); err != nil {
+			return err
 		}
 	}
 
