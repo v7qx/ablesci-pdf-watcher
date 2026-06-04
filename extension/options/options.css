@@ -92,6 +92,10 @@ body {
   font-size: 12px;
 }
 
+.setting-copy code {
+  font: inherit;
+}
+
 .browser-settings-links {
   margin-top: 8px;
   font-size: 12px;

@@ -449,7 +449,7 @@ async function load() {
     document.title = 'Ablesci PDF Watcher Settings';
     const descNode = el('watcherListUrlsDesc');
     if (descNode) {
-      descNode.innerHTML = 'One Ablesci list link per line. Elseviers default to random 3~200 pages; append <code>&amp;page_min=1&amp;page_max=5</code> to customize.';
+      descNode.innerHTML = 'One Ablesci list link per line. Elsevier entries default to random 3~200 pages; append <code>&amp;page_min=1&amp;page_max=5</code> to customize.';
     }
   }
 
