@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/hex"
@@ -16,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -59,17 +62,24 @@ type OSSFields struct {
 }
 
 type Response struct {
-	OK       bool   `json:"ok"`
-	Error    string `json:"error,omitempty"`
-	Action   string `json:"action,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Filename string `json:"filename,omitempty"`
-	Size     int64  `json:"size,omitempty"`
-	MD5      string `json:"md5,omitempty"`
-	IsPDF    bool   `json:"is_pdf,omitempty"`
-	Status   int    `json:"status,omitempty"`
-	Body     string `json:"body,omitempty"`
-	Deleted  bool   `json:"deleted,omitempty"`
+	OK             bool     `json:"ok"`
+	Error          string   `json:"error,omitempty"`
+	Action         string   `json:"action,omitempty"`
+	Path           string   `json:"path,omitempty"`
+	Filename       string   `json:"filename,omitempty"`
+	Size           int64    `json:"size,omitempty"`
+	MD5            string   `json:"md5,omitempty"`
+	IsPDF          bool     `json:"is_pdf,omitempty"`
+	Status         int      `json:"status,omitempty"`
+	Body           string   `json:"body,omitempty"`
+	Deleted        bool     `json:"deleted,omitempty"`
+	CleanStatus    string   `json:"clean_status,omitempty"`
+	CleanOutput    string   `json:"clean_output,omitempty"`
+	CleanErrorCode string   `json:"clean_error_code,omitempty"`
+	CleanMatched   int      `json:"clean_matched,omitempty"`
+	CleanRules     []string `json:"clean_rules,omitempty"`
+	CleanEngine    string   `json:"clean_engine,omitempty"`
+	CleanElapsedMs int64    `json:"clean_elapsed_ms,omitempty"`
 }
 
 func isTerminal() bool {
@@ -116,6 +126,8 @@ func run() error {
 		return writeResponse(Response{OK: true, Action: "pong"})
 	case "stat_pdf":
 		return handleStatPDF(req)
+	case "clean_pdf":
+		return handleCleanPDF(req)
 	case "upload_oss":
 		return handleUploadOSS(req)
 	case "delete_file":
@@ -126,6 +138,8 @@ func run() error {
 		return handleOpenLocalStorageDir(req)
 	case "write_text_file":
 		return handleWriteTextFile(req)
+	case "read_text_file":
+		return handleReadTextFile(req)
 	default:
 		return fmt.Errorf("unknown action: %s", req.Action)
 	}
@@ -328,6 +342,52 @@ func handleOpenLocalStorageDir(req Request) error {
 }
 
 
+
+func handleReadTextFile(req Request) error {
+	p := strings.Trim(req.Path, "\" ")
+	var resolved string
+	if p == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		resolved = filepath.Clean(filepath.Join(filepath.Dir(exe), "blacklist.txt"))
+	} else {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return err
+		}
+		resolved = filepath.Clean(abs)
+	}
+	
+	// 仅允许读取 .txt 文件以防任意读取敏感系统文件
+	if !strings.HasSuffix(strings.ToLower(resolved), ".txt") {
+		return errors.New("refuse to read non-txt file")
+	}
+
+	// 自动创建默认文件（如果不存在）
+	if p == "" {
+		if _, err := os.Stat(resolved); os.IsNotExist(err) {
+			template := `# 示例求助人 ID 黑名单文件
+# 每行一个用户 ID，也可在 ID 后使用 # 或 // 添加拉黑备注说明
+# 
+AAAAAAA # 示例用户，拉黑原因备注，例如：2026-06-04 临时测试使用
+`
+			_ = os.WriteFile(resolved, []byte(template), 0644)
+		}
+	}
+
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return err
+	}
+	return writeResponse(Response{
+		OK:     true,
+		Action: "read_text_file",
+		Path:   resolved,
+		Body:   string(content),
+	})
+}
 
 func handleWriteTextFile(req Request) error {
 	filename := sanitizeReportFilename(req.Filename)
@@ -789,4 +849,152 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func handleCleanPDF(req Request) error {
+	path, err := cleanExistingPath(req.Path)
+	if err != nil {
+		return err
+	}
+	if err := ensureAllowedPDFPath(path); err != nil {
+		return err
+	}
+
+	// 1. Resolve cleaner path
+	cleanerPath := req.Extra["cleaner_path"]
+	if cleanerPath == "" {
+		exePath, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		cleanerPath = filepath.Join(filepath.Dir(exePath), "zotero-access-cleaner.exe")
+	}
+
+	// Verify cleaner exists
+	if _, err := os.Stat(cleanerPath); err != nil {
+		return fmt.Errorf("去水印工具未找到，请在设置中配置正确的绝对路径。错误: %w", err)
+	}
+
+	// 2. Create temp file for summary JSON
+	tmpFile, err := os.CreateTemp("", "cleaner_summary_*.json")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary summary file: %w", err)
+	}
+	summaryPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(summaryPath)
+
+	// 3. Prepare arguments
+	args := []string{
+		"-input", path,
+		"-apply",
+		"-replace",
+		"-no-backup",
+		"-summary-json", summaryPath,
+	}
+
+	if patternsPath := req.Extra["patterns_path"]; patternsPath != "" {
+		args = append(args, "-patterns", patternsPath)
+	}
+	if engine := req.Extra["engine"]; engine != "" {
+		args = append(args, "-engine", engine)
+	}
+	if timeoutStr := req.Extra["timeout_seconds"]; timeoutStr != "" {
+		args = append(args, "-timeout-seconds", timeoutStr)
+	}
+
+	// 4. Set process timeout
+	timeoutSeconds := 60
+	if timeoutStr := req.Extra["timeout_seconds"]; timeoutStr != "" {
+		if val, err := strconv.Atoi(timeoutStr); err == nil && val > 0 {
+			timeoutSeconds = val
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds+5)*time.Second)
+	defer cancel()
+
+	// 5. Execute process
+	cmd := exec.CommandContext(ctx, cleanerPath, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
+	}
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	runErr := cmd.Run()
+
+	// 6. Check summary JSON
+	summaryData, readErr := os.ReadFile(summaryPath)
+	if readErr == nil {
+		// Parse summary
+		type Summary struct {
+			SchemaVersion int      `json:"schema_version"`
+			Status        string   `json:"status"`
+			Source        string   `json:"source"`
+			Output        string   `json:"output"`
+			Engine        string   `json:"engine"`
+			EngineVersion string   `json:"engine_version"`
+			RulesVersion  string   `json:"rules_version"`
+			Matched       int      `json:"matched"`
+			RemovedCalls  int      `json:"removed_calls"`
+			Rules         []string `json:"rules"`
+			ElapsedMs     int64    `json:"elapsed_ms"`
+			ErrorCode     string   `json:"error_code"`
+			Error         string   `json:"error"`
+		}
+		var summary Summary
+		if json.Unmarshal(summaryData, &summary) == nil {
+			resultPath := path
+			if summary.Status == "cleaned" && strings.TrimSpace(summary.Output) != "" {
+				if resolvedOutput, outputErr := cleanExistingPath(summary.Output); outputErr == nil {
+					if allowedErr := ensureAllowedPDFPath(resolvedOutput); allowedErr == nil {
+						resultPath = resolvedOutput
+					}
+				}
+			}
+			return writeResponse(Response{
+				OK:             true,
+				Action:         "clean_pdf",
+				Path:           resultPath,
+				CleanStatus:    summary.Status,
+				CleanOutput:    summary.Output,
+				CleanErrorCode: summary.ErrorCode,
+				CleanMatched:   summary.Matched,
+				CleanRules:     summary.Rules,
+				CleanEngine:    summary.Engine,
+				CleanElapsedMs: summary.ElapsedMs,
+				Error:          summary.Error,
+			})
+		}
+	}
+
+	// If reading/parsing summary failed, handle error or timeout
+	status := "error"
+	var errMsg string
+	if ctx.Err() == context.DeadlineExceeded {
+		status = "timeout"
+		errMsg = "去水印进程运行超时"
+	} else {
+		if runErr != nil {
+			errMsg = fmt.Sprintf("去水印子进程执行错误: %v, stderr: %s", runErr, stderr.String())
+		} else {
+			errMsg = "去水印执行未生成摘要数据"
+		}
+	}
+
+	return writeResponse(Response{
+		OK:          true,
+		Action:      "clean_pdf",
+		Path:        path,
+		CleanStatus: status,
+		CleanErrorCode: func() string {
+			if status == "timeout" {
+				return "engine_timeout"
+			}
+			return "engine_failed"
+		}(),
+		Error:       errMsg,
+	})
 }

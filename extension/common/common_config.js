@@ -71,7 +71,16 @@
     watcherMaxPerSession: 1,
     watcherAllowZeroSession: false,
     watcherUseCalendarProgress: true,
-    watcherLanguage: 'auto'
+    watcherLanguage: 'auto',
+    pdfCleanerEnabled: false,
+    pdfCleanerCliPath: '',
+    pdfCleanerPatternsPath: '',
+    pdfCleanerEngine: 'auto',
+    pdfCleanerTimeoutSeconds: 60,
+    pdfCleanerOnError: 'upload_original',
+    watcherSkipCorrigendum: true,
+    watcherEnableBlacklist: true,
+    watcherBlacklistPath: ''
   };
 
   function sanitizePathPart(s) {
@@ -197,7 +206,16 @@
       watcherMaxPerSession: 1,
       watcherAllowZeroSession: opts.watcherAllowZeroSession === true,
       watcherUseCalendarProgress: opts.watcherUseCalendarProgress !== false,
-      watcherLanguage: ['auto', 'zh', 'en'].includes(opts.watcherLanguage) ? opts.watcherLanguage : 'auto'
+      watcherLanguage: ['auto', 'zh', 'en'].includes(opts.watcherLanguage) ? opts.watcherLanguage : 'auto',
+      pdfCleanerEnabled: opts.pdfCleanerEnabled === true,
+      pdfCleanerCliPath: String(opts.pdfCleanerCliPath || '').trim(),
+      pdfCleanerPatternsPath: String(opts.pdfCleanerPatternsPath || '').trim(),
+      pdfCleanerEngine: ['auto', 'pdfcpu', 'qpdf'].includes(opts.pdfCleanerEngine) ? opts.pdfCleanerEngine : 'auto',
+      pdfCleanerTimeoutSeconds: clampNumber(opts.pdfCleanerTimeoutSeconds, 60, 5, 300),
+      pdfCleanerOnError: ['upload_original', 'stop_upload'].includes(opts.pdfCleanerOnError) ? opts.pdfCleanerOnError : 'upload_original',
+      watcherSkipCorrigendum: opts.watcherSkipCorrigendum !== false,
+      watcherEnableBlacklist: opts.watcherEnableBlacklist !== false,
+      watcherBlacklistPath: String(opts.watcherBlacklistPath !== undefined ? opts.watcherBlacklistPath : DEFAULT_OPTIONS.watcherBlacklistPath).trim()
     };
   }
 
@@ -229,6 +247,10 @@
     watcherTaskTimeoutMinutes: {
       validate: (v) => Number.isFinite(Number(v)) && Number(v) > 0,
       message: '任务超时时间必须大于 0。'
+    },
+    pdfCleanerTimeoutSeconds: {
+      validate: (v) => Number.isFinite(Number(v)) && Number(v) >= 5 && Number(v) <= 300,
+      message: '去水印超时时间必须在 5 到 300 秒之间。'
     }
   };
 

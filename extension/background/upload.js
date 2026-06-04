@@ -90,6 +90,94 @@
       const opts = optsOverride || await getOptions();
       const diag = makeDiagnosticBase(payload, opts);
 
+      // 1. 校验 Corrigendum 更正类求助
+      if (opts.watcherSkipCorrigendum && payload?.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
+        await saveDiagnostic({ ...diag, stage: 'skipped-corrigendum', error: '已按设置跳过 Corrigendum 更正类求助' });
+        post(port, 'done', '已跳过 Corrigendum 更正类求助', {
+          html: '已按设置跳过 Corrigendum 更正类求助。',
+          recomend: false,
+          reload: false,
+          downloadOnly: true,
+          blocked: true,
+          skipped: true,
+          skipReason: 'corrigendum',
+          message: '已按设置跳过 Corrigendum 更正类求助'
+        });
+        return;
+      }
+
+      // 2. 校验求助人黑名单 (异步读取本地黑名单文件)
+      if (opts.watcherEnableBlacklist && payload?.requesterId) {
+        let isBlacklisted = false;
+        let blacklistComment = '';
+        try {
+          const res = await sendNativeMessage(opts.nativeHostName, {
+            action: 'read_text_file',
+            path: opts.watcherBlacklistPath || ''
+          }, nativeMessageLongTimeoutMs);
+          if (res && res.ok && res.body) {
+            const blacklistMap = new Map();
+            const lines = res.body.split(/\r?\n/);
+            for (let line of lines) {
+              line = line.trim();
+              if (!line || line.startsWith('#') || line.startsWith('//')) {
+                continue;
+              }
+              const commentIdx = line.indexOf('#') >= 0 ? line.indexOf('#') : (line.indexOf('//') >= 0 ? line.indexOf('//') : -1);
+              let comment = '';
+              if (commentIdx >= 0) {
+                comment = line.substring(commentIdx + 1).trim();
+                if (comment.startsWith('/') || comment.startsWith('#')) {
+                  comment = comment.replace(/^[\/#\s]+/, '').trim();
+                }
+                line = line.substring(0, commentIdx).trim();
+              }
+              const parts = line.split(/[\s,，]+/).map(p => p.trim()).filter(Boolean);
+              for (const part of parts) {
+                blacklistMap.set(part, comment);
+              }
+            }
+            if (blacklistMap.has(payload.requesterId)) {
+              isBlacklisted = true;
+              blacklistComment = blacklistMap.get(payload.requesterId) || '';
+            }
+          }
+        } catch (err) {
+          await saveDiagnostic({ ...diag, stage: 'skipped-blacklist-error', error: `读取本地黑名单文件失败: ${err.message || err}` });
+          post(port, 'done', '读取黑名单失败', {
+            html: `读取本地黑名单文件失败，请检查路径是否正确：<br>${escapeHtml(opts.watcherBlacklistPath || '（本地目录默认 blacklist.txt）')}<br>错误: ${escapeHtml(err.message || err)}`,
+            recomend: false,
+            reload: false,
+            downloadOnly: true,
+            blocked: true,
+            skipped: true,
+            skipReason: 'blacklist_error',
+            message: `读取本地黑名单文件失败，请核对设置页面中的路径。`
+          });
+          return;
+        }
+
+        if (isBlacklisted) {
+          const blockMsg = blacklistComment ? `求助人已被列入黑名单，拒绝应助。备注: ${blacklistComment}` : '求助人已被列入黑名单，拒绝应助。';
+          await saveDiagnostic({ ...diag, stage: 'skipped-blacklist', error: blockMsg });
+          let htmlMsg = `当前求助人（ID: ${escapeHtml(payload.requesterId)}）已被列入本地黑名单，拒绝下载和上传。`;
+          if (blacklistComment) {
+            htmlMsg += `<br><span style="color: #e6a23c; font-size: 0.95em;"><strong>拉黑备注：</strong>${escapeHtml(blacklistComment)}</span>`;
+          }
+          post(port, 'done', '已跳过黑名单求助人', {
+            html: htmlMsg,
+            recomend: false,
+            reload: false,
+            downloadOnly: true,
+            blocked: true,
+            skipped: true,
+            skipReason: 'blacklist',
+            message: `求助人 ID (${payload.requesterId}) 在本地黑名单中，任务已安全终止。${blacklistComment ? '备注: ' + blacklistComment : ''}`
+          });
+          return;
+        }
+      }
+
       if (!payload?.pdfUrl) {
         await saveDiagnostic({ ...diag, stage: 'skipped-missing-pdf-url', error: '缺少 pdfUrl，已按信息不全跳过' });
         post(port, 'done', '当前求助缺少可识别的 PDF 链接，已按信息不全跳过；不会下载或上传。', {
@@ -158,6 +246,51 @@
         }
       });
       post(port, 'progress', `PDF 校验通过：${stat.filename}，${formatBytes(stat.size)}，MD5=${stat.md5}`);
+
+      if (opts.pdfCleanerEnabled) {
+        post(port, 'progress', '正在对 PDF 进行去水印处理...');
+        try {
+          const cleanRes = await sendNativeMessage(opts.nativeHostName, {
+            action: 'clean_pdf',
+            path: stat.path || item.filename,
+            extra: {
+              cleaner_path: opts.pdfCleanerCliPath || '',
+              patterns_path: opts.pdfCleanerPatternsPath || '',
+              engine: opts.pdfCleanerEngine || 'auto',
+              timeout_seconds: String(opts.pdfCleanerTimeoutSeconds || 60)
+            }
+          }, nativeMessageLongTimeoutMs);
+
+          if (cleanRes && cleanRes.ok) {
+            if (cleanRes.clean_status === 'cleaned') {
+              post(port, 'progress', `去水印完成：匹配水印 ${cleanRes.clean_matched} 处，使用引擎 ${cleanRes.clean_engine}，耗时 ${cleanRes.clean_elapsed_ms}ms。`);
+              post(port, 'progress', '正在重新校验去水印后的 PDF 并计算 MD5...');
+              stat = await sendNativeMessage(opts.nativeHostName, {
+                action: 'stat_pdf',
+                path: cleanRes.path || stat.path || item.filename
+              }, nativeMessageLongTimeoutMs);
+            } else if (cleanRes.clean_status === 'no_watermark') {
+              post(port, 'progress', '未检测到匹配的期刊水印，跳过清洗。');
+            } else {
+              const cleanerErr = cleanRes.error || '未知去水印状态或错误';
+              if (opts.pdfCleanerOnError === 'stop_upload') {
+                throw new Error(`去水印未成功（状态: ${cleanRes.clean_status}）：${cleanerErr}`);
+              } else {
+                post(port, 'progress', `去水印未成功（状态: ${cleanRes.clean_status}）：${cleanerErr}。按配置继续使用原始 PDF 进行上传。`);
+              }
+            }
+          } else {
+            throw new Error((cleanRes && cleanRes.error) || '去水印助手返回异常');
+          }
+        } catch (err) {
+          console.error('[pdf-cleaner] error:', err);
+          if (opts.pdfCleanerOnError === 'stop_upload') {
+            throw new Error(`去水印失败，已终止上传：${err.message || err}`);
+          } else {
+            post(port, 'progress', `去水印出错：${err.message || err}。按配置继续使用原始 PDF 进行上传。`);
+          }
+        }
+      }
       const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.slice() : [];
       const size = Number(stat.size || 0);
       if (opts.debugDownloadOnly) {

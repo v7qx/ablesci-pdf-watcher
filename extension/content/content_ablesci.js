@@ -10,7 +10,10 @@
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
     buttonPosition: 'end',
-    watcherLanguage: 'auto'
+    watcherLanguage: 'auto',
+    watcherSkipCorrigendum: true,
+    watcherEnableBlacklist: true,
+    watcherBlacklistPath: ''
   };
   let currentUploadPort = null;
   let pageOptions = { ...DEFAULT_PAGE_OPTIONS };
@@ -194,7 +197,10 @@
       buttonColor: isSafeHexColor(opts?.buttonColor) ? opts.buttonColor : DEFAULT_PAGE_OPTIONS.buttonColor,
       buttonTextColor: isSafeHexColor(opts?.buttonTextColor) ? opts.buttonTextColor : DEFAULT_PAGE_OPTIONS.buttonTextColor,
       buttonPosition: normalizeButtonPosition(opts?.buttonPosition),
-      watcherLanguage: ['auto', 'zh', 'en'].includes(opts?.watcherLanguage) ? opts.watcherLanguage : 'auto'
+      watcherLanguage: ['auto', 'zh', 'en'].includes(opts?.watcherLanguage) ? opts.watcherLanguage : 'auto',
+      watcherSkipCorrigendum: opts?.watcherSkipCorrigendum !== false,
+      watcherEnableBlacklist: opts?.watcherEnableBlacklist !== false,
+      watcherBlacklistPath: String(opts?.watcherBlacklistPath !== undefined ? opts.watcherBlacklistPath : DEFAULT_PAGE_OPTIONS.watcherBlacklistPath).trim()
     };
   }
 
@@ -506,6 +512,27 @@
     return { type: '', label };
   }
 
+  function extractRequesterId() {
+    const rows = Array.from(document.querySelectorAll('.assist-detail tr'));
+    for (const tr of rows) {
+      const cells = Array.from(tr.children || []);
+      const label = visibleText(cells[0]);
+      if (/^(求助人|requester)$/i.test(label)) {
+        const link = cells[1]?.querySelector('a');
+        if (link) {
+          const dataId = link.getAttribute('data-id');
+          if (dataId) return dataId;
+          try {
+            const url = new URL(link.href, location.href);
+            const id = url.searchParams.get('id');
+            if (id) return id;
+          } catch (_) {}
+        }
+      }
+    }
+    return '';
+  }
+
   function extractJournalName() {
     const rows = Array.from(document.querySelectorAll('.assist-detail tr'));
     for (const tr of rows) {
@@ -535,6 +562,7 @@
     const journalName = extractJournalName();
     const risk = detectPageRisk();
     const documentTypeInfo = extractDocumentTypeInfo();
+    const requesterId = extractRequesterId();
 
     return {
       pageUrl: location.href,
@@ -546,6 +574,7 @@
       journalName,
       documentType: documentTypeInfo.type,
       documentTypeLabel: documentTypeInfo.label,
+      requesterId,
       hasRemark: risk.flags?.remark === true,
       remarkText: risk.remarkText || '',
       riskFlags: risk.flags || {},
@@ -591,6 +620,9 @@
     let payload;
     try {
       payload = collectPayload();
+      if (pageOptions.watcherSkipCorrigendum && payload.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
+        throw new Error(isEn ? 'Skipped corrigendum requests.' : '已按设置跳过 Corrigendum 更正类求助');
+      }
     } catch (err) {
       setStatus(err.message || String(err), 'err');
       return;

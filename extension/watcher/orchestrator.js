@@ -406,6 +406,34 @@
             parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
             orderedCount: candidates.length
           });
+
+          let blacklistedIds = [];
+          if (opts.watcherEnableBlacklist) {
+            try {
+              const res = await depsRef.sendNativeMessage(opts.nativeHostName, {
+                action: 'read_text_file',
+                path: opts.watcherBlacklistPath || ''
+              });
+              if (res && res.ok && res.body) {
+                const lines = res.body.split(/\r?\n/);
+                for (let line of lines) {
+                  line = line.trim();
+                  if (!line || line.startsWith('#') || line.startsWith('//')) {
+                    continue;
+                  }
+                  const commentIdx = line.indexOf('#') >= 0 ? line.indexOf('#') : (line.indexOf('//') >= 0 ? line.indexOf('//') : -1);
+                  if (commentIdx >= 0) {
+                    line = line.substring(0, commentIdx).trim();
+                  }
+                  const parts = line.split(/[\s,，]+/).map(p => p.trim()).filter(Boolean);
+                  blacklistedIds.push(...parts);
+                }
+              }
+            } catch (err) {
+              console.error('[Blacklist] failed to read blacklist file in auto watcher:', err);
+            }
+          }
+
           for (const rawCandidate of candidates) {
             const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
             if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
@@ -449,7 +477,7 @@
 
             const payload = detail.payload;
             payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
-            const detailAllowed = isDetailAllowedForWatcher(payload, opts);
+            const detailAllowed = isDetailAllowedForWatcher(payload, opts, blacklistedIds);
             const key = getProcessedKey(candidate, payload);
             if (!detailAllowed.ok) {
               await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });

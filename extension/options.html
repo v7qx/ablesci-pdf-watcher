@@ -14,13 +14,15 @@
     </header>
 
     <section class="card">
-      <h2 class="card-title">安装检查</h2>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>浏览器下载设置</strong>
-          <span>
-            请手动关闭"下载前询问保存位置"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。
-          </span>
+          <span>请手动关闭"下载前询问保存位置"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。</span>
+          <div style="margin-top: 8px; font-size: 12px; line-height: 1.5; color: #4b5563;">
+            <code style="user-select: all; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-family: monospace;">chrome://settings/downloads</code>
+            &nbsp;&nbsp;&nbsp;&nbsp;
+            <code style="user-select: all; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-family: monospace;">chrome://settings/content/pdfDocuments</code>
+          </div>
         </div>
       </div>
       <div class="setting-row">
@@ -209,6 +211,74 @@
       </div>
     </details>
 
+    <details class="card">
+      <summary>PDF 去水印 (Experimental)</summary>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>启用 PDF 去水印</strong>
+          <span>在下载 PDF 完成后、上传到科研通之前，自动调用本地去水印工具清理水印。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="启用 PDF 去水印">
+            <input id="pdfCleanerEnabled" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>去水印工具路径</strong>
+          <span>zotero-access-cleaner.exe 的绝对路径。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="pdfCleanerCliPath" type="text" placeholder="例如：D:\path\to\zotero-access-cleaner.exe">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>规则库文件路径</strong>
+          <span>patterns.json 的绝对路径。留空则尝试自动从工具路径推导。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="pdfCleanerPatternsPath" type="text" placeholder="例如：D:\path\to\patterns.json">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>处理引擎</strong>
+          <span>默认自适应模式。</span>
+        </div>
+        <div class="setting-control">
+          <select id="pdfCleanerEngine">
+            <option value="auto">自适应 (Auto)</option>
+            <option value="pdfcpu">pdfcpu 引擎 (严格校验)</option>
+            <option value="qpdf">qpdf 引擎 (高容错性)</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>单文件超时时间</strong>
+          <span>去水印进程的最长允许运行时间（单位：秒）。</span>
+        </div>
+        <div class="setting-control setting-control-compact">
+          <input id="pdfCleanerTimeoutSeconds" class="compact-number" type="number" min="5" max="300" step="1" value="60">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>去水印出错时的策略</strong>
+          <span>如果去水印失败或超时，是继续上传原 PDF 还是终止上传。</span>
+        </div>
+        <div class="setting-control">
+          <select id="pdfCleanerOnError">
+            <option value="upload_original">上传原始 PDF</option>
+            <option value="stop_upload">终止上传并报错</option>
+          </select>
+        </div>
+      </div>
+    </details>
+
     <details class="card" open>
       <summary>运行数据</summary>
       <div class="setting-row">
@@ -330,6 +400,23 @@
             <span class="toggle"><input id="watcherSkipRiskText" type="checkbox"><span></span></span>
             <span class="toggle-text">异常文本</span>
           </label>
+          <label class="toggle-option" title="跳过更正类求助">
+            <span class="toggle"><input id="watcherSkipCorrigendum" type="checkbox"><span></span></span>
+            <span class="toggle-text">更正/Corrigendum</span>
+          </label>
+          <label class="toggle-option" title="启用求助人黑名单">
+            <span class="toggle"><input id="watcherEnableBlacklist" type="checkbox"><span></span></span>
+            <span class="toggle-text">求助人黑名单</span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>黑名单文件路径</strong>
+          <span>设置本地黑名单 .txt 文件的绝对路径（留空默认读取并生成“本地目录”下的 blacklist.txt）。多个 ID 用逗号、空格或换行分隔。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="watcherBlacklistPath" type="text" placeholder="例如：D:\path\to\blacklist.txt" style="font-family: monospace;">
         </div>
       </div>
       <div class="setting-row">

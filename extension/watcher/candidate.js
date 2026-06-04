@@ -158,6 +158,9 @@
         detail_system_prompt_si: '详情页系统提示 DOI 可能是补充材料或并非全文，已跳过',
         detail_remark: '详情页存在备注，已按设置跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
+        list_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (列表页)',
+        detail_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (详情页)',
+        detail_blacklist_user: '求助人 ID 处于黑名单中，已跳过',
         journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
       };
       return labels[code] ? `${code} - ${labels[code]}` : code;
@@ -356,10 +359,13 @@
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
       if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
       if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
+      if (opts.watcherSkipCorrigendum && candidate.title && /^Corrigendum\s+to/i.test(String(candidate.title).trim())) {
+        return { ok: false, reason: 'list_corrigendum' };
+      }
       return { ok: true };
     }
 
-    function isDetailAllowedForWatcher(payload, opts) {
+    function isDetailAllowedForWatcher(payload, opts, blacklistedIds = []) {
       if (!payload?.assistId) return { ok: false, reason: 'missing_assist_id' };
       const flags = payload.riskFlags || {};
       const textValue = [
@@ -376,6 +382,22 @@
       if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
       if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
       if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
+      if (opts.watcherSkipCorrigendum && payload.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
+        return { ok: false, reason: 'detail_corrigendum' };
+      }
+      if (opts.watcherEnableBlacklist && payload.requesterId) {
+        if (Array.isArray(blacklistedIds) && blacklistedIds.length > 0) {
+          if (blacklistedIds.includes(payload.requesterId)) {
+            return { ok: false, reason: 'detail_blacklist_user' };
+          }
+        } else if (opts.watcherBlacklistUserIds) {
+          const blacklistRaw = opts.watcherBlacklistUserIds || '';
+          const blacklist = blacklistRaw.split(/[^a-zA-Z0-9]+/).map(s => s.trim()).filter(Boolean);
+          if (blacklist.includes(payload.requesterId)) {
+            return { ok: false, reason: 'detail_blacklist_user' };
+          }
+        }
+      }
       if (opts.watcherSkipRiskText && flags.systemPromptSupplementDoi) {
         return { ok: false, reason: 'detail_system_prompt_si' };
       }

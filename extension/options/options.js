@@ -62,7 +62,6 @@ const {
 });
 
 const TEXT_MAP = {
-  "安装检查": "Installation Check",
   "设置下载、上传、按钮显示和低频值守。": "Configure download, upload, button styles, and auto watcher.",
   "浏览器下载设置": "Browser Download Settings",
   "请手动关闭\"下载前询问保存位置\"，并设置 PDF 直接下载；否则 PDF 可能会在浏览器内置阅读器中打开，插件无法继续。": "Please manually disable \"Ask where to save each file before downloading\" and configure PDFs to download directly; otherwise, PDFs may open in the browser's built-in viewer and halt the plugin.",
@@ -160,6 +159,12 @@ const TEXT_MAP = {
   "书籍章节": "Book Chapter",
   "专利/报告": "Patent/Report",
   "异常文本": "Risk Text",
+  "更正/Corrigendum": "Corrigendum",
+  "求助人黑名单": "Requester Blacklist",
+  "黑名单文件路径": "Blacklist File Path",
+  "设置本地黑名单 .txt 文件的绝对路径（留空默认读取并生成“本地目录”下的 blacklist.txt）。多个 ID 用逗号、空格或换行分隔。": "Specify the absolute path of the local blacklist .txt file (leave empty to default to blacklist.txt under local directory). IDs separated by commas, spaces, or newlines.",
+  "例如：D:\\path\\to\\blacklist.txt": "e.g., D:\\path\\to\\blacklist.txt",
+
 
   "任务超时": "Task Timeout",
   "区分未触发下载、下载中超时和任务最长时间；超时会取消当前任务并释放队列。": "Set different timeouts. Unresponsive tasks will be cancelled and queue released.",
@@ -267,7 +272,28 @@ const TEXT_MAP = {
   "非 SD 最低求助量不能小于 0。": "Min non-SD requests cannot be less than 0.",
   "任务超时时间必须大于 0。": "Task timeout must be greater than 0.",
   "任务最长时间不能小于未触发下载或下载中超时时间。": "Max task time cannot be less than download or idle timeouts.",
-  "低频值守列表 URL 不能为空。": "List URLs cannot be empty."
+  "低频值守列表 URL 不能为空。": "List URLs cannot be empty.",
+  "PDF 去水印 (Experimental)": "PDF Watermark Cleaner (Exp)",
+  "启用 PDF 去水印": "Enable PDF Watermark Cleaner",
+  "在下载 PDF 完成后、上传到科研通之前，自动调用本地去水印工具清理水印。": "Automatically clean watermarks using the local CLI tool after PDF download and before upload.",
+  "去水印工具路径": "Watermark Cleaner Path",
+  "zotero-access-cleaner.exe 的绝对路径。": "Absolute path to zotero-access-cleaner.exe.",
+  "例如：D:\\path\\to\\zotero-access-cleaner.exe": "e.g., D:\\path\\to\\zotero-access-cleaner.exe",
+  "规则库文件路径": "Patterns File Path",
+  "patterns.json 的绝对路径。留空则尝试自动从工具路径推导。": "Absolute path to patterns.json. Leave empty to auto-derive from the tool path.",
+  "例如：D:\\path\\to\\patterns.json": "e.g., D:\\path\\to\\patterns.json",
+  "处理引擎": "Processing Engine",
+  "默认自适应模式。": "Default is adaptive mode.",
+  "自适应 (Auto)": "Adaptive (Auto)",
+  "pdfcpu 引擎 (严格校验)": "pdfcpu Engine (Strict)",
+  "qpdf 引擎 (高容错性)": "qpdf Engine (High Tolerance)",
+  "单文件超时时间": "Single File Timeout",
+  "去水印进程的最长允许运行时间（单位：秒）。": "Maximum allowed run time for the watermark cleaning process (in seconds).",
+  "去水印出错时的策略": "Error Handling Strategy",
+  "如果去水印失败或超时，是继续上传原 PDF 还是终止上传。": "Choose whether to proceed with uploading the original PDF or stop upload if cleaning fails/times out.",
+  "上传原始 PDF": "Upload Original PDF",
+  "终止上传并报错": "Abort Upload and Report Error",
+  "去水印超时时间必须在 5 到 300 秒之间。": "Watermark cleaner timeout must be between 5 and 300 seconds."
 };
 
 function getActualLanguage(langOption) {

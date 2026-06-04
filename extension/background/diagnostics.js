@@ -28,7 +28,9 @@
         publisherHost: hostnameOf(payload?.pdfUrl || ''),
         pickedUrl: urlHostPath(payload?.pdfUrl || ''),
         source: payload?.pdfUrlSource || '',
-        downloadMode: opts?.downloadMode || 'auto'
+        downloadMode: opts?.downloadMode || 'auto',
+        requesterId: payload?.requesterId || '',
+        watcherBlacklistPath: opts?.watcherBlacklistPath || ''
       };
     }
 
