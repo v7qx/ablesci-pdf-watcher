@@ -449,21 +449,21 @@
           <strong>连续遇阻自动暂停（实验）</strong>
           <span>启用后，当连续遇到人机验证页面达到设定次数时，自动暂停值守，以防频繁撞墙被封。</span>
         </div>
-        <div class="setting-control" style="flex-direction: column; align-items: flex-end; gap: 6px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
+        <div class="setting-control cf-pause-control">
+          <div class="cf-pause-toggle-row">
             <label class="toggle" title="启用连续遇阻自动暂停">
               <input id="watcherStopOnCfChallenge" type="checkbox">
               <span></span>
             </label>
-            <label class="toggle-option" title="遇到 CF 或 challenge 时立即发浏览器提醒" style="user-select: text; -webkit-user-select: text; margin-left: 0;">
+            <label class="toggle-option cf-alert-option" title="遇到 CF 或 challenge 时立即发浏览器提醒">
               <span class="toggle"><input id="watcherCfNotificationEnabled" type="checkbox"><span></span></span>
-              <span class="toggle-text" style="user-select: text; -webkit-user-select: text;">CF 提醒</span>
+              <span class="toggle-text">CF 提醒</span>
             </label>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
-            <span style="font-size: 13px; color: var(--muted);">连续遇阻</span>
-            <input id="watcherCfPauseThreshold" type="number" min="1" max="10" step="1" value="6" style="width: 60px; min-height: 30px; padding: 4px 8px;" aria-label="连续遇阻暂停次数">
-            <span style="font-size: 13px; color: var(--muted);">次后暂停</span>
+          <div class="cf-pause-threshold-row">
+            <span class="muted-inline-label">连续遇阻</span>
+            <input id="watcherCfPauseThreshold" class="compact-threshold-input" type="number" min="1" max="10" step="1" value="6" aria-label="连续遇阻暂停次数">
+            <span class="muted-inline-label">次后暂停</span>
           </div>
         </div>
       </div>
@@ -529,12 +529,12 @@
       </div>
       </details>
       <div class="setting-row watcher-action-row">
-        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 28px; flex-wrap: wrap;">
-          <div class="setting-copy" style="flex: 1 1 auto; min-width: 250px;">
+        <div class="watcher-action-layout">
+          <div class="setting-copy watcher-action-copy">
             <strong>值守操作</strong>
             <span id="watcherActionDesc">手动触发一次检查，或复制当前排查配置。</span>
           </div>
-          <div class="setting-control" style="flex: 0 0 auto; display: flex; gap: 8px; justify-content: flex-end;">
+          <div class="setting-control watcher-action-buttons">
             <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
             <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
           </div>

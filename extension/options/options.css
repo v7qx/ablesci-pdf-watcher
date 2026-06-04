@@ -134,6 +134,17 @@ body {
   max-width: 160px;
 }
 
+.compact-threshold-input {
+  width: 60px;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.muted-inline-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 #watcherSpeedMode {
   max-width: 240px;
 }
@@ -141,6 +152,25 @@ body {
 .watcher-action-row {
   align-items: center;
   flex-wrap: wrap;
+}
+
+.watcher-action-layout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.watcher-action-copy {
+  flex: 1 1 auto;
+  min-width: 250px;
+}
+
+.watcher-action-buttons {
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .watcher-status-panel {
@@ -160,6 +190,33 @@ body {
 
 .watcher-action-row .setting-copy span {
   white-space: normal;
+}
+
+.cf-pause-control {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.cf-pause-toggle-row,
+.cf-pause-threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cf-pause-threshold-row {
+  margin-top: 2px;
+}
+
+.cf-alert-option {
+  margin-left: 0;
+}
+
+.cf-alert-option,
+.cf-alert-option .toggle-text {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 input[type="text"],
