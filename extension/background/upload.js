@@ -317,6 +317,7 @@
       let pdfCleanerResult = null;
       if (opts.pdfCleanerEnabled) {
         const originalPdfPath = stat.path || item.filename || '';
+        const shouldPreserveCleanerOriginal = opts.pdfCleanerPreserveOriginal === true || opts.debugDownloadOnly === true;
         post(port, 'progress', '正在对 PDF 进行去水印处理...');
         try {
           const cleanRes = await sendNativeMessage(opts.nativeHostName, {
@@ -327,7 +328,7 @@
               patterns_path: opts.pdfCleanerPatternsPath || '',
               engine: opts.pdfCleanerEngine || 'auto',
               timeout_seconds: String(opts.pdfCleanerTimeoutSeconds || 60),
-              preserve_original: String(opts.pdfCleanerPreserveOriginal === true)
+              preserve_original: String(shouldPreserveCleanerOriginal)
             }
           }, nativeMessageLongTimeoutMs);
 
@@ -386,6 +387,7 @@
             size,
             md5: stat.md5 || ''
           },
+          pdfCleanerResult,
           message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
         });
         post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
