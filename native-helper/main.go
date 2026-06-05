@@ -130,6 +130,8 @@ func run() error {
 		return handleUploadOSS(req)
 	case "delete_file":
 		return handleDeleteFile(req)
+	case "copy_pdf":
+		return handleCopyPDF(req)
 	case "notify_user":
 		return handleNotifyUser(req)
 	case "open_local_storage":
@@ -229,6 +231,55 @@ func handleDeleteFile(req Request) error {
 	}
 
 	return writeResponse(Response{OK: true, Action: "delete_file", Path: path, Deleted: true})
+}
+
+func handleCopyPDF(req Request) error {
+	path, err := cleanExistingPath(req.Path)
+	if err != nil {
+		return err
+	}
+	if err := ensureAllowedPDFPath(path); err != nil {
+		return err
+	}
+	info, _, err := inspectPDF(path)
+	if err != nil {
+		return fmt.Errorf("refuse to copy file that is not a valid PDF: %w", err)
+	}
+
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	if base == "" {
+		base = path
+	}
+	target := uniquePath(base + ".original.pdf")
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	copied, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		_ = os.Remove(target)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(target)
+		return closeErr
+	}
+	if copied != info.Size() {
+		_ = os.Remove(target)
+		return fmt.Errorf("copy size mismatch: expected %d, copied %d", info.Size(), copied)
+	}
+	if _, _, err := inspectPDF(target); err != nil {
+		_ = os.Remove(target)
+		return fmt.Errorf("copied file is not a valid PDF: %w", err)
+	}
+	return writeResponse(Response{OK: true, Action: "copy_pdf", Path: target, Filename: filepath.Base(target), Size: copied})
 }
 
 func handleNotifyUser(req Request) error {

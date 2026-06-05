@@ -40,10 +40,12 @@
       return res && (res.recomend === 1 || res.recomend === '1' || res.recommend === 1 || res.recommend === '1');
     }
 
-    function postDoneFromSiteResponse(port, res, fallbackMsg) {
+    function postDoneFromSiteResponse(port, res, fallbackMsg, extra = {}) {
       const rawHtml = res && res.msg ? String(res.msg) : (fallbackMsg || '上传成功');
-      post(port, 'done', stripHtml(rawHtml), {
-        html: rawHtml,
+      const finalHtml = extra.pdfCleanerHtml ? `${rawHtml}<br>${extra.pdfCleanerHtml}` : rawHtml;
+      post(port, 'done', stripHtml(finalHtml), {
+        ...extra,
+        html: finalHtml,
         recomend: isRecommendResponse(res),
         reload: true,
         responseCode: res && res.code

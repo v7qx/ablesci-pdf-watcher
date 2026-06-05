@@ -63,25 +63,79 @@
       escapeHtml
     });
 
-    function downloadOnlyDone(port, reasons, stat) {
+    function pdfCleanerResultFromResponse(cleanRes, overrides = {}) {
+      const result = {
+        enabled: true,
+        status: String(cleanRes?.clean_status || overrides.status || 'unknown'),
+        matched: Number(cleanRes?.clean_matched || 0),
+        rules: Array.isArray(cleanRes?.clean_rules) ? cleanRes.clean_rules.slice(0, 20) : [],
+        engine: String(cleanRes?.clean_engine || ''),
+        elapsedMs: Number(cleanRes?.clean_elapsed_ms || 0),
+        errorCode: String(cleanRes?.clean_error_code || ''),
+        error: String(cleanRes?.error || overrides.error || ''),
+        outputPath: String(cleanRes?.path || ''),
+        originalPath: String(overrides.originalPath || ''),
+        preservedOriginalPath: String(overrides.preservedOriginalPath || '')
+      };
+      if (overrides.status) result.status = String(overrides.status);
+      if (overrides.error) result.error = String(overrides.error);
+      return result;
+    }
+
+    function pdfCleanerSummaryText(result) {
+      if (!result || !result.enabled) return '';
+      const engine = result.engine ? `，引擎 ${result.engine}` : '';
+      const elapsed = result.elapsedMs ? `，耗时 ${result.elapsedMs}ms` : '';
+      const preserved = result.preservedOriginalPath ? `；调试原始 PDF 已保留：${basenameOf(result.preservedOriginalPath)}` : '';
+      if (result.status === 'cleaned') {
+        return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${preserved}`;
+      }
+      if (result.status === 'no_watermark') {
+        return `去水印：未检测到匹配水印${engine}${elapsed}${preserved}`;
+      }
+      if (result.status === 'skipped') {
+        return `去水印：已跳过${result.error ? `（${result.error}）` : ''}${preserved}`;
+      }
+      return `去水印：失败或异常（状态 ${result.status || 'unknown'}${result.error ? `：${result.error}` : ''}）${preserved}`;
+    }
+
+    function pdfCleanerSummaryHtml(result) {
+      const text = pdfCleanerSummaryText(result);
+      return text ? `<span class="ablesci-cleaner-summary">${escapeHtml(text)}</span>` : '';
+    }
+
+    function doneExtraForCleaner(result) {
+      const text = pdfCleanerSummaryText(result);
+      return result ? {
+        pdfCleanerResult: result,
+        pdfCleanerSummary: text,
+        pdfCleanerHtml: pdfCleanerSummaryHtml(result)
+      } : {};
+    }
+
+    function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null) {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
+      const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
       post(port, 'done', `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
-        html: `已仅下载并校验 PDF，未自动上传。<br>原因：${escapeHtml(reasonText)}<br>文件：${escapeHtml(stat?.filename || 'paper.pdf')}`,
+        html: `已仅下载并校验 PDF，未自动上传。<br>原因：${escapeHtml(reasonText)}<br>文件：${escapeHtml(stat?.filename || 'paper.pdf')}${cleanerHtml ? `<br>${cleanerHtml}` : ''}`,
         recomend: false,
         reload: false,
-        downloadOnly: true
+        downloadOnly: true,
+        ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
 
-    function debugDownloadOnlyDone(port, stat) {
+    function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null) {
       const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
-      const message = `调试模式已开启，未自动上传。准备上传文件：${name}`;
+      const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
+      const message = `调试模式已开启，未自动上传。准备上传文件：${name}${cleanerText ? `；${cleanerText}` : ''}`;
       post(port, 'done', message, {
         html: escapeHtml(message),
         recomend: false,
         reload: false,
         downloadOnly: true,
-        debugOnly: true
+        debugOnly: true,
+        ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
 
@@ -237,7 +291,24 @@
       });
       post(port, 'progress', `PDF 校验通过：${stat.filename}，${formatBytes(stat.size)}，MD5=${stat.md5}`);
 
+      let pdfCleanerResult = null;
       if (opts.pdfCleanerEnabled) {
+        const originalPdfPath = stat.path || item.filename || '';
+        let preservedOriginalPath = '';
+        if (opts.debugDownloadOnly && originalPdfPath) {
+          try {
+            const copyRes = await sendNativeMessage(opts.nativeHostName, {
+              action: 'copy_pdf',
+              path: originalPdfPath
+            }, nativeMessageLongTimeoutMs);
+            if (copyRes && copyRes.ok && copyRes.path) {
+              preservedOriginalPath = copyRes.path;
+              post(port, 'progress', `调试模式：已保留去水印前原始 PDF：${copyRes.filename || basenameOf(copyRes.path)}`);
+            }
+          } catch (copyErr) {
+            post(port, 'progress', `调试模式：保留去水印前原始 PDF 失败：${copyErr.message || copyErr}`);
+          }
+        }
         post(port, 'progress', '正在对 PDF 进行去水印处理...');
         try {
           const cleanRes = await sendNativeMessage(opts.nativeHostName, {
@@ -252,19 +323,25 @@
           }, nativeMessageLongTimeoutMs);
 
           if (cleanRes && cleanRes.ok) {
+            pdfCleanerResult = pdfCleanerResultFromResponse(cleanRes, {
+              originalPath: originalPdfPath,
+              preservedOriginalPath
+            });
             if (cleanRes.clean_status === 'cleaned') {
-              post(port, 'progress', `去水印完成：匹配水印 ${cleanRes.clean_matched} 处，使用引擎 ${cleanRes.clean_engine}，耗时 ${cleanRes.clean_elapsed_ms}ms。`);
+              post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
               post(port, 'progress', '正在重新校验去水印后的 PDF 并计算 MD5...');
               stat = await sendNativeMessage(opts.nativeHostName, {
                 action: 'stat_pdf',
                 path: cleanRes.path || stat.path || item.filename
               }, nativeMessageLongTimeoutMs);
             } else if (cleanRes.clean_status === 'no_watermark') {
-              post(port, 'progress', '未检测到匹配的期刊水印，跳过清洗。');
+              post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
             } else {
               const cleanerErr = cleanRes.error || '未知去水印状态或错误';
               if (opts.pdfCleanerOnError === 'stop_upload') {
-                throw new Error(`去水印未成功（状态: ${cleanRes.clean_status}）：${cleanerErr}`);
+                const stopErr = new Error(`去水印未成功（状态: ${cleanRes.clean_status}）：${cleanerErr}`);
+                stopErr.pdfCleanerResult = pdfCleanerResult;
+                throw stopErr;
               } else {
                 post(port, 'progress', `去水印未成功（状态: ${cleanRes.clean_status}）：${cleanerErr}。按配置继续使用原始 PDF 进行上传。`);
               }
@@ -274,8 +351,16 @@
           }
         } catch (err) {
           console.error('[pdf-cleaner] error:', err);
+          pdfCleanerResult = pdfCleanerResult || pdfCleanerResultFromResponse(null, {
+            status: 'error',
+            error: err.message || String(err),
+            originalPath: originalPdfPath,
+            preservedOriginalPath
+          });
           if (opts.pdfCleanerOnError === 'stop_upload') {
-            throw new Error(`去水印失败，已终止上传：${err.message || err}`);
+            const stopErr = new Error(`去水印失败，已终止上传：${err.message || err}`);
+            stopErr.pdfCleanerResult = pdfCleanerResult;
+            throw stopErr;
           } else {
             post(port, 'progress', `去水印出错：${err.message || err}。按配置继续使用原始 PDF 进行上传。`);
           }
@@ -297,7 +382,7 @@
           message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
         });
         post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
-        debugDownloadOnlyDone(port, stat);
+        debugDownloadOnlyDone(port, stat, pdfCleanerResult);
         return;
       }
 
@@ -306,19 +391,19 @@
       if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件小于 ${formatConfiguredSize(opts.minAutoUploadMB || defaultOptions.minAutoUploadMB, opts.minAutoUploadUnit || defaultOptions.minAutoUploadUnit)}（当前 ${formatBytes(size)}），已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-small-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult);
         return;
       }
       if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件大于 ${formatConfiguredSize(opts.maxAutoUploadMB || defaultOptions.maxAutoUploadMB, opts.maxAutoUploadUnit || defaultOptions.maxAutoUploadUnit)}（当前 ${formatBytes(size)}），超过自动上传范围，已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-large-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult);
         return;
       }
 
       if (payload.downloadOnly) {
         await saveDiagnostic({ ...diag, stage: 'download-only-risk', downloadItem: downloadMeta, fileSize: size, reasons: downloadOnlyReasons });
-        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat);
+        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat, pdfCleanerResult);
         return;
       }
 
@@ -334,7 +419,7 @@
         if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
           await recordManualWatcherDaily('uploaded').catch(() => {});
         }
-        postDoneFromSiteResponse(port, permit, '上传成功');
+        postDoneFromSiteResponse(port, permit, '上传成功', doneExtraForCleaner(pdfCleanerResult));
         return;
       }
 
@@ -371,15 +456,19 @@
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        postDoneFromSiteResponse(port, parsed, '上传成功');
+        postDoneFromSiteResponse(port, parsed, '上传成功', doneExtraForCleaner(pdfCleanerResult));
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        post(port, 'done', 'OSS 上传完成，请检查 Ablesci 页面状态。', {
-          html: 'OSS 上传完成，请检查 Ablesci 页面状态。',
+        const cleanerExtra = doneExtraForCleaner(pdfCleanerResult);
+        const cleanerText = cleanerExtra.pdfCleanerSummary ? `；${cleanerExtra.pdfCleanerSummary}` : '';
+        const cleanerHtml = cleanerExtra.pdfCleanerHtml ? `<br>${cleanerExtra.pdfCleanerHtml}` : '';
+        post(port, 'done', `OSS 上传完成，请检查 Ablesci 页面状态。${cleanerText}`, {
+          html: `OSS 上传完成，请检查 Ablesci 页面状态。${cleanerHtml}`,
           recomend: false,
-          reload: true
+          reload: true,
+          ...cleanerExtra
         });
       }
     }

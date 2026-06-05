@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -56,5 +57,49 @@ func TestValidateOSSHostRejectsUnsafeEndpoints(t *testing.T) {
 		if err := validateOSSHost(host); err == nil {
 			t.Fatalf("expected %s to be rejected", host)
 		}
+	}
+}
+
+func TestHandleCopyPDFCreatesOriginalCopy(t *testing.T) {
+	src := filepath.Join(os.TempDir(), "ablesci-copy-test.pdf")
+	if err := os.WriteFile(src, []byte("%PDF-1.4\n% test\n"), 0644); err != nil {
+		t.Fatalf("write source pdf: %v", err)
+	}
+	defer os.Remove(src)
+
+	path, err := cleanExistingPath(src)
+	if err != nil {
+		t.Fatalf("clean path: %v", err)
+	}
+	info, _, err := inspectPDF(path)
+	if err != nil {
+		t.Fatalf("inspect source pdf: %v", err)
+	}
+	ext := filepath.Ext(path)
+	base := path[:len(path)-len(ext)]
+	target := uniquePath(base + ".original.pdf")
+	in, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		t.Fatalf("copy target: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close target: %v", err)
+	}
+	defer os.Remove(target)
+	copiedInfo, _, err := inspectPDF(target)
+	if err != nil {
+		t.Fatalf("inspect copied pdf: %v", err)
+	}
+	if copiedInfo.Size() != info.Size() {
+		t.Fatalf("copy size mismatch: got %d want %d", copiedInfo.Size(), info.Size())
 	}
 }

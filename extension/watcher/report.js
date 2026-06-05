@@ -400,9 +400,33 @@
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
+      const cleanerResults = logs
+        .map(log => log.pdfCleanerResult)
+        .filter(result => result && result.enabled);
+      const cleanerStats = cleanerResults.reduce((acc, result) => {
+        const status = String(result.status || 'unknown');
+        if (status === 'cleaned') {
+          acc.cleaned += 1;
+          acc.removed += Number(result.matched || 0);
+        } else if (status === 'no_watermark') {
+          acc.noWatermark += 1;
+        } else {
+          acc.failed += 1;
+        }
+        if (result.error) acc.errors.push(`${status}: ${result.error}`);
+        return acc;
+      }, { cleaned: 0, removed: 0, noWatermark: 0, failed: 0, errors: [] });
+      function cleanerStatusText(result) {
+        if (!result || !result.enabled) return '';
+        const status = String(result.status || 'unknown');
+        if (status === 'cleaned') return isEn ? `cleaned ${Number(result.matched || 0)}` : `已去除 ${Number(result.matched || 0)} 处`;
+        if (status === 'no_watermark') return isEn ? 'no watermark' : '未检测到';
+        return `${isEn ? 'failed' : '失败'}: ${result.error || result.errorCode || status}`;
+      }
 
       const csvHeader = [
         'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
+        'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath',
         'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
         'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
@@ -506,7 +530,13 @@
           journalName: log.journalName || '',
           detailUrl: reportDetailValue(log),
           status: translateStep(log.status || '', isEn),
-          reason: translateReason(log.reason || '', isEn)
+          reason: translateReason(log.reason || '', isEn),
+          pdfCleanerStatus: log.pdfCleanerResult?.status || '',
+          pdfCleanerMatched: log.pdfCleanerResult?.matched ?? '',
+          pdfCleanerEngine: log.pdfCleanerResult?.engine || '',
+          pdfCleanerElapsedMs: log.pdfCleanerResult?.elapsedMs ?? '',
+          pdfCleanerError: log.pdfCleanerResult?.error || log.pdfCleanerResult?.errorCode || '',
+          pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || ''
         }))
       ];
       const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
@@ -640,6 +670,15 @@
         `- 最近会话执行时长 (秒): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
         `- Trace 事件记录数: ${traces.length}`
       ]);
+      summaryLines.push(
+        ...(isEn ? [
+          `- PDF Cleaner: cleaned tasks=${cleanerStats.cleaned}, removed matches=${cleanerStats.removed}, no watermark=${cleanerStats.noWatermark}, failed=${cleanerStats.failed}`,
+          `- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || 'None'}`
+        ] : [
+          `- PDF 去水印: 成功清洗任务=${cleanerStats.cleaned}，已去除匹配数=${cleanerStats.removed}，未检测到水印=${cleanerStats.noWatermark}，失败=${cleanerStats.failed}`,
+          `- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || '无'}`
+        ])
+      );
 
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
@@ -663,8 +702,8 @@
         '',
         '## Recent Events',
         '',
-        isEn ? '| Time | Trigger | Status | Reason | Journal | DOI | Detail |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) |',
-        '| --- | --- | --- | --- | --- | --- | --- |',
+        isEn ? '| Time | Trigger | Status | Reason | PDF Cleaner | Journal | DOI | Detail |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | PDF 去水印 | 期刊 (Journal) | DOI | 详情 (Detail) |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- |',
         ...logs.filter(log => log.status !== 'queued_upload' && log.status !== 'queued_download_only').slice(0, 12).map(log => {
           let detailVal = reportDetailValue(log);
           if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
@@ -675,6 +714,7 @@
             log.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (log.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : log.trigger),
             translateStep(log.status || '', isEn),
             translateReason(log.reason || '', isEn),
+            cleanerStatusText(log.pdfCleanerResult),
             log.journalName || '',
             log.doi || '',
             detailVal

@@ -640,7 +640,7 @@
       if (msg.type === 'progress') setStatus(translateBackgroundMessage(msg.message), 'busy');
       if (msg.type === 'done') {
         const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
-        const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush)
+        const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush && !msg.pdfCleanerResult)
           ? { ...msg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
           : msg;
 

@@ -113,6 +113,7 @@
             if (!normalSkipReasons.has(failureReason)) {
               await saveErrorDiagnostic(payload, err);
             }
+            const cleanerExtra = err?.pdfCleanerResult ? { pdfCleanerResult: err.pdfCleanerResult } : {};
             if (failureReason === 'publisher_unsupported') {
               const message = formatTaskError(err) || '当前出版商页面类型不支持，已按正常情况跳过本次任务。';
               post(port, 'done', message, {
@@ -121,7 +122,8 @@
                 reload: false,
                 downloadOnly: true,
                 skipped: true,
-                skipReason: 'publisher_unsupported'
+                skipReason: 'publisher_unsupported',
+                ...cleanerExtra
               });
             } else if (isNonPdfAccessPageError(err)) {
               post(port, 'done', htmlDownloadMessage, {
@@ -129,7 +131,8 @@
                 recomend: false,
                 reload: false,
                 downloadOnly: true,
-                blocked: true
+                blocked: true,
+                ...cleanerExtra
               });
             } else if (failureReason === 'login_required') {
               const message = 'ScienceDirect 需要登录或机构访问后才能继续。插件已保留这次为登录阻塞，不计入无权限期刊；完成登录后可重新触发。';
@@ -139,7 +142,8 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true,
-                skipReason: 'login_required'
+                skipReason: 'login_required',
+                ...cleanerExtra
               });
             } else if (failureReason === 'cf_challenge') {
               const message = /暂停低频值守/.test(formatTaskError(err))
@@ -151,7 +155,8 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true,
-                skipReason: 'cf_challenge'
+                skipReason: 'cf_challenge',
+                ...cleanerExtra
               });
             } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
               const message = accessEnvironmentPause?.paused
@@ -163,7 +168,8 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true,
-                skipReason: 'no_access'
+                skipReason: 'no_access',
+                ...cleanerExtra
               });
             } else if (failureReason === 'doi_not_found' || failureReason === 'doi_resolution_failed') {
               const message = 'DOI 解析失败或不存在，已跳过本次任务。';
@@ -173,7 +179,8 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true,
-                skipReason: failureReason
+                skipReason: failureReason,
+                ...cleanerExtra
               });
             } else if (isExpectedTimeoutFailure(failureReason)) {
               const message = formatTimeoutDoneMessage(err, failureReason);
@@ -184,11 +191,12 @@
                 downloadOnly: true,
                 blocked: true,
                 timeout: true,
-                timeoutReason: failureReason
+                timeoutReason: failureReason,
+                ...cleanerExtra
               });
             } else {
               console.error('[Ablesci PDF Watcher Error]', err);
-              post(port, 'error', formatTaskError(err));
+              post(port, 'error', formatTaskError(err), cleanerExtra);
             }
           }
         } finally {

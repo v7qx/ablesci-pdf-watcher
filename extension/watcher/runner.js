@@ -236,7 +236,8 @@
               sessionId: context.sessionId || '',
               assistId: context.key,
               durationMs,
-              paused
+              paused,
+              pdfCleanerResult: msg.pdfCleanerResult || null
               }),
               updateProcessed(context.key, 'failed', msg.message || 'upload_failed'),
               incrementDaily('failed', context.trigger),
@@ -247,7 +248,8 @@
                 sessionId: context.sessionId || '',
                 trigger: context.trigger || '',
                 status: 'failed',
-                reason: msg.message || 'upload_failed'
+                reason: msg.message || 'upload_failed',
+                pdfCleanerResult: msg.pdfCleanerResult || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
@@ -261,7 +263,8 @@
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 assistId: context.key,
-                durationMs
+                durationMs,
+                pdfCleanerResult: msg.pdfCleanerResult || null
               }),
               updateProcessed(context.key, 'failed', msg.message || 'blocked'),
               incrementDaily('failed', context.trigger),
@@ -272,7 +275,8 @@
                 sessionId: context.sessionId || '',
                 trigger: context.trigger || '',
                 status: 'failed',
-                reason: msg.message || 'blocked'
+                reason: msg.message || 'blocked',
+                pdfCleanerResult: msg.pdfCleanerResult || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
@@ -289,7 +293,8 @@
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 assistId: context.key,
-                durationMs
+                durationMs,
+                pdfCleanerResult: msg.pdfCleanerResult || null
               }),
               recordRiskEvent(context.opts || {}, cleanReason, 'success'),
               appendWatcherLog({
@@ -298,7 +303,8 @@
                 sessionId: context.sessionId || '',
                 trigger: context.trigger || '',
                 status: 'success',
-                reason: cleanReason
+                reason: cleanReason,
+                pdfCleanerResult: msg.pdfCleanerResult || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: true, reason: cleanReason, durationMs });
