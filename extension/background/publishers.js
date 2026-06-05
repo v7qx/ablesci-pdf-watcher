@@ -161,6 +161,17 @@
     return match ? `https://pubs.acs.org/doi/full/${match[1]}` : '';
   }
 
+  function ieeeArticleUrlFromPdfUrl(url) {
+    try {
+      const u = new URL(String(url || ''));
+      if (!isIeeeUrl(u.href) || !/\/stamp\/stamp\.jsp$/i.test(u.pathname || '')) return '';
+      const arnumber = u.searchParams.get('arnumber');
+      return arnumber && /^\d+$/.test(arnumber) ? `https://ieeexplore.ieee.org/document/${arnumber}/` : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   function scienceDirectArticleUrlFromPdfUrl(url) {
     const pii = extractScienceDirectPii(url);
     if (!pii) return '';
@@ -169,11 +180,12 @@
 
   function publisherArticleUrlFromPdfUrl(url) {
     if (isDoiUrl(url)) return url;
-    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || springerArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || wileyArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || acsArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
+    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || springerArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || wileyArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || acsArticleUrlFromPdfUrl(url) || ieeeArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
   }
 
   function looksLikePdfDownloadUrl(url) {
     const value = String(url || '');
+    if (isIeeeUrl(value) && /\/stamp\/stamp\.jsp/i.test(value)) return false;
     return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/doi\/pdfdirect\/|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stamp\/stamp\.jsp/i.test(value);
   }
 
