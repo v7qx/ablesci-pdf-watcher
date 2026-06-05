@@ -245,7 +245,37 @@
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }
-      if (['springer', 'wiley', 'acs', 'ieee', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
+      if (msg.publisher === 'ieee' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
+        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+          sendResponse({ ok: true, ignored: true, reason: 'same ieee pdf url already handled' });
+          return false;
+        }
+        pending.lastNativePdfUrl = msg.pdfUrl;
+        if (msg.articleUrl) pending.articleUrl = msg.articleUrl;
+        pending.publisher = 'ieee';
+        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        tracePublisherStep(pending, 'publisher-pdf-url-received', {
+          publisher: 'ieee',
+          articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+          pdfUrl: msg.pdfUrl,
+          source: msg.source || '',
+          diagnostics: msg.diagnostics || null
+        });
+        if (typeof pending.downloadDirectFromPublisherUrl === 'function') {
+          pending.downloadDirectFromPublisherUrl(msg.pdfUrl, msg.source || 'ieee_metadata_pdf_path')
+            .then(() => sendResponse({ ok: true, action: 'download_ieee_pdf_direct', pdfUrl: msg.pdfUrl }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+          return true;
+        }
+        pending.armDownloadCapture?.(msg.pdfUrl);
+        post(pending.port, 'progress', '已从 IEEE 文章页取得正文 PDF 链接，正在打开下载链接。');
+        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
+          .then(() => sendResponse({ ok: true, action: 'navigate_to_ieee_pdf', pdfUrl: msg.pdfUrl }))
+          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+      }
+      if (['springer', 'wiley', 'acs', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
         if (pending.lastNativePdfUrl === msg.pdfUrl) {
           sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });

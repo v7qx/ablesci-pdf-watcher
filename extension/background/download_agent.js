@@ -204,6 +204,7 @@
       const active = options.active !== false;
       const revealAfterMs = Number(options.revealAfterMs || 0);
       const signal = options.signal || null;
+      const directDownloadFilenameRel = options.filenameRel || makeDownloadFilename('', options.payload?.suggestedFilename || 'paper.pdf');
 
       return await new Promise(async (resolve, reject) => {
         let tabId = null;
@@ -356,6 +357,26 @@
           acceptCandidate(item, 'onCreated');
         }
 
+        async function downloadDirectFromPublisherUrl(url, source = 'publisher_direct_download') {
+          if (settled) return null;
+          const nextUrl = String(url || '').trim();
+          if (!nextUrl) throw new Error('出版商返回的 PDF 地址为空');
+          sourceUrlForMatching = nextUrl;
+          expectedHost = hostnameOf(sourceUrlForMatching);
+          downloadArmed = true;
+          tracePublisherStep('publisher-direct-download-start', {
+            expectedHost,
+            sourceUrl: traceUrl(sourceUrlForMatching),
+            source
+          });
+          post(port, 'progress', '已取得出版社真实 PDF 地址，改用 chrome.downloads 直接下载，避免进入浏览器 PDF 预览页。');
+          const item = await downloadByDownloadsAPI(nextUrl, directDownloadFilenameRel, signal, { downloadTimeoutMs });
+          item._ablesciPublisherTabId = tabId;
+          item._ablesciMatchSource = source;
+          finishOk(item);
+          return item;
+        }
+
         async function pollDownloads() {
           if (settled) return;
           const items = await chromeApi.downloads.search({ startedAfter, orderBy: ['-startTime'], limit: 20 });
@@ -409,7 +430,8 @@
                 expectedHost,
                 sourceUrl: traceUrl(sourceUrlForMatching)
               });
-            }
+            },
+            downloadDirectFromPublisherUrl
           });
           registerPublisherTab(tabId, { pdfUrl, articleUrl, reason: 'interactive_publisher_tab' }).catch(() => {});
 
