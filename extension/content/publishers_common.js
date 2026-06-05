@@ -22,7 +22,7 @@
   }
 
   function isWiley() {
-    return host === 'onlinelibrary.wiley.com';
+    return host === 'onlinelibrary.wiley.com' || host.endsWith('.onlinelibrary.wiley.com');
   }
 
   function isAip() {

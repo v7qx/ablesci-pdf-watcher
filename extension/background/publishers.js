@@ -38,7 +38,7 @@
   }
 
   function isWileyUrl(url) {
-    return /:\/\/onlinelibrary\.wiley\.com\//i.test(String(url || ''));
+    return /:\/\/(?:[^/]+\.)?onlinelibrary\.wiley\.com\//i.test(String(url || ''));
   }
 
   function aipArticleUrlFromPdfUrl(url) {
@@ -151,8 +151,10 @@
 
   function wileyArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
-    const match = s.match(/^https?:\/\/onlinelibrary\.wiley\.com\/doi\/(?:pdf|epdf|pdfdirect)\/(10\.[^?#]+)(?:[?#].*)?$/i);
-    return match ? `https://onlinelibrary.wiley.com/doi/full/${match[1]}` : '';
+    const match = s.match(/^https?:\/\/([^/]+\.)?onlinelibrary\.wiley\.com\/doi\/(?:pdf|epdf|pdfdirect)\/(10\.[^?#]+)(?:[?#].*)?$/i);
+    if (!match) return '';
+    const subdomain = match[1] || '';
+    return `https://${subdomain}onlinelibrary.wiley.com/doi/full/${match[2]}`;
   }
 
   function acsArticleUrlFromPdfUrl(url) {
