@@ -15,6 +15,7 @@
       isScienceDirectUrl,
       isDoiUrl,
       isNatureUrl,
+      isCnpeUrl,
       isSpringerUrl,
       isRscDirectPdfUrl,
       isRscUrl,
@@ -478,7 +479,7 @@
         downloadTimeoutMs,
         signal
       };
-      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl);
+      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl) || isCnpeUrl(pdfUrl);
 
       function isUnsupportedSpringerBookPdfUrl(url) {
         const s = String(url || '');
@@ -507,6 +508,15 @@
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'Nature 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+      }
+
+      if (isCnpeUrl(pdfUrl) && !looksLikePdfDownloadUrl(pdfUrl)) {
+        if (mode === 'publisher_tab') {
+          post(port, 'progress', 'SAGE 易阅通使用可见文章页原生 PDF 下载模式。');
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
+        }
+        post(port, 'progress', 'SAGE 易阅通使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
         return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
       }
 

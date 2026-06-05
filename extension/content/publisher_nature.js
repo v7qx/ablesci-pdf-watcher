@@ -54,6 +54,27 @@
     }
   }
 
+  function hasNatureNoSubscriptionAccess() {
+    if (findNatureArticlePdfLink()) return false;
+    const hasAccessProvider = !!document.querySelector('.c-article-access-provider');
+    const hasPaywallContainer = !!document.querySelector(
+      '.c-article-paywall, .c-paywall, #paywall, .paywall, .paywall-container, [data-test="paywall"]'
+    );
+    const hasAccessOptionsHeader = Array.from(document.querySelectorAll('h2, h3')).some(h =>
+      /Access options/i.test(h.innerText || h.textContent || '')
+    );
+    const bodyText = (document.body && document.body.innerText) || '';
+    const hasPaywallText = [
+      'This is a preview of subscription content',
+      'Subscribe to this journal',
+      'Buy this article',
+      'Rent or buy this article',
+      'access via your institution'
+    ].some(text => bodyText.includes(text));
+
+    return hasAccessProvider || hasPaywallContainer || hasAccessOptionsHeader || hasPaywallText;
+  }
+
   async function notifyReady() {
     if (!common.isNature() || pdfTriggered) return;
     if (!(await common.canControlCurrentPublisherPage())) {
@@ -72,15 +93,23 @@
       }
       return;
     }
+    if (hasNatureNoSubscriptionAccess()) {
+      sendNatureMessage({
+        articleUrl: location.href,
+        noSubscription: true,
+        error: 'Nature 明确返回没有正文订阅权限。'
+      });
+      stopObserver();
+      return;
+    }
     const found = findNatureArticlePdfLink();
     if (!found) return;
     pdfTriggered = true;
     sendNatureMessage({
       pdfUrl: found.href,
-      clicked: true,
+      clicked: false,
       source: 'native_article_pdf_link'
     });
-    setTimeout(() => found.link.click(), 0);
     stopObserver();
   }
 

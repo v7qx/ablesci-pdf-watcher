@@ -41,7 +41,9 @@
     "https://*.scitation.org/*",
     "https://aip.org/*",
     "https://scitation.org/*",
-    "https://ieeexplore.ieee.org/*"
+    "https://ieeexplore.ieee.org/*",
+    "https://*.nature.com/*",
+    "https://*.cnpereading.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -83,7 +85,9 @@
         "https://*.scitation.org/*",
         "https://aip.org/*",
         "https://scitation.org/*",
-        "https://ieeexplore.ieee.org/*"
+        "https://ieeexplore.ieee.org/*",
+        "https://*.nature.com/*",
+        "https://*.cnpereading.com/*"
       ],
       "js": [
         "content/publishers_common.js",
@@ -91,6 +95,8 @@
         "content/publisher_direct_pdf.js",
         "content/publisher_rsc.js",
         "content/publisher_aip.js",
+        "content/publisher_nature.js",
+        "content/publisher_cnpe.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"

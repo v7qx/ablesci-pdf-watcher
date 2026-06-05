@@ -87,8 +87,8 @@
       if (!result || !result.enabled) return '';
       const engine = result.engine ? `，引擎 ${result.engine}` : '';
       const elapsed = result.elapsedMs ? `，耗时 ${result.elapsedMs}ms` : '';
-      const preserved = result.preservedOriginalPath ? `；调试原始 PDF 已保留：${basenameOf(result.preservedOriginalPath)}` : '';
-      const preservedCleaned = result.preservedCleanedPath ? `；调试无水印 PDF 已保留：${basenameOf(result.preservedCleanedPath)}` : '';
+      const preserved = result.preservedOriginalPath ? '；已保留 *.original.pdf' : '';
+      const preservedCleaned = result.preservedCleanedPath ? '；已保留 *.cleaned.pdf' : '';
       if (result.status === 'cleaned') {
         return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${preserved}${preservedCleaned}`;
       }
@@ -121,6 +121,20 @@
       return idx > 0 ? value.slice(0, idx) : '';
     }
 
+    function truncateFilename(filename, maxLen = 30) {
+      const str = String(filename || '');
+      if (str.length <= maxLen) return str;
+      const extIdx = str.lastIndexOf('.');
+      const ext = extIdx > 0 ? str.slice(extIdx) : '';
+      const base = extIdx > 0 ? str.slice(0, extIdx) : str;
+      if (base.length <= maxLen - ext.length) return str;
+      const avail = maxLen - ext.length - 3;
+      if (avail <= 0) return '...' + ext;
+      const prefixLen = Math.floor(avail * 0.6);
+      const suffixLen = avail - prefixLen;
+      return base.slice(0, prefixLen) + '...' + base.slice(base.length - suffixLen) + ext;
+    }
+
     function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null) {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
       const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
@@ -135,8 +149,9 @@
 
     function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null) {
       const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
+      const truncatedName = truncateFilename(name, 35);
       const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
-      const message = `调试模式已开启，未自动上传。准备上传文件：${name}${cleanerText ? `；${cleanerText}` : ''}`;
+      const message = `调试模式已开启，未自动上传。准备上传文件：${truncatedName}${cleanerText ? `；${cleanerText}` : ''}`;
       post(port, 'done', message, {
         html: escapeHtml(message),
         recomend: false,

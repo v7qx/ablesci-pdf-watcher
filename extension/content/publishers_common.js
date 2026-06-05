@@ -45,6 +45,10 @@
     return /(^|\.)iop\.org$/i.test(host);
   }
 
+  function isCnpe() {
+    return /(^|\.)cnpereading\.com$/i.test(host);
+  }
+
   function currentPublisher() {
     if (isScienceDirect()) return 'sciencedirect';
     if (isNature()) return 'nature';
@@ -56,6 +60,7 @@
     if (isIeee()) return 'ieee';
     if (isOxford()) return 'oxford';
     if (isIop()) return 'iop';
+    if (isCnpe()) return 'cnpe';
     return '';
   }
 
@@ -136,6 +141,7 @@
     isIeee,
     isOxford,
     isIop,
+    isCnpe,
     currentPublisher,
     canControlCurrentPublisherPage,
     decodeHtmlUrl,

@@ -12,6 +12,7 @@
       extractScienceDirectPii,
       isDoiHost,
       isNatureUrl,
+      isCnpeUrl,
       isSpringerUrl,
       isRscUrl,
       isAipUrl,
@@ -68,11 +69,11 @@
       }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isCnpeUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
         pending.articleUrl = url;
         pending.publisher = isScienceDirectUrl(url)
           ? 'sciencedirect'
-          : (isNatureUrl(url) ? 'nature' : (isSpringerUrl(url) ? 'springer' : (isRscUrl(url) ? 'rsc' : (isWileyUrl(url) ? 'wiley' : (isAipUrl(url) ? 'aip' : (isAcsUrl(url) ? 'acs' : (isIeeeUrl(url) ? 'ieee' : (isOxfordUrl(url) ? 'oxford' : 'iop'))))))));
+          : (isNatureUrl(url) ? 'nature' : (isCnpeUrl(url) ? 'cnpe' : (isSpringerUrl(url) ? 'springer' : (isRscUrl(url) ? 'rsc' : (isWileyUrl(url) ? 'wiley' : (isAipUrl(url) ? 'aip' : (isAcsUrl(url) ? 'acs' : (isIeeeUrl(url) ? 'ieee' : (isOxfordUrl(url) ? 'oxford' : 'iop')))))))));
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -126,6 +127,16 @@
       if (msg.publisher === 'sciencedirect' && msg.noSubscription) {
         pending.finishError(new Error('ScienceDirect 明确返回无正文订阅权限（does not subscribe to this content on ScienceDirect）。'));
         sendResponse({ ok: true, action: 'science_direct_no_subscription' });
+        return false;
+      }
+      if (msg.publisher === 'nature' && msg.noSubscription) {
+        pending.finishError(new Error('Nature 明确返回无正文订阅权限。'));
+        sendResponse({ ok: true, action: 'nature_no_subscription' });
+        return false;
+      }
+      if (msg.publisher === 'cnpe' && msg.noSubscription) {
+        pending.finishError(new Error('易阅通 SAGE 平台明确返回无正文订阅权限。'));
+        sendResponse({ ok: true, action: 'cnpe_no_subscription' });
         return false;
       }
       if (msg.publisherChallenge) {
@@ -217,6 +228,12 @@
         }
         pending.lastNativePdfUrl = msg.pdfUrl;
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (typeof pending.downloadDirectFromPublisherUrl === 'function') {
+          pending.downloadDirectFromPublisherUrl(msg.pdfUrl, msg.source || 'nature_pdf_direct')
+            .then(() => sendResponse({ ok: true, action: 'download_nature_pdf_direct', pdfUrl: msg.pdfUrl }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+          return true;
+        }
         if (msg.clicked) {
           pending.armDownloadCapture?.(msg.pdfUrl);
           post(pending.port, 'progress', '已在 Nature 文章页触发原生正文 PDF 下载按钮，继续监听浏览器下载。');
@@ -226,6 +243,32 @@
         post(pending.port, 'progress', '已从 Nature 文章页取得正文 PDF 下载链接，正在打开该链接。');
         chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
           .then(() => sendResponse({ ok: true, action: 'navigate_to_nature_pdf', pdfUrl: msg.pdfUrl }))
+          .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+      }
+      if (msg.publisher === 'cnpe' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
+        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+          sendResponse({ ok: true, ignored: true, reason: 'same cnpe pdf url already handled' });
+          return false;
+        }
+        pending.lastNativePdfUrl = msg.pdfUrl;
+        if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        if (msg.clicked) {
+          pending.armDownloadCapture?.(msg.pdfUrl);
+          post(pending.port, 'progress', '已在易阅通页面触发原生 PDF 下载，继续监听浏览器下载。');
+          sendResponse({ ok: true, action: 'clicked_cnpe_pdf', pdfUrl: msg.pdfUrl });
+          return false;
+        }
+        if (typeof pending.downloadDirectFromPublisherUrl === 'function') {
+          pending.downloadDirectFromPublisherUrl(msg.pdfUrl, msg.source || 'cnpe_pdf_direct')
+            .then(() => sendResponse({ ok: true, action: 'download_cnpe_pdf_direct', pdfUrl: msg.pdfUrl }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+          return true;
+        }
+        post(pending.port, 'progress', '已从易阅通文章页取得正文 PDF 下载链接，正在打开该链接。');
+        chromeApi.tabs.update(tabId, { url: msg.pdfUrl })
+          .then(() => sendResponse({ ok: true, action: 'navigate_to_cnpe_pdf', pdfUrl: msg.pdfUrl }))
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }

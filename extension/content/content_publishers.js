@@ -18,6 +18,10 @@
       window.AblesciNaturePublisher?.start();
       return;
     }
+    if (location.hostname.includes('cnpereading.com')) {
+      window.AblesciCnpePublisher?.start();
+      return;
+    }
     if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isIeee() || common.isOxford()) {
       window.AblesciDirectPdfPublisher?.start();
       return;
