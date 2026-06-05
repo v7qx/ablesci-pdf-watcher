@@ -340,6 +340,10 @@
             clearTimeout(noDownloadTimer);
             noDownloadTimer = null;
           }
+          if (revealTimer) {
+            clearTimeout(revealTimer);
+            revealTimer = null;
+          }
           post(port, 'progress', `检测到浏览器下载 #${item.id}（${source}），等待完成...`);
           onceDownloadComplete(downloadId, downloadTimeoutMs, signal)
             .then(item => {
@@ -369,6 +373,14 @@
             sourceUrl: traceUrl(sourceUrlForMatching),
             source
           });
+          if (noDownloadTimer) {
+            clearTimeout(noDownloadTimer);
+            noDownloadTimer = null;
+          }
+          if (revealTimer) {
+            clearTimeout(revealTimer);
+            revealTimer = null;
+          }
           post(port, 'progress', '已取得出版社真实 PDF 地址，改用 chrome.downloads 直接下载，避免进入浏览器 PDF 预览页。');
           const item = await downloadByDownloadsAPI(nextUrl, directDownloadFilenameRel, signal, { downloadTimeoutMs });
           item._ablesciPublisherTabId = tabId;
