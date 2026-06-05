@@ -60,24 +60,24 @@ type OSSFields struct {
 }
 
 type Response struct {
-	OK             bool     `json:"ok"`
-	Error          string   `json:"error,omitempty"`
-	Action         string   `json:"action,omitempty"`
-	Path           string   `json:"path,omitempty"`
-	Filename       string   `json:"filename,omitempty"`
-	Size           int64    `json:"size,omitempty"`
-	MD5            string   `json:"md5,omitempty"`
-	IsPDF          bool     `json:"is_pdf,omitempty"`
-	Status         int      `json:"status,omitempty"`
-	Body           string   `json:"body,omitempty"`
-	Deleted        bool     `json:"deleted,omitempty"`
-	CleanStatus    string   `json:"clean_status,omitempty"`
-	CleanOutput    string   `json:"clean_output,omitempty"`
-	CleanErrorCode string   `json:"clean_error_code,omitempty"`
-	CleanMatched   int      `json:"clean_matched,omitempty"`
-	CleanRules     []string `json:"clean_rules,omitempty"`
-	CleanEngine    string   `json:"clean_engine,omitempty"`
-	CleanElapsedMs int64    `json:"clean_elapsed_ms,omitempty"`
+	OK                 bool     `json:"ok"`
+	Error              string   `json:"error,omitempty"`
+	Action             string   `json:"action,omitempty"`
+	Path               string   `json:"path,omitempty"`
+	Filename           string   `json:"filename,omitempty"`
+	Size               int64    `json:"size,omitempty"`
+	MD5                string   `json:"md5,omitempty"`
+	IsPDF              bool     `json:"is_pdf,omitempty"`
+	Status             int      `json:"status,omitempty"`
+	Body               string   `json:"body,omitempty"`
+	Deleted            bool     `json:"deleted,omitempty"`
+	CleanStatus        string   `json:"clean_status,omitempty"`
+	CleanOutput        string   `json:"clean_output,omitempty"`
+	CleanErrorCode     string   `json:"clean_error_code,omitempty"`
+	CleanMatched       int      `json:"clean_matched,omitempty"`
+	CleanRules         []string `json:"clean_rules,omitempty"`
+	CleanEngine        string   `json:"clean_engine,omitempty"`
+	CleanElapsedMs     int64    `json:"clean_elapsed_ms,omitempty"`
 	CleanBackupPath    string   `json:"clean_backup_path,omitempty"`
 	CleanBackupCreated bool     `json:"clean_backup_created,omitempty"`
 }
@@ -1029,6 +1029,7 @@ func handleCleanPDF(req Request) error {
 
 	// 5. Execute process
 	cmd := exec.CommandContext(ctx, cleanerPath, args...)
+	cmd.Env = envWithCleanerToolDirs(cleanerPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
@@ -1115,4 +1116,34 @@ func handleCleanPDF(req Request) error {
 		}(),
 		Error: errMsg,
 	})
+}
+
+func envWithCleanerToolDirs(cleanerPath string) []string {
+	env := os.Environ()
+	cleanerDir := filepath.Dir(cleanerPath)
+	if cleanerDir == "." || cleanerDir == "" {
+		return env
+	}
+
+	extraDirs := []string{
+		cleanerDir,
+		filepath.Join(cleanerDir, "bin"),
+		filepath.Join(cleanerDir, "qpdf"),
+		filepath.Join(cleanerDir, "qpdf", "bin"),
+	}
+	pathValue := strings.Join(extraDirs, string(os.PathListSeparator))
+	pathKey := "PATH"
+	found := false
+	for i, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && strings.EqualFold(key, pathKey) {
+			env[i] = key + "=" + pathValue + string(os.PathListSeparator) + value
+			found = true
+			break
+		}
+	}
+	if !found {
+		env = append(env, pathKey+"="+pathValue)
+	}
+	return env
 }
