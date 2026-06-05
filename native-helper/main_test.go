@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/binary"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -75,31 +77,89 @@ func TestHandleCopyPDFCreatesOriginalCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect source pdf: %v", err)
 	}
-	ext := filepath.Ext(path)
-	base := path[:len(path)-len(ext)]
-	target := uniquePath(base + ".original.pdf")
-	in, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open source: %v", err)
+	resp := captureNativeResponse(t, func() error {
+		return handleCopyPDF(Request{Path: path})
+	})
+	defer os.Remove(resp.Path)
+	if !resp.OK {
+		t.Fatalf("copy response not ok: %s", resp.Error)
 	}
-	defer in.Close()
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		t.Fatalf("create target: %v", err)
+	if filepath.Ext(resp.Path) != ".pdf" {
+		t.Fatalf("expected pdf target, got %s", resp.Path)
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		t.Fatalf("copy target: %v", err)
+	if filepath.Base(resp.Path) != "ablesci-copy-test.original.pdf" {
+		t.Fatalf("unexpected target name: %s", filepath.Base(resp.Path))
 	}
-	if err := out.Close(); err != nil {
-		t.Fatalf("close target: %v", err)
-	}
-	defer os.Remove(target)
-	copiedInfo, _, err := inspectPDF(target)
+	copiedInfo, _, err := inspectPDF(resp.Path)
 	if err != nil {
 		t.Fatalf("inspect copied pdf: %v", err)
 	}
 	if copiedInfo.Size() != info.Size() {
 		t.Fatalf("copy size mismatch: got %d want %d", copiedInfo.Size(), info.Size())
 	}
+}
+
+func TestHandleCopyPDFCreatesCleanedCopyInTargetDir(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "cleaner-output.pdf")
+	if err := os.WriteFile(src, []byte("%PDF-1.4\n% cleaned\n"), 0644); err != nil {
+		t.Fatalf("write source pdf: %v", err)
+	}
+	resp := captureNativeResponse(t, func() error {
+		return handleCopyPDF(Request{
+			Path:      src,
+			MoveToDir: dstDir,
+			Filename:  "paper.pdf",
+			Extra:     map[string]string{"suffix": ".cleaned.pdf"},
+		})
+	})
+	defer os.Remove(resp.Path)
+	if !resp.OK {
+		t.Fatalf("copy response not ok: %s", resp.Error)
+	}
+	if filepath.Dir(resp.Path) != dstDir {
+		t.Fatalf("expected target dir %s, got %s", dstDir, filepath.Dir(resp.Path))
+	}
+	if filepath.Base(resp.Path) != "paper.cleaned.pdf" {
+		t.Fatalf("unexpected target name: %s", filepath.Base(resp.Path))
+	}
+	if _, _, err := inspectPDF(resp.Path); err != nil {
+		t.Fatalf("inspect copied pdf: %v", err)
+	}
+}
+
+func captureNativeResponse(t *testing.T, fn func() error) Response {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	callErr := fn()
+	closeErr := w.Close()
+	os.Stdout = oldStdout
+	if callErr != nil {
+		r.Close()
+		t.Fatalf("native call failed: %v", callErr)
+	}
+	if closeErr != nil {
+		r.Close()
+		t.Fatalf("close stdout pipe: %v", closeErr)
+	}
+	defer r.Close()
+	var size uint32
+	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
+		t.Fatalf("read response size: %v", err)
+	}
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	var resp Response
+	if err := json.Unmarshal(buf, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
 }

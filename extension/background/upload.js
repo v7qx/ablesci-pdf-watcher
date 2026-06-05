@@ -75,7 +75,8 @@
         error: String(cleanRes?.error || overrides.error || ''),
         outputPath: String(cleanRes?.path || ''),
         originalPath: String(overrides.originalPath || ''),
-        preservedOriginalPath: String(overrides.preservedOriginalPath || '')
+        preservedOriginalPath: String(overrides.preservedOriginalPath || ''),
+        preservedCleanedPath: String(overrides.preservedCleanedPath || '')
       };
       if (overrides.status) result.status = String(overrides.status);
       if (overrides.error) result.error = String(overrides.error);
@@ -87,8 +88,9 @@
       const engine = result.engine ? `，引擎 ${result.engine}` : '';
       const elapsed = result.elapsedMs ? `，耗时 ${result.elapsedMs}ms` : '';
       const preserved = result.preservedOriginalPath ? `；调试原始 PDF 已保留：${basenameOf(result.preservedOriginalPath)}` : '';
+      const preservedCleaned = result.preservedCleanedPath ? `；调试无水印 PDF 已保留：${basenameOf(result.preservedCleanedPath)}` : '';
       if (result.status === 'cleaned') {
-        return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${preserved}`;
+        return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${preserved}${preservedCleaned}`;
       }
       if (result.status === 'no_watermark') {
         return `去水印：未检测到匹配水印${engine}${elapsed}${preserved}`;
@@ -111,6 +113,12 @@
         pdfCleanerSummary: text,
         pdfCleanerHtml: pdfCleanerSummaryHtml(result)
       } : {};
+    }
+
+    function dirnameOf(path) {
+      const value = String(path || '');
+      const idx = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'));
+      return idx > 0 ? value.slice(0, idx) : '';
     }
 
     function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null) {
@@ -294,12 +302,16 @@
       let pdfCleanerResult = null;
       if (opts.pdfCleanerEnabled) {
         const originalPdfPath = stat.path || item.filename || '';
+        const originalPdfDir = dirnameOf(originalPdfPath);
+        const originalPdfName = stat.filename || basenameOf(originalPdfPath);
         let preservedOriginalPath = '';
+        let preservedCleanedPath = '';
         if (opts.debugDownloadOnly && originalPdfPath) {
           try {
             const copyRes = await sendNativeMessage(opts.nativeHostName, {
               action: 'copy_pdf',
-              path: originalPdfPath
+              path: originalPdfPath,
+              extra: { suffix: '.original.pdf' }
             }, nativeMessageLongTimeoutMs);
             if (copyRes && copyRes.ok && copyRes.path) {
               preservedOriginalPath = copyRes.path;
@@ -325,9 +337,28 @@
           if (cleanRes && cleanRes.ok) {
             pdfCleanerResult = pdfCleanerResultFromResponse(cleanRes, {
               originalPath: originalPdfPath,
-              preservedOriginalPath
+              preservedOriginalPath,
+              preservedCleanedPath
             });
             if (cleanRes.clean_status === 'cleaned') {
+              if (opts.debugDownloadOnly && cleanRes.path) {
+                try {
+                  const copyCleanedRes = await sendNativeMessage(opts.nativeHostName, {
+                    action: 'copy_pdf',
+                    path: cleanRes.path,
+                    move_to_dir: originalPdfDir,
+                    filename: originalPdfName,
+                    extra: { suffix: '.cleaned.pdf' }
+                  }, nativeMessageLongTimeoutMs);
+                  if (copyCleanedRes && copyCleanedRes.ok && copyCleanedRes.path) {
+                    preservedCleanedPath = copyCleanedRes.path;
+                    pdfCleanerResult.preservedCleanedPath = preservedCleanedPath;
+                    post(port, 'progress', `调试模式：已保留去水印后无水印 PDF：${copyCleanedRes.filename || basenameOf(copyCleanedRes.path)}`);
+                  }
+                } catch (copyCleanedErr) {
+                  post(port, 'progress', `调试模式：保留去水印后无水印 PDF 失败：${copyCleanedErr.message || copyCleanedErr}`);
+                }
+              }
               post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
               post(port, 'progress', '正在重新校验去水印后的 PDF 并计算 MD5...');
               stat = await sendNativeMessage(opts.nativeHostName, {
@@ -355,7 +386,8 @@
             status: 'error',
             error: err.message || String(err),
             originalPath: originalPdfPath,
-            preservedOriginalPath
+            preservedOriginalPath,
+            preservedCleanedPath
           });
           if (opts.pdfCleanerOnError === 'stop_upload') {
             const stopErr = new Error(`去水印失败，已终止上传：${err.message || err}`);

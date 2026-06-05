@@ -426,7 +426,7 @@
 
       const csvHeader = [
         'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
-        'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath',
+        'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath', 'pdfCleanerCleanedPath',
         'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
         'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
@@ -536,7 +536,8 @@
           pdfCleanerEngine: log.pdfCleanerResult?.engine || '',
           pdfCleanerElapsedMs: log.pdfCleanerResult?.elapsedMs ?? '',
           pdfCleanerError: log.pdfCleanerResult?.error || log.pdfCleanerResult?.errorCode || '',
-          pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || ''
+          pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || '',
+          pdfCleanerCleanedPath: log.pdfCleanerResult?.preservedCleanedPath || ''
         }))
       ];
       const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';

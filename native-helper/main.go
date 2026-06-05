@@ -246,12 +246,43 @@ func handleCopyPDF(req Request) error {
 		return fmt.Errorf("refuse to copy file that is not a valid PDF: %w", err)
 	}
 
-	ext := filepath.Ext(path)
-	base := strings.TrimSuffix(path, ext)
-	if base == "" {
-		base = path
+	suffix := strings.TrimSpace(req.Extra["suffix"])
+	if suffix == "" {
+		suffix = ".original.pdf"
 	}
-	target := uniquePath(base + ".original.pdf")
+	if !isSafeCopyPDFSuffix(suffix) {
+		return fmt.Errorf("invalid copy_pdf suffix: %s", suffix)
+	}
+
+	ext := filepath.Ext(path)
+	sourceBaseName := filepath.Base(path)
+	if req.Filename != "" {
+		sourceBaseName = filepath.Base(req.Filename)
+	}
+	sourceBaseName = strings.TrimSuffix(sourceBaseName, filepath.Ext(sourceBaseName))
+	if sourceBaseName == "" || sourceBaseName == "." || sourceBaseName == string(filepath.Separator) {
+		sourceBaseName = strings.TrimSuffix(filepath.Base(path), ext)
+	}
+	targetDir := filepath.Dir(path)
+	if strings.TrimSpace(req.MoveToDir) != "" {
+		resolvedDir, dirErr := filepath.Abs(filepath.Clean(req.MoveToDir))
+		if dirErr != nil {
+			return dirErr
+		}
+		dirInfo, statErr := os.Stat(resolvedDir)
+		if statErr != nil {
+			return statErr
+		}
+		if !dirInfo.IsDir() {
+			return fmt.Errorf("copy_pdf target is not a directory: %s", resolvedDir)
+		}
+		targetDir = resolvedDir
+	}
+	base := filepath.Join(targetDir, sourceBaseName)
+	if base == "" {
+		base = strings.TrimSuffix(path, ext)
+	}
+	target := uniquePath(base + suffix)
 	src, err := os.Open(path)
 	if err != nil {
 		return err
@@ -280,6 +311,25 @@ func handleCopyPDF(req Request) error {
 		return fmt.Errorf("copied file is not a valid PDF: %w", err)
 	}
 	return writeResponse(Response{OK: true, Action: "copy_pdf", Path: target, Filename: filepath.Base(target), Size: copied})
+}
+
+func isSafeCopyPDFSuffix(suffix string) bool {
+	if !strings.HasPrefix(suffix, ".") || !strings.HasSuffix(strings.ToLower(suffix), ".pdf") {
+		return false
+	}
+	if strings.ContainsAny(suffix, `/\:`) {
+		return false
+	}
+	if strings.Contains(suffix, "..") {
+		return false
+	}
+	for _, r := range suffix {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func handleNotifyUser(req Request) error {
