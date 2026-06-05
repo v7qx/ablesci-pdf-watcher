@@ -78,6 +78,8 @@ type Response struct {
 	CleanRules     []string `json:"clean_rules,omitempty"`
 	CleanEngine    string   `json:"clean_engine,omitempty"`
 	CleanElapsedMs int64    `json:"clean_elapsed_ms,omitempty"`
+	CleanBackupPath    string   `json:"clean_backup_path,omitempty"`
+	CleanBackupCreated bool     `json:"clean_backup_created,omitempty"`
 }
 
 func isTerminal() bool {
@@ -992,13 +994,18 @@ func handleCleanPDF(req Request) error {
 	defer os.Remove(summaryPath)
 
 	// 3. Prepare arguments
+	preserveOriginal := req.Extra["preserve_original"] == "true"
 	args := []string{
 		"-input", path,
 		"-apply",
 		"-replace",
-		"-no-backup",
-		"-summary-json", summaryPath,
 	}
+	if preserveOriginal {
+		args = append(args, "-preserve-original-on-cleaned")
+	} else {
+		args = append(args, "-no-backup")
+	}
+	args = append(args, "-summary-json", summaryPath)
 
 	if patternsPath := req.Extra["patterns_path"]; patternsPath != "" {
 		args = append(args, "-patterns", patternsPath)
@@ -1050,6 +1057,8 @@ func handleCleanPDF(req Request) error {
 			ElapsedMs     int64    `json:"elapsed_ms"`
 			ErrorCode     string   `json:"error_code"`
 			Error         string   `json:"error"`
+			BackupPath    string   `json:"backup_path"`
+			BackupCreated bool     `json:"backup_created"`
 		}
 		var summary Summary
 		if json.Unmarshal(summaryData, &summary) == nil {
@@ -1062,17 +1071,19 @@ func handleCleanPDF(req Request) error {
 				}
 			}
 			return writeResponse(Response{
-				OK:             true,
-				Action:         "clean_pdf",
-				Path:           resultPath,
-				CleanStatus:    summary.Status,
-				CleanOutput:    summary.Output,
-				CleanErrorCode: summary.ErrorCode,
-				CleanMatched:   summary.Matched,
-				CleanRules:     summary.Rules,
-				CleanEngine:    summary.Engine,
-				CleanElapsedMs: summary.ElapsedMs,
-				Error:          summary.Error,
+				OK:                 true,
+				Action:             "clean_pdf",
+				Path:               resultPath,
+				CleanStatus:        summary.Status,
+				CleanOutput:        summary.Output,
+				CleanErrorCode:     summary.ErrorCode,
+				CleanMatched:       summary.Matched,
+				CleanRules:         summary.Rules,
+				CleanEngine:        summary.Engine,
+				CleanElapsedMs:     summary.ElapsedMs,
+				CleanBackupPath:    summary.BackupPath,
+				CleanBackupCreated: summary.BackupCreated,
+				Error:              summary.Error,
 			})
 		}
 	}

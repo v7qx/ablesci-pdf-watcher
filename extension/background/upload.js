@@ -75,7 +75,7 @@
         error: String(cleanRes?.error || overrides.error || ''),
         outputPath: String(cleanRes?.path || ''),
         originalPath: String(overrides.originalPath || ''),
-        preservedOriginalPath: String(overrides.preservedOriginalPath || ''),
+        preservedOriginalPath: String(overrides.preservedOriginalPath || (cleanRes?.clean_backup_created ? cleanRes?.clean_backup_path : '') || ''),
         preservedCleanedPath: String(overrides.preservedCleanedPath || '')
       };
       if (overrides.status) result.status = String(overrides.status);
@@ -302,25 +302,6 @@
       let pdfCleanerResult = null;
       if (opts.pdfCleanerEnabled) {
         const originalPdfPath = stat.path || item.filename || '';
-        const originalPdfDir = dirnameOf(originalPdfPath);
-        const originalPdfName = stat.filename || basenameOf(originalPdfPath);
-        let preservedOriginalPath = '';
-        let preservedCleanedPath = '';
-        if (opts.debugDownloadOnly && originalPdfPath) {
-          try {
-            const copyRes = await sendNativeMessage(opts.nativeHostName, {
-              action: 'copy_pdf',
-              path: originalPdfPath,
-              extra: { suffix: '.original.pdf' }
-            }, nativeMessageLongTimeoutMs);
-            if (copyRes && copyRes.ok && copyRes.path) {
-              preservedOriginalPath = copyRes.path;
-              post(port, 'progress', `调试模式：已保留去水印前原始 PDF：${copyRes.filename || basenameOf(copyRes.path)}`);
-            }
-          } catch (copyErr) {
-            post(port, 'progress', `调试模式：保留去水印前原始 PDF 失败：${copyErr.message || copyErr}`);
-          }
-        }
         post(port, 'progress', '正在对 PDF 进行去水印处理...');
         try {
           const cleanRes = await sendNativeMessage(opts.nativeHostName, {
@@ -330,35 +311,16 @@
               cleaner_path: opts.pdfCleanerCliPath || '',
               patterns_path: opts.pdfCleanerPatternsPath || '',
               engine: opts.pdfCleanerEngine || 'auto',
-              timeout_seconds: String(opts.pdfCleanerTimeoutSeconds || 60)
+              timeout_seconds: String(opts.pdfCleanerTimeoutSeconds || 60),
+              preserve_original: String(opts.pdfCleanerPreserveOriginal === true)
             }
           }, nativeMessageLongTimeoutMs);
 
           if (cleanRes && cleanRes.ok) {
             pdfCleanerResult = pdfCleanerResultFromResponse(cleanRes, {
-              originalPath: originalPdfPath,
-              preservedOriginalPath,
-              preservedCleanedPath
+              originalPath: originalPdfPath
             });
             if (cleanRes.clean_status === 'cleaned') {
-              if (opts.debugDownloadOnly && cleanRes.path) {
-                try {
-                  const copyCleanedRes = await sendNativeMessage(opts.nativeHostName, {
-                    action: 'copy_pdf',
-                    path: cleanRes.path,
-                    move_to_dir: originalPdfDir,
-                    filename: originalPdfName,
-                    extra: { suffix: '.cleaned.pdf' }
-                  }, nativeMessageLongTimeoutMs);
-                  if (copyCleanedRes && copyCleanedRes.ok && copyCleanedRes.path) {
-                    preservedCleanedPath = copyCleanedRes.path;
-                    pdfCleanerResult.preservedCleanedPath = preservedCleanedPath;
-                    post(port, 'progress', `调试模式：已保留去水印后无水印 PDF：${copyCleanedRes.filename || basenameOf(copyCleanedRes.path)}`);
-                  }
-                } catch (copyCleanedErr) {
-                  post(port, 'progress', `调试模式：保留去水印后无水印 PDF 失败：${copyCleanedErr.message || copyCleanedErr}`);
-                }
-              }
               post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
               post(port, 'progress', '正在重新校验去水印后的 PDF 并计算 MD5...');
               stat = await sendNativeMessage(opts.nativeHostName, {
@@ -385,9 +347,7 @@
           pdfCleanerResult = pdfCleanerResult || pdfCleanerResultFromResponse(null, {
             status: 'error',
             error: err.message || String(err),
-            originalPath: originalPdfPath,
-            preservedOriginalPath,
-            preservedCleanedPath
+            originalPath: originalPdfPath
           });
           if (opts.pdfCleanerOnError === 'stop_upload') {
             const stopErr = new Error(`去水印失败，已终止上传：${err.message || err}`);

@@ -310,6 +310,8 @@ const TEXT_MAP = {
   "如果去水印失败或超时，是继续上传原 PDF 还是终止上传。": "Choose whether to proceed with uploading the original PDF or stop upload if cleaning fails/times out.",
   "上传原始 PDF": "Upload Original PDF",
   "终止上传并报错": "Abort Upload and Report Error",
+  "去水印调试模式": "Watermark Debug Mode",
+  "保留去水印前的原始 PDF 文件（清洗成功时在同一目录下生成 filename.original.pdf）。": "Preserve original PDF file as filename.original.pdf when cleaned successfully.",
   "去水印超时时间必须在 5 到 300 秒之间。": "Watermark cleaner timeout must be between 5 and 300 seconds."
 };
 
