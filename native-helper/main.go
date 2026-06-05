@@ -24,8 +24,6 @@ import (
 	"time"
 )
 
-const allowedOSSHost = "https://ables1.oss-cn-shanghai.aliyuncs.com/"
-
 const createNoWindow = 0x08000000
 
 type Request struct {
@@ -341,8 +339,6 @@ func handleOpenLocalStorageDir(req Request) error {
 	return writeResponse(Response{OK: true, Action: "open_local_storage", Path: targetDir})
 }
 
-
-
 func handleReadTextFile(req Request) error {
 	p := strings.Trim(req.Path, "\" ")
 	var resolved string
@@ -359,7 +355,7 @@ func handleReadTextFile(req Request) error {
 		}
 		resolved = filepath.Clean(abs)
 	}
-	
+
 	// 仅允许读取 .txt 文件以防任意读取敏感系统文件
 	if !strings.HasSuffix(strings.ToLower(resolved), ".txt") {
 		return errors.New("refuse to read non-txt file")
@@ -690,7 +686,6 @@ func addPDFExtension(src string) (string, error) {
 	return dst, nil
 }
 
-
 func reportDir(dir string) (string, error) {
 	dir = strings.Trim(dir, "\" ")
 	if dir == "" {
@@ -778,8 +773,6 @@ func uniquePath(p string) string {
 	return fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext)
 }
 
-
-
 func sameFilePath(a, b string) bool {
 	aa, _ := filepath.Abs(a)
 	bb, _ := filepath.Abs(b)
@@ -797,33 +790,43 @@ func validateOSSHost(host string) error {
 	if u.Scheme != "https" {
 		return errors.New("上传存储地址必须使用 HTTPS")
 	}
+	if u.User != nil {
+		return errors.New("上传存储地址不能包含账号信息")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("上传存储地址不能包含查询参数或片段")
+	}
 	if isLocalOrPrivateHost(u.Hostname()) {
 		return errors.New("上传存储地址不能是本机或内网地址")
 	}
-	normalized, err := normalizeAllowedURL(host)
-	if err != nil {
-		return err
-	}
-	allowed, err := normalizeAllowedURL(allowedOSSHost)
-	if err != nil {
-		return err
-	}
-	if normalized != allowed {
-		return errors.New("上传存储地址不在允许范围，请更新插件或检查上传链路")
+	if !isAllowedAliyunOSSEndpoint(u.Hostname()) {
+		return errors.New("上传存储地址不是允许的阿里云 OSS 公网地址，请检查上传链路")
 	}
 	return nil
 }
 
-func normalizeAllowedURL(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", err
+func isAllowedAliyunOSSEndpoint(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if h == "" || strings.Contains(h, "_") {
+		return false
 	}
-	if u.Scheme != "https" {
-		return "", errors.New("allowed oss host must use https")
+	if strings.Contains(h, ".oss-internal.") ||
+		strings.Contains(h, "-internal.aliyuncs.com") ||
+		strings.Contains(h, ".vpc100-oss-") {
+		return false
 	}
-	host := strings.ToLower(u.Host)
-	return "https://" + host, nil
+	labels := strings.Split(h, ".")
+	if len(labels) < 4 {
+		return false
+	}
+	if labels[len(labels)-2] != "aliyuncs" || labels[len(labels)-1] != "com" {
+		return false
+	}
+	endpoint := labels[len(labels)-3]
+	if endpoint == "oss" {
+		return true
+	}
+	return strings.HasPrefix(endpoint, "oss-") && !strings.Contains(endpoint, "internal")
 }
 
 func isLocalOrPrivateHost(host string) bool {
@@ -998,6 +1001,6 @@ func handleCleanPDF(req Request) error {
 			}
 			return "engine_failed"
 		}(),
-		Error:       errMsg,
+		Error: errMsg,
 	})
 }
