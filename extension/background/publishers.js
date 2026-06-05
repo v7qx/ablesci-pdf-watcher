@@ -164,7 +164,7 @@
   function ieeeArticleUrlFromPdfUrl(url) {
     try {
       const u = new URL(String(url || ''));
-      if (!isIeeeUrl(u.href) || !/\/stamp\/stamp\.jsp$/i.test(u.pathname || '')) return '';
+      if (!isIeeeUrl(u.href) || !/\/(?:stamp\/stamp|stampPDF\/getPDF)\.jsp$/i.test(u.pathname || '')) return '';
       const arnumber = u.searchParams.get('arnumber');
       return arnumber && /^\d+$/.test(arnumber) ? `https://ieeexplore.ieee.org/document/${arnumber}/` : '';
     } catch (_) {
@@ -186,7 +186,7 @@
   function looksLikePdfDownloadUrl(url) {
     const value = String(url || '');
     if (isIeeeUrl(value) && /\/stamp\/stamp\.jsp/i.test(value)) return false;
-    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/doi\/pdfdirect\/|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stamp\/stamp\.jsp/i.test(value);
+    return /\/(?:pdf|pdfft)(?:[/?#]|$)|\/doi\/pdfdirect\/|\/articlepdf\/|\/article-pdf\/|\/content\/pdf\/|\.pdf(?:[?#]|$)|downloadpdf|viewpdf|stampPDF\/getPDF\.jsp|stamp\/stamp\.jsp/i.test(value);
   }
 
   function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
