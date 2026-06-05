@@ -79,15 +79,6 @@
   function pickPdfUrlFromDocument(doc) {
     doc = doc || document;
     const doi = getFullDoiFromDocument(doc);
-    for (const a of Array.from(doc.querySelectorAll('a.direct-pdf[href]'))) {
-      const href = normalizeUrl(a.getAttribute('href') || a.href, location.href);
-      if (/^https?:\/\/onlinelibrary\.wiley\.com\/doi\/pdfdirect\/10\.\d{4,9}\//i.test(href || '')) {
-        return { url: href, source: 'wiley-direct-pdf-button' };
-      }
-    }
-    if (doi && /^10\.1002\//i.test(doi)) {
-      return { url: `https://onlinelibrary.wiley.com/doi/pdfdirect/${doi}`, source: 'wiley-doi-pdfdirect-first' };
-    }
     if (doi) {
       return { url: `https://doi.org/${doi}`, source: 'doi-first' };
     }
