@@ -39,6 +39,20 @@
       </div>
     </section>
 
+    <section class="card" id="debugToolCard">
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>开发调试工具 (模拟应助)</strong>
+          <span>无需在网站上真实求助或认领，可在此处输入 DOI 或文献 URL（支持 dx.doi.org、Wiley、Springer、ACS、IEEE 等链接），直接模拟并测试插件的前后台应助探测与下载逻辑（会自动以仅下载模式运行，不会触发实际上传）。</span>
+          <div class="debug-tool-input-row" style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+            <input id="debugDoiInput" type="text" placeholder="输入 DOI 或 文献 URL，例如: 10.1002/..." style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.95em; height: 32px; box-sizing: border-box;">
+            <button id="btnDebugSimulate" class="secondary" type="button" style="height: 32px; padding: 0 16px; white-space: nowrap; line-height: 30px;">开始模拟</button>
+          </div>
+          <div id="debugLogContainer" style="margin-top: 12px; padding: 12px; background: #fafafa; border: 1px dashed var(--border); border-radius: 4px; display: none; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; color: var(--text-muted); line-height: 1.5;"></div>
+        </div>
+      </div>
+    </section>
+
     <details class="card">
       <summary>上传规则</summary>
       <div class="setting-row">

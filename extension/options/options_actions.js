@@ -253,6 +253,79 @@
       showText('status', res.ok ? '已清除 watcher 日志和 trace。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
     }
 
+    async function simulateAssist() {
+      const input = el('debugDoiInput');
+      const btn = el('btnDebugSimulate');
+      const logContainer = el('debugLogContainer');
+      if (!input || !btn || !logContainer) return;
+
+      const rawVal = input.value.trim();
+      if (!rawVal) {
+        alert('请输入 DOI 或文献 URL');
+        return;
+      }
+
+      let pdfUrl = rawVal;
+      if (!/^https?:\/\//i.test(rawVal)) {
+        if (/^10\.\d{4,9}\//i.test(rawVal)) {
+          pdfUrl = 'https://doi.org/' + rawVal;
+        } else {
+          alert('输入的格式不正确，请输入以 10. 开头的 DOI，或者完整的 URL 链接');
+          return;
+        }
+      }
+
+      btn.disabled = true;
+      btn.textContent = '模拟中...';
+      logContainer.style.display = 'block';
+      logContainer.textContent = `[模拟应助] 开始测试: ${pdfUrl}\n[模拟应助] 正在连接插件后台任务队列...\n`;
+
+      try {
+        const port = chromeApi.runtime.connect({ name: 'ablesci-pdf-upload' });
+
+        port.onMessage.addListener(msg => {
+          if (!msg) return;
+          if (msg.type === 'progress') {
+            logContainer.textContent += `[进度] ${msg.payload}\n`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+          } else if (msg.type === 'done') {
+            logContainer.textContent += `\n[完成] 测试结束！返回结果：\n${msg.payload || ''}\n`;
+            if (msg.extra?.html) {
+              logContainer.textContent += `\n[详细反馈] ${msg.extra.html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '')}\n`;
+            }
+            logContainer.scrollTop = logContainer.scrollHeight;
+            btn.disabled = false;
+            btn.textContent = '开始模拟';
+            port.disconnect();
+          } else if (msg.type === 'error') {
+            logContainer.textContent += `\n[错误] 应助出错：${msg.payload || '未知错误'}\n`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+            btn.disabled = false;
+            btn.textContent = '开始模拟';
+            port.disconnect();
+          }
+        });
+
+        port.postMessage({
+          type: 'startUpload',
+          payload: {
+            pdfUrl: pdfUrl,
+            suggestedFilename: `debug_simulate_${Date.now()}.pdf`,
+            assistId: `simulate_debug_${Math.random().toString(36).substring(2, 8)}`,
+            csrfToken: 'dummy_csrf_token',
+            downloadOnly: true,
+            requesterId: 'simulate_debugger',
+            title: 'Simulated Debug Test Paper'
+          }
+        });
+
+      } catch (err) {
+        logContainer.textContent += `\n[异常] 启动模拟失败: ${err.message || String(err)}\n`;
+        btn.disabled = false;
+        btn.textContent = '开始模拟';
+      }
+    }
+
     function handleDocumentCopy(event) {
       const active = document.activeElement;
       const tag = String(active?.tagName || '').toLowerCase();
@@ -288,6 +361,7 @@
       testWatcherNotification,
       clearAutoWatcherState,
       clearAutoWatcherLogs,
+      simulateAssist,
       handleDocumentCopy,
       handleWindowBlur
     };

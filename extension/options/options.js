@@ -581,6 +581,7 @@ const {
   testWatcherNotification,
   clearAutoWatcherState,
   clearAutoWatcherLogs,
+  simulateAssist,
   handleDocumentCopy,
   handleWindowBlur
 } = createOptionsActionsApi({
@@ -646,3 +647,4 @@ el('testWatcherNotification')?.addEventListener('click', testWatcherNotification
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
+el('btnDebugSimulate')?.addEventListener('click', simulateAssist);
