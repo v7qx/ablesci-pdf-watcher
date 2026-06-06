@@ -352,7 +352,7 @@
         });
         for (const listUrl of runListUrls) {
           let sequentialPageScanCount = 0;
-          const maxSequentialPageScans = 5;
+          const maxSequentialPageScans = trigger === 'manual' ? 1 : 5;
           while (sequentialPageScanCount < maxSequentialPageScans) {
           const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateForTargets);
           let pickedListUrl = pagePick.pickedListUrl;
@@ -395,9 +395,31 @@
 
           const detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
           const shouldRescanDetectedTail = pagePick.pageOrder === 'desc'
+            && trigger !== 'manual'
             && pagePick.hasExplicitPageMax !== true
             && Number.isFinite(detectedMaxPage)
             && detectedMaxPage > Number(pagePick.pickedPage || 0);
+          if (
+            trigger === 'manual' &&
+            pagePick.pageOrder === 'desc' &&
+            pagePick.hasExplicitPageMax !== true &&
+            Number.isFinite(detectedMaxPage) &&
+            detectedMaxPage > Number(pagePick.pageMax || 0) &&
+            pagePick.urlKey
+          ) {
+            stateForTargets.detectedMaxPages = stateForTargets.detectedMaxPages || {};
+            stateForTargets.detectedMaxPages[pagePick.urlKey] = detectedMaxPage;
+            await saveWatcherStateSafe(stateForTargets);
+            await appendWatcherTrace('list_scan_detected_tail_page_saved', {
+              reason: 'manual_order_desc_detected_max_page_saved',
+              trigger,
+              configuredUrl: listUrl,
+              listUrl: pickedListUrl,
+              publisher: pagePick.publisher,
+              urlKey: pagePick.urlKey,
+              detectedMaxPage
+            });
+          }
           if (shouldRescanDetectedTail) {
             let tailListUrl = '';
             try {
@@ -434,24 +456,6 @@
             }
           }
 
-          if ((pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc') && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
-            stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-            stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
-            await saveWatcherStateSafe(stateForTargets);
-            await appendWatcherTrace('list_scan_page_progress_saved', {
-              reason: 'sequential_page_scan_progress',
-              trigger,
-              listUrl: pickedListUrl,
-              configuredUrl: listUrl,
-              publisher: pagePick.publisher,
-              pageOrder: pagePick.pageOrder,
-              urlKey: pagePick.urlKey,
-              pickedPage: Number(pagePick.pickedPage),
-              currentPage: parsed?.listStats?.currentPage || '',
-              maxPage: parsed?.listStats?.maxPage || ''
-            });
-          }
-
           const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
           if (!sourceGate.ok) {
             await appendWatcherTrace('list_scan_skip_source_gate', {
@@ -463,6 +467,23 @@
               threshold: sourceGate.threshold
             });
             if (isSequentialPageScan) {
+              if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+                stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+                stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+                await saveWatcherStateSafe(stateForTargets);
+                await appendWatcherTrace('list_scan_page_progress_saved', {
+                  reason: 'sequential_page_exhausted_source_gate',
+                  trigger,
+                  listUrl: pickedListUrl,
+                  configuredUrl: listUrl,
+                  publisher: pagePick.publisher,
+                  pageOrder: pagePick.pageOrder,
+                  urlKey: pagePick.urlKey,
+                  pickedPage: Number(pagePick.pickedPage),
+                  currentPage: parsed?.listStats?.currentPage || '',
+                  maxPage: parsed?.listStats?.maxPage || ''
+                });
+              }
               sequentialPageScanCount += 1;
               continue;
             }
@@ -595,6 +616,23 @@
             }
           }
           if (isSequentialPageScan && handledCount === handledBeforePage) {
+            if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+              stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+              await saveWatcherStateSafe(stateForTargets);
+              await appendWatcherTrace('list_scan_page_progress_saved', {
+                reason: 'sequential_page_exhausted_no_handled_candidate',
+                trigger,
+                listUrl: pickedListUrl,
+                configuredUrl: listUrl,
+                publisher: pagePick.publisher,
+                pageOrder: pagePick.pageOrder,
+                urlKey: pagePick.urlKey,
+                pickedPage: Number(pagePick.pickedPage),
+                currentPage: parsed?.listStats?.currentPage || '',
+                maxPage: parsed?.listStats?.maxPage || ''
+              });
+            }
             sequentialPageScanCount += 1;
             if (sequentialPageScanCount < maxSequentialPageScans) {
               await appendWatcherTrace('list_scan_continue_next_page', {
@@ -625,8 +663,10 @@
       } finally {
         await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
         await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
-        if (currentRunOpts) await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
-        if (currentRunOpts) await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
+        if (trigger !== 'manual' && currentRunOpts) {
+          await scheduleNextAssistAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, trigger).catch(() => {});
+          await refreshAlarmAfterRun(currentRunOpts, runResult || { ok: false, reason: 'unknown' }, attempt, trigger).catch(() => {});
+        }
         await restoreManualScheduleSnapshot().catch(() => {});
         await recordAttemptFinish(attempt, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
         try { await writeDailyReports(); } catch (_) {}

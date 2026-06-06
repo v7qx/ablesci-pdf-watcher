@@ -212,9 +212,16 @@
     }
 
     async function runAutoWatcherNow() {
+      const button = el('runAutoWatcherNow');
+      if (button?.disabled) return;
+      if (button) button.disabled = true;
       showPill('watcherRunStatus', '检查中');
-      const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
-      showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
+      try {
+        const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
+        showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
+      } finally {
+        if (button) button.disabled = false;
+      }
     }
 
     async function testWatcherNotification() {

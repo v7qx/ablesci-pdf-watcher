@@ -261,6 +261,14 @@
       if (!pageMeta) return meta;
 
       const urlKey = getListUrlKey(url);
+      const detectedMaxPage = Number(state?.detectedMaxPages?.[urlKey] || 0);
+      if (
+        Number.isFinite(detectedMaxPage) &&
+        detectedMaxPage > Number(pageMeta.range.max || 0) &&
+        pageMeta.hasExplicitPageMax !== true
+      ) {
+        pageMeta.range.max = detectedMaxPage;
+      }
       meta.urlKey = urlKey;
       meta.pageOrder = pageMeta.pageOrder;
       meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;
