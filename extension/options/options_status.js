@@ -16,6 +16,7 @@
 
     let advancedStatusCache = null;
     let advancedCountdownTimer = null;
+    let lastAutoTriggerTime = 0;
     async function renderAdvancedWatcherStatus() {
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
@@ -74,7 +75,22 @@
       }
       const state = advancedStatusCache.state || {};
       const schedule = advancedStatusCache.schedule || nextDisplaySchedule(state);
-      setText('watcherAssistCountdown', countdownText(schedule.assistCountdownAt));
+
+      const text = countdownText(schedule.assistCountdownAt);
+      setText('watcherAssistCountdown', text);
+
+      // 当值守开启、倒计时到点、后台没有在运行，并且过了冷却期时，主动向后台发送强制 alarm 触发，以消除 chrome.alarms 定时延迟
+      if (isEnabled && !state.autoWatcherRunning) {
+        const date = schedule.assistCountdownAt ? new Date(schedule.assistCountdownAt) : null;
+        if (date && !Number.isNaN(date.getTime())) {
+          const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+          if (seconds <= 0 && (Date.now() - lastAutoTriggerTime > 15000)) {
+            lastAutoTriggerTime = Date.now();
+            chromeApi.runtime.sendMessage({ type: 'ablesciRunAutoWatcherNow', trigger: 'alarm' })
+              .catch(err => console.warn('[Ablesci PDF Watcher] Failed to auto-trigger watcher on due:', err));
+          }
+        }
+      }
     }
 
     function startAdvancedCountdownTimer() {

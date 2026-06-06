@@ -203,7 +203,7 @@
         try { return new URL(href, location.href).href; } catch (_) { return ''; }
       }
       function doiFrom(textValue) {
-        const match = String(textValue || '').match(/10\.\d{4,9}\/[\S"'<>]+/i);
+        const match = String(textValue || '').match(/10\.\d{4,9}\/[^\s"']+/i);
         if (!match) return '';
         return match[0].split('#')[0].split('?')[0].replace(/[)\].,;，。]+$/, '');
       }

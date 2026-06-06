@@ -119,7 +119,8 @@
 
       chromeApi.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg?.type === 'ablesciRunAutoWatcherNow') {
-          runAutoWatcherOnce('manual')
+          const trigger = msg.trigger === 'alarm' ? 'alarm' : 'manual';
+          runAutoWatcherOnce(trigger)
             .then(sendResponse)
             .catch(err => sendResponse({ ok: false, reason: err?.message || String(err) }));
           return true;

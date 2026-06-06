@@ -10,6 +10,8 @@
   let stopTimer = null;
   let challengePrompted = false;
   let lastNoCandidateDiagnosticAt = 0;
+  let wileyButtonClicked = false;
+  let wileyFetchTested = false;
 
   function normalize(href) {
     return common.normalizeUrl(common.decodeHtmlUrl(href || ''), location.href);
@@ -60,7 +62,7 @@
   }
 
   function extractWileyPdfDirectUrl(value) {
-    const match = String(value || '').match(/(\/doi\/pdfdirect\/10\.\d{4,9}\/[^"'<>\s&)]+)/i);
+    const match = String(value || '').match(/(\/doi\/pdfdirect\/10\.\d{4,9}\/[^"'\s]+)/i);
     return match ? normalize(match[1]) : null;
   }
 
@@ -81,6 +83,8 @@
     const semanticHit = !!document.querySelector(
       '[data-pgc="wolAccessDenied"], [data-pg-name="access-denied"], #access-denied, .paywall-login, .access-panel, #ad--purchase-options'
     );
+    if (hashHit || semanticHit) return true;
+
     const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
     const textHit = /Get access to the full version of this (article|chapter)/i.test(text) &&
                     /View access options below/i.test(text);
@@ -88,7 +92,16 @@
                        /Log in to Wiley Online Library/i.test(text) ||
                        /Purchase Instant Access/i.test(text) ||
                        /48-Hour online access/i.test(text);
-    return hashHit || semanticHit || (textHit && optionsHit);
+    if (textHit && optionsHit) return true;
+
+    const hasFullAccess = /Full Access|Open Access|Free Access/i.test(text);
+    const hasAccessOptions = /Institutional Login|Log in to Wiley Online Library|Purchase Instant Access/i.test(text);
+    if (hasAccessOptions && !hasFullAccess) {
+      const hasIframe = !!document.querySelector('iframe#pdf-iframe[src], iframe[src*="/doi/pdfdirect/"]');
+      if (!hasIframe) return true;
+    }
+
+    return false;
   }
 
   function ieeeArticleNumberFromUrl(url) {
@@ -235,6 +248,80 @@
       stopObserver();
       return;
     }
+    // 针对 wiley 的 fetch 探测逻辑：
+    // 不管是摘要页还是阅读器页，直接通过 fetch 请求 pdfdirect 链接，在 0.5s 内精准测出有无权限，彻底规避前台阅读器黑盒和延时挂起
+    if (publisher === 'wiley' && !wileyFetchTested) {
+      const match = String(location.href).match(/\/doi\/(?:pdf|epdf|full|abs|pdfdirect)\/(10\.[^?#]+)/i);
+      const doi = match ? decodeURIComponent(match[1]) : null;
+      if (doi) {
+        wileyFetchTested = true;
+        const pdfdirectUrl = encodeURI(`/doi/pdfdirect/${doi}`);
+        console.debug('[Ablesci PDF Watcher] Wiley page: testing pdfdirect access via fetch...', pdfdirectUrl);
+        fetch(pdfdirectUrl, { redirect: 'manual' })
+          .then(async response => {
+            const contentType = response.headers.get('content-type') || '';
+            const status = response.status;
+            const isOpaque = response.type === 'opaqueredirect' || status === 0;
+            const isRedirect = status >= 300 && status < 400;
+            const isErrorStatus = status === 403 || status === 401;
+            const isHtml = contentType.includes('text/html');
+
+            if (isOpaque || isRedirect || isErrorStatus || isHtml) {
+              console.debug('[Ablesci PDF Watcher] Wiley fetch test failed (paywall/redirect detected):', status, response.type, contentType);
+              pdfTriggered = true;
+              common.sendPublisherMessage('wiley', {
+                articleUrl: location.href,
+                accessDenied: true,
+                error: `Wiley 页面探测无正文 PDF 访问权限（fetch 测试返回 ${status || 'redirect'}），已停止本次下载。`,
+                source: 'wiley_pdfdirect_fetch_test'
+              });
+              stopObserver();
+            } else if (response.ok && !isHtml) {
+              console.debug('[Ablesci PDF Watcher] Wiley fetch test succeeded (accessible PDF found):', pdfdirectUrl);
+              pdfTriggered = true;
+              common.sendPublisherMessage('wiley', {
+                articleUrl: location.href,
+                pdfUrl: normalize(pdfdirectUrl),
+                source: 'wiley_pdfdirect_fetch_succeeded'
+              });
+              stopObserver();
+            }
+          })
+          .catch(err => {
+            console.error('[Ablesci PDF Watcher] Wiley fetch test error, treating as access denied to prevent hang:', err);
+            pdfTriggered = true;
+            common.sendPublisherMessage('wiley', {
+              articleUrl: location.href,
+              accessDenied: true,
+              error: 'Wiley 页面探测异常（fetch 错误），已作为无权限安全处理。',
+              source: 'wiley_pdfdirect_fetch_error'
+            });
+            stopObserver();
+          });
+      }
+    }
+    // 针对 wiley 的模拟点击逻辑：
+    // 在普通的 Wiley 文献主页上，如果没有检测到无权限页面，我们寻找 PDF 按钮并模拟点击一次
+    // 这能触发无权限提示/跳转，或在有权限时跳转到阅读器页，消除无权限检测挂起
+    if (publisher === 'wiley' && !wileyButtonClicked) {
+      const isWileyPdfReaderPage = /\/doi\/(?:pdf|epdf)\//i.test(location.pathname || '');
+      if (!isWileyPdfReaderPage) {
+        const result = findPdfLink();
+        const found = result.selected;
+        if (found && found.el && found.el.tagName !== 'META') {
+          wileyButtonClicked = true;
+          console.debug('[Ablesci PDF Watcher] Wiley normal page: auto-clicking PDF button to trigger check');
+          common.sendPublisherMessage('wiley', {
+            articleUrl: location.href,
+            pdfUrl: found.href,
+            source: 'wiley_article_pdf_link_click_trigger',
+            diagnostics: result.diagnostics
+          });
+          found.el.click();
+          return;
+        }
+      }
+    }
     if (common.hasPublisherChallengePage()) {
       if (!challengePrompted) {
         challengePrompted = true;
@@ -246,6 +333,7 @@
       }
       return;
     }
+    const isWileyPdfReaderPage = publisher === 'wiley' && /\/doi\/(?:pdf|epdf)\//i.test(location.pathname || '');
     const wileyPdfDirectUrl = findWileyPdfViewerDirectUrl();
     if (wileyPdfDirectUrl) {
       pdfTriggered = true;
@@ -259,6 +347,8 @@
         }
       });
       stopObserver();
+      return;
+    } else if (isWileyPdfReaderPage) {
       return;
     }
     const ieeePdfDownloadUrl = findIeeePdfDownloadUrl();

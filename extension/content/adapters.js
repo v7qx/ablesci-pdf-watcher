@@ -8,7 +8,7 @@
   function extractDoi(text) {
     if (!text) return null;
     let s = safeDecode(text);
-    const m = s.match(/10\.\d{4,9}\/[\S"'<>]+/i);
+    const m = s.match(/10\.\d{4,9}\/[^\s"']+/i);
     if (!m) return null;
     let doi = m[0];
     doi = doi.split('#')[0].split('?')[0];

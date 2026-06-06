@@ -219,11 +219,11 @@
     if (!pdfLike) return false;
     if (sourcePii && actualPii && sourcePii !== actualPii) return false;
     const sourceDoi = (() => {
-      const match = decodeURIComponent(String(sourceUrl || '')).match(/(10\.\d{4,9}\/[^?#\s"'\(\)]+)/i);
+      const match = decodeURIComponent(String(sourceUrl || '')).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
       return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
     })();
     const actualDoi = (() => {
-      const match = decodeURIComponent(String(url || '')).match(/(10\.\d{4,9}\/[^?#\s"'\(\)]+)/i);
+      const match = decodeURIComponent(String(url || '')).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
       return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
     })();
     if (sourceDoi && actualDoi && sourceDoi !== actualDoi && !sourceDoi.startsWith(actualDoi) && !actualDoi.startsWith(sourceDoi)) return false;
