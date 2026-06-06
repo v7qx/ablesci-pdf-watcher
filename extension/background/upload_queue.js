@@ -104,7 +104,7 @@
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
-          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription']);
+          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription', 'empty_pdf_file']);
           if (!normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});
           }
@@ -180,6 +180,17 @@
                 downloadOnly: true,
                 blocked: true,
                 skipReason: failureReason,
+                ...cleanerExtra
+              });
+            } else if (failureReason === 'empty_pdf_file') {
+              const message = '下载到了空 PDF 文件（大小为 0B），已按正常情况跳过本次任务。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: 'empty_pdf_file',
                 ...cleanerExtra
               });
             } else if (isExpectedTimeoutFailure(failureReason)) {

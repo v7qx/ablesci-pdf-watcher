@@ -116,7 +116,7 @@
 
   function isOxfordRelatedDownloadHost(h) {
     const s = String(h || '');
-    return /^academic\.oup\.com$/i.test(s) || /(^|\.)silverchair-cdn\.com$/i.test(s);
+    return /^academic\.oup\.com$/i.test(s) || /(^|\.)silverchair-cdn\.com$/i.test(s) || /(^|\.)silverchair\.com$/i.test(s);
   }
 
   function isAipRelatedDownloadHost(h) {
@@ -218,6 +218,15 @@
     const pdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url) || looksLikePdfDownloadUrl(sourceUrl);
     if (!pdfLike) return false;
     if (sourcePii && actualPii && sourcePii !== actualPii) return false;
+    const sourceDoi = (() => {
+      const match = decodeURIComponent(String(sourceUrl || '')).match(/(10\.\d{4,9}\/[^?#\s"'\(\)]+)/i);
+      return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
+    })();
+    const actualDoi = (() => {
+      const match = decodeURIComponent(String(url || '')).match(/(10\.\d{4,9}\/[^?#\s"'\(\)]+)/i);
+      return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
+    })();
+    if (sourceDoi && actualDoi && sourceDoi !== actualDoi && !sourceDoi.startsWith(actualDoi) && !actualDoi.startsWith(sourceDoi)) return false;
     if (expected && finalHost.toLowerCase() === expected) return true;
     if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return true;
     if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return true;

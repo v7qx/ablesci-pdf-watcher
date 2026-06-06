@@ -75,6 +75,22 @@
     return extractWileyPdfDirectUrl(scripts);
   }
 
+  function hasWileyAccessDeniedPage() {
+    if (common.currentPublisher() !== 'wiley') return false;
+    const hashHit = location.hash.toLowerCase() === '#accessdeniallayout';
+    const semanticHit = !!document.querySelector(
+      '[data-pgc="wolAccessDenied"], [data-pg-name="access-denied"], #access-denied, .paywall-login, .access-panel, #ad--purchase-options'
+    );
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    const textHit = /Get access to the full version of this (article|chapter)/i.test(text) &&
+                    /View access options below/i.test(text);
+    const optionsHit = /Institutional Login/i.test(text) ||
+                       /Log in to Wiley Online Library/i.test(text) ||
+                       /Purchase Instant Access/i.test(text) ||
+                       /48-Hour online access/i.test(text);
+    return hashHit || semanticHit || (textHit && optionsHit);
+  }
+
   function ieeeArticleNumberFromUrl(url) {
     try {
       const u = new URL(String(url || ''), location.href);
@@ -208,6 +224,17 @@
       return;
     }
     if (rejectUnsupportedSpringerPage()) return;
+    if (publisher === 'wiley' && hasWileyAccessDeniedPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('wiley', {
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'Wiley 页面明确显示无正文访问权限，已停止本次下载。',
+        source: 'wiley_access_denied_page'
+      });
+      stopObserver();
+      return;
+    }
     if (common.hasPublisherChallengePage()) {
       if (!challengePrompted) {
         challengePrompted = true;

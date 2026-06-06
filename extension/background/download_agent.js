@@ -472,7 +472,9 @@
     async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
       const filenameRel = makeDownloadFilename('', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
-      const noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
+      const revealAfterMs = 60000;
+      let noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
+      noDownloadTimeoutMs = Math.max(noDownloadTimeoutMs, revealAfterMs + 30000);
       const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || defaultOptions.watcherDownloadTimeoutMinutes) * 60 * 1000);
       const timeoutOptions = {
         noDownloadTimeoutMs,
@@ -498,8 +500,8 @@
           post(port, 'progress', `${label} 使用后台静默出版商页面模式。`);
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 0, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', `${label} 使用后台静默出版商页面模式；如 30 秒内未触发下载，会自动切到前台。`);
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `${label} 使用后台静默出版商页面模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isNatureUrl(pdfUrl)) {
@@ -507,8 +509,8 @@
           post(port, 'progress', 'Nature 使用可见文章页原生 PDF 下载模式。');
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', 'Nature 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `Nature 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isCnpeUrl(pdfUrl) && !looksLikePdfDownloadUrl(pdfUrl)) {
@@ -516,8 +518,8 @@
           post(port, 'progress', 'SAGE 易阅通使用可见文章页原生 PDF 下载模式。');
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', 'SAGE 易阅通使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `SAGE 易阅通使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isSpringerUrl(pdfUrl)) {
@@ -529,7 +531,7 @@
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'Springer 使用后台文章页校验模式；仅支持 /article/ 期刊文献，不直接下载书籍或章节链接。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isAipUrl(pdfUrl)) {
@@ -537,8 +539,8 @@
           post(port, 'progress', 'AIP 使用可见文章页原生 PDF 下载模式。');
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', 'AIP 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `AIP 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isIopUrl(pdfUrl)) {
@@ -546,8 +548,8 @@
           post(port, 'progress', 'IOP 使用可见文章页原生 PDF 下载模式。');
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', 'IOP 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `IOP 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (isRscDirectPdfUrl(pdfUrl)) {
@@ -560,8 +562,8 @@
           post(port, 'progress', 'RSC 使用可见文章页原生 PDF 下载模式。');
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
-        post(port, 'progress', 'RSC 使用后台文章页原生 PDF 下载模式；如 30 秒内未触发下载，会自动切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+        post(port, 'progress', `RSC 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
       if (mode === 'publisher_tab') {
@@ -583,7 +585,7 @@
       } catch (err) {
         if (canUsePublisherPageFallback) {
           post(port, 'progress', '直接下载失败，尝试打开出版商文章页查找 PDF 按钮：' + (err.message || err));
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs: 30000, payload: opts.payloadContext || null });
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
         }
         post(port, 'progress', '直接下载失败，尝试后台标签页：' + (err.message || err));
         return await downloadByBackgroundTab(pdfUrl, timeoutOptions);

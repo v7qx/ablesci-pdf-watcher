@@ -58,6 +58,7 @@
       if (!raw) return '';
       if (/任务已取消|Ablesci 页面已关闭或刷新|页面已关闭|已停止等待下载/i.test(raw)) return 'user_cancelled';
       if (raw.includes(htmlDownloadMessage)) return 'html_login_or_error_page';
+      if (raw.includes('empty pdf file')) return 'empty_pdf_file';
       if (/file header is not %PDF-|likely html\/login\/error page/i.test(raw)) return 'not_pdf';
       if (/DOI Not Found|doi not found|The DOI you requested|DOI you requested|does not exist|Invalid DOI|DOI 不存在|DOI不存在|找不到\s*DOI|DOI\s*未找到/i.test(raw)) return 'doi_not_found';
       if (/doi\.org/i.test(raw) && /not found|404|invalid|不存在|未找到/i.test(raw)) return 'doi_resolution_failed';

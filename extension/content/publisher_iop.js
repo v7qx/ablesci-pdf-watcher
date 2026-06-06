@@ -20,7 +20,7 @@
         ].join(' ');
         const articlePdf = /wd-jnl-art-pdf-button/i.test(a.className || '') ||
           /content-download/i.test(a.className || '') ||
-          /\/article\/[^/]+\/[^/]+\/pdf/i.test(href);
+          /\/article\/.*\/pdf/i.test(href);
         const supplementary = /supplement|supp-info|peer review|reporting summary/i.test(`${href} ${text} ${marker}`);
         return { a, href, text, articlePdf, supplementary };
       })
