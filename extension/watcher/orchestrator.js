@@ -351,8 +351,12 @@
           listUrls: runListUrls
         });
         for (const listUrl of runListUrls) {
-          const pagePick = randomizeAssistListUrlWithMeta(listUrl);
-          const pickedListUrl = pagePick.pickedListUrl;
+          let sequentialPageScanCount = 0;
+          const maxSequentialPageScans = 5;
+          while (sequentialPageScanCount < maxSequentialPageScans) {
+          const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateForTargets);
+          let pickedListUrl = pagePick.pickedListUrl;
+          const isSequentialPageScan = pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc';
           attempt.listScanStarted = true;
           attempt.pickedListUrl = pickedListUrl;
           attempt.pickedPage = pagePick.pickedPage;
@@ -361,13 +365,17 @@
           attempt.pageMax = pagePick.pageMax;
           attempt.frontHit = pagePick.frontHit;
           attempt.alpha = pagePick.alpha;
+          attempt.pageOrder = pagePick.pageOrder;
+          attempt.listUrlKey = pagePick.urlKey;
           await appendWatcherTrace('list_scan_start', {
-            reason: pickedListUrl === listUrl ? 'configured_url' : 'randomized_page',
+            reason: pickedListUrl === listUrl ? 'configured_url' : 'picked_page',
             trigger,
             listUrl: pickedListUrl,
             configuredUrl: listUrl,
             publisher: pagePick.publisher,
             pageCurve: pagePick.pageCurve,
+            pageOrder: pagePick.pageOrder,
+            urlKey: pagePick.urlKey,
             pickedPage: pagePick.pickedPage,
             pageMin: pagePick.pageMin,
             pageMax: pagePick.pageMax,
@@ -379,11 +387,71 @@
           stateForTargets.lastPickedListUrl = pickedListUrl;
           await saveWatcherStateSafe(stateForTargets);
           await incrementDaily('checked', trigger);
-          const parsed = await parseListUrl(pickedListUrl);
+          let parsed = await parseListUrl(pickedListUrl);
           if (parsed.cfChallenge) {
             if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
             return finish({ ok: false, reason: 'cf_challenge' });
           }
+
+          const detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
+          const shouldRescanDetectedTail = pagePick.pageOrder === 'desc'
+            && pagePick.hasExplicitPageMax !== true
+            && Number.isFinite(detectedMaxPage)
+            && detectedMaxPage > Number(pagePick.pickedPage || 0);
+          if (shouldRescanDetectedTail) {
+            let tailListUrl = '';
+            try {
+              const tailUrl = new URL(pickedListUrl);
+              tailUrl.searchParams.set('page', String(detectedMaxPage));
+              tailListUrl = tailUrl.toString();
+            } catch (_) {}
+            if (tailListUrl) {
+              pickedListUrl = tailListUrl;
+              pagePick.pickedListUrl = pickedListUrl;
+              pagePick.pickedPage = detectedMaxPage;
+              pagePick.pageMax = detectedMaxPage;
+              attempt.pickedListUrl = pickedListUrl;
+              attempt.pickedPage = detectedMaxPage;
+              attempt.pageMax = detectedMaxPage;
+              await appendWatcherTrace('list_scan_detected_tail_page', {
+                reason: 'order_desc_detected_max_page',
+                trigger,
+                configuredUrl: listUrl,
+                previousListUrl: stateForTargets.lastPickedListUrl,
+                listUrl: pickedListUrl,
+                publisher: pagePick.publisher,
+                urlKey: pagePick.urlKey,
+                detectedMaxPage
+              });
+              stateForTargets.lastPickedListUrl = pickedListUrl;
+              await saveWatcherStateSafe(stateForTargets);
+              await incrementDaily('checked', trigger);
+              parsed = await parseListUrl(pickedListUrl);
+              if (parsed.cfChallenge) {
+                if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
+                return finish({ ok: false, reason: 'cf_challenge' });
+              }
+            }
+          }
+
+          if ((pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc') && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+            stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+            stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+            await saveWatcherStateSafe(stateForTargets);
+            await appendWatcherTrace('list_scan_page_progress_saved', {
+              reason: 'sequential_page_scan_progress',
+              trigger,
+              listUrl: pickedListUrl,
+              configuredUrl: listUrl,
+              publisher: pagePick.publisher,
+              pageOrder: pagePick.pageOrder,
+              urlKey: pagePick.urlKey,
+              pickedPage: Number(pagePick.pickedPage),
+              currentPage: parsed?.listStats?.currentPage || '',
+              maxPage: parsed?.listStats?.maxPage || ''
+            });
+          }
+
           const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
           if (!sourceGate.ok) {
             await appendWatcherTrace('list_scan_skip_source_gate', {
@@ -394,11 +462,16 @@
               count: sourceGate.count,
               threshold: sourceGate.threshold
             });
-            continue;
+            if (isSequentialPageScan) {
+              sequentialPageScanCount += 1;
+              continue;
+            }
+            break;
           }
           await resetCfChallengeStreak();
 
           const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
+          const handledBeforePage = handledCount;
           await appendWatcherTrace('list_scan_candidates', {
             reason: 'ordered_candidates',
             trigger,
@@ -444,6 +517,7 @@
             if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
             const listAllowed = isListCandidateAllowed(candidate, opts);
             if (!listAllowed.ok) {
+              const candidateKey = getProcessedKey(candidate);
               await appendWatcherTrace('candidate_skip_list_filter', {
                 reason: listAllowed.reason,
                 reasonText: describeWatcherReason(listAllowed.reason),
@@ -452,6 +526,9 @@
                 assistId: candidate.assistId || '',
                 title: candidate.title || ''
               });
+              if (candidateKey && listAllowed.reason === 'not_waiting') {
+                await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
+              }
               continue;
             }
             if (await wasRecentlyProcessed(candidate)) {
@@ -516,6 +593,26 @@
                 return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
               }
             }
+          }
+          if (isSequentialPageScan && handledCount === handledBeforePage) {
+            sequentialPageScanCount += 1;
+            if (sequentialPageScanCount < maxSequentialPageScans) {
+              await appendWatcherTrace('list_scan_continue_next_page', {
+                reason: 'sequential_page_no_handled_candidate',
+                trigger,
+                listUrl: pickedListUrl,
+                configuredUrl: listUrl,
+                publisher: pagePick.publisher,
+                pageOrder: pagePick.pageOrder,
+                urlKey: pagePick.urlKey,
+                pickedPage: pagePick.pickedPage,
+                nextScanIndex: sequentialPageScanCount + 1,
+                maxSequentialPageScans
+              });
+              continue;
+            }
+          }
+          break;
           }
         }
 

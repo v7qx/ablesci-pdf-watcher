@@ -139,7 +139,7 @@
     if (isScienceDirectPdfLandingPage()) {
       if (hasScienceDirectContentError()) {
         sendScienceDirectMessage({
-          error: 'ScienceDirect 返回错误页：There was a problem providing the content you requested。'
+          error: 'ScienceDirect 返回错误页：There was a problem providing the content you requested。(可能已触发高频风控封锁，请排查并暂停值守/暂停应助。)'
         });
         stopObserver();
       }

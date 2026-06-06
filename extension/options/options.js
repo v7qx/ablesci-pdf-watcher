@@ -151,7 +151,7 @@ const TEXT_MAP = {
 
   "候选筛选": "Candidate Filter",
   "列表 URL": "List URLs",
-  "每行一个 Ablesci 求助列表链接。默认 Elsevier 在 3~200 页随机；也可追加 <code>&amp;page_min=1&amp;page_max=5</code> 自定义范围。": "One Ablesci helper list link per line. Defaults to random pages 3~200 for Elsevier. Add query parameters for custom range.",
+  "每行一个 Ablesci 求助列表链接。追加 <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> 可按页码倒序依次扫描。": "One Ablesci helper list link per line. Add <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> for sequential reverse scanning.",
   "非 SD 最低求助量": "Min Non-SD Requests",
   "除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。": "Min waiting count required to parse non-SD pages. 0 to disable, defaults to 200.",
   "控制哪些求助在列表页和详情页被跳过。": "Control which requests are skipped on list and details pages.",
@@ -451,7 +451,7 @@ async function load() {
     document.title = 'Ablesci PDF Watcher Settings';
     const descNode = el('watcherListUrlsDesc');
     if (descNode) {
-      descNode.innerHTML = 'One Ablesci list link per line. Elsevier entries default to random 3~200 pages; append <code>&amp;page_min=1&amp;page_max=5</code> to customize.';
+      descNode.innerHTML = 'One Ablesci list link per line. Add <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> for sequential reverse scanning.';
     }
   }
 

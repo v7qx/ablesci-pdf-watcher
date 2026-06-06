@@ -13,7 +13,7 @@
   const ASSIST_RANDOM_PAGE_RANGES = {
     elsevier: {
       min: 3,
-      max: 200,
+      max: 250,
       curve: 'mixed_backlog_power',
       frontProbability: 0.20,
       frontMin: 3,
@@ -124,6 +124,20 @@
     return Math.min(max, Math.max(min, Math.round(Number(value) || min)));
   }
 
+  function getListUrlKey(url) {
+    try {
+      const u = new URL(url);
+      u.searchParams.delete('page');
+      u.searchParams.delete('order');
+      u.searchParams.delete('page_order');
+      u.searchParams.delete('page_min');
+      u.searchParams.delete('page_max');
+      return u.toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
   function pageRangeMetaFromUrl(url) {
     try {
       const u = new URL(url);
@@ -138,15 +152,46 @@
       // the built-in publisher curve.
       const customMin = u.searchParams.get('page_min');
       const customMax = u.searchParams.get('page_max');
-      if (customMin !== null || customMax !== null) {
-        const min = clampInt(parseInt(customMin, 10) || 1, 1, 9999);
-        const max = clampInt(parseInt(customMax, 10) || min, min, 9999);
-        return { publisher: publisher || 'custom', range: { min, max, curve: 'uniform' } };
+      const hasExplicitPageMin = customMin !== null;
+      const hasExplicitPageMax = customMax !== null;
+      const configuredPage = parseInt(u.searchParams.get('page') || '', 10);
+      const hasConfiguredPage = Number.isInteger(configuredPage) && configuredPage > 0;
+      const customOrder = u.searchParams.get('order') || u.searchParams.get('page_order');
+      const pageOrder = customOrder === 'desc' || customOrder === 'asc'
+        ? customOrder
+        : (hasConfiguredPage && !hasExplicitPageMin && !hasExplicitPageMax ? 'desc' : 'random');
+      const hasSequentialOrder = pageOrder === 'desc' || pageOrder === 'asc';
+
+      let min = 1;
+      let max = 1;
+      let curve = 'uniform';
+
+      if (hasExplicitPageMin || hasExplicitPageMax) {
+        const parsedMin = parseInt(customMin, 10);
+        min = clampInt(Number.isInteger(parsedMin) ? parsedMin : 1, 1, 9999);
+        const parsedMax = parseInt(customMax, 10);
+        max = clampInt(Number.isInteger(parsedMax) ? parsedMax : min, min, 9999);
+      } else {
+        const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
+        if (range) {
+          min = clampInt(range.min ?? 1, 1, 9999);
+          max = clampInt(hasConfiguredPage && hasSequentialOrder ? configuredPage : (range.max ?? min), min, 9999);
+          curve = range.curve || 'uniform';
+        } else if (!hasSequentialOrder) {
+          return null;
+        } else {
+          min = 1;
+          max = 1;
+        }
       }
 
-      const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
-      if (!range) return null;
-      return { publisher, range };
+      return {
+        publisher: publisher || 'custom',
+        range: { min, max, curve },
+        pageOrder,
+        hasExplicitPageMin,
+        hasExplicitPageMax
+      };
     } catch (_) {
       return null;
     }
@@ -194,7 +239,7 @@
     };
   }
 
-  function randomizeAssistListUrlWithMeta(url) {
+  function randomizeAssistListUrlWithMeta(url, state = null) {
     const meta = {
       configuredUrl: url,
       pickedListUrl: url,
@@ -204,14 +249,69 @@
       pageMin: '',
       pageMax: '',
       frontHit: false,
-      alpha: ''
+      alpha: '',
+      pageOrder: 'random',
+      urlKey: '',
+      hasExplicitPageMin: false,
+      hasExplicitPageMax: false
     };
     try {
       const u = new URL(url);
       const pageMeta = pageRangeMetaFromUrl(url);
       if (!pageMeta) return meta;
-      const picked = pickAssistPage(pageMeta.range);
+
+      const urlKey = getListUrlKey(url);
+      meta.urlKey = urlKey;
+      meta.pageOrder = pageMeta.pageOrder;
+      meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;
+      meta.hasExplicitPageMax = pageMeta.hasExplicitPageMax === true;
+
+      let pickedPage = 1;
+      let picked = null;
+
+      if ((pageMeta.pageOrder === 'desc' || pageMeta.pageOrder === 'asc') && state) {
+        const lastVisitedPages = state.lastVisitedPages || {};
+        const lastPage = lastVisitedPages[urlKey];
+        const min = pageMeta.range.min;
+        const max = pageMeta.range.max;
+
+        if (pageMeta.pageOrder === 'desc') {
+          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
+            pickedPage = max;
+          } else {
+            pickedPage = Number(lastPage) - 1;
+            if (pickedPage < min) {
+              pickedPage = max;
+            }
+          }
+        } else {
+          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
+            pickedPage = min;
+          } else {
+            pickedPage = Number(lastPage) + 1;
+            if (pickedPage > max) {
+              pickedPage = min;
+            }
+          }
+        }
+        picked = {
+          pickedPage,
+          pageCurve: pageMeta.range.curve || 'uniform',
+          pageMin: min,
+          pageMax: max,
+          frontHit: false,
+          alpha: ''
+        };
+      } else {
+        picked = pickAssistPage(pageMeta.range);
+      }
+
       u.searchParams.set('page', String(picked.pickedPage));
+      u.searchParams.delete('order');
+      u.searchParams.delete('page_order');
+      u.searchParams.delete('page_min');
+      u.searchParams.delete('page_max');
+
       return {
         ...meta,
         ...picked,
@@ -251,6 +351,7 @@
     normalizeListUrls,
     randomIntInclusive,
     clampInt,
+    getListUrlKey,
     pageRangeMetaFromUrl,
     pickAssistPage,
     randomizeAssistListUrlWithMeta,

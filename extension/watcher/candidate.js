@@ -189,6 +189,16 @@
         const m = String(value || '').replace(/,/g, '').match(/\d+/);
         return m ? Number(m[0]) : null;
       }
+      function pageFromHref(href) {
+        try {
+          const u = new URL(href, location.href);
+          const page = parseInt(u.searchParams.get('page') || '', 10);
+          return Number.isFinite(page) ? page : null;
+        } catch (_) {
+          const m = String(href || '').match(/[?&]page=(\d+)/);
+          return m ? parseInt(m[1], 10) : null;
+        }
+      }
       function absUrl(href) {
         try { return new URL(href, location.href).href; } catch (_) { return ''; }
       }
@@ -213,11 +223,45 @@
         const count = numberFromText(text(item.querySelector('.waiting-publisher-item-num')));
         if (title && Number.isFinite(count)) publisherCounts[title] = count;
       });
+      let currentPage = 1;
+      let maxPage = 1;
+      try {
+        const urlPage = pageFromHref(location.href);
+        if (Number.isFinite(urlPage)) currentPage = urlPage;
+        const activePageEl = document.querySelector([
+          '.pagination li.active a',
+          '.pages li.active a',
+          '.pagination .active a',
+          '.layui-laypage-curr',
+          '[aria-current="page"]'
+        ].join(', '));
+        if (activePageEl) {
+          const activeHrefPage = pageFromHref(activePageEl.getAttribute('href') || '');
+          const activeTextPage = numberFromText(text(activePageEl));
+          currentPage = activeHrefPage || activeTextPage || currentPage;
+        }
+
+        const pageAnchors = Array.from(document.querySelectorAll('.pagination a, .pages a, a[href*="page="]'));
+        const lastPageAnchor = document.querySelector('.pagination li.last a, .pages li.last a, .pagination .last a') ||
+          pageAnchors.find(a => /尾页|末页|最后|last/i.test(text(a) || a.getAttribute('title') || ''));
+        if (lastPageAnchor) {
+          maxPage = pageFromHref(lastPageAnchor.getAttribute('href') || '') || currentPage;
+        }
+        const pageNums = [currentPage, maxPage];
+        pageAnchors.forEach(a => {
+          const page = pageFromHref(a.getAttribute('href') || '');
+          if (Number.isFinite(page)) pageNums.push(page);
+        });
+        maxPage = Math.max(...pageNums.filter(Number.isFinite));
+      } catch (_) {}
+
       const listStats = {
         sourceUrl: location.href,
         totalSeeking: Number.isFinite(totalSeeking) ? totalSeeking : null,
         supplementCount: Number.isFinite(supplementCount) ? supplementCount : null,
-        publisherCounts
+        publisherCounts,
+        currentPage,
+        maxPage
       };
 
       const rows = Array.from(document.querySelectorAll('ul.assist-list > li, .assist-list li'));
