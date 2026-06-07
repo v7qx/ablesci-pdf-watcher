@@ -393,6 +393,28 @@
             return finish({ ok: false, reason: 'cf_challenge' });
           }
 
+          if (isSequentialPageScan && parsed?.listStats?.currentPage && Number.isFinite(parsed.listStats.currentPage)) {
+            const realCurrentPage = Number(parsed.listStats.currentPage);
+            if (realCurrentPage < Number(pagePick.pickedPage)) {
+              await appendWatcherTrace('list_scan_page_corrected', {
+                reason: 'requested_page_exceeds_max_page',
+                trigger,
+                requestedPage: pagePick.pickedPage,
+                correctedPage: realCurrentPage,
+                maxPage: parsed.listStats.maxPage
+              });
+              pagePick.pickedPage = realCurrentPage;
+              attempt.pickedPage = realCurrentPage;
+              if (parsed.listStats.maxPage && Number.isFinite(parsed.listStats.maxPage)) {
+                pagePick.pageMax = Number(parsed.listStats.maxPage);
+                attempt.pageMax = Number(parsed.listStats.maxPage);
+                stateForTargets.detectedMaxPages = stateForTargets.detectedMaxPages || {};
+                stateForTargets.detectedMaxPages[pagePick.urlKey] = Number(parsed.listStats.maxPage);
+                await saveWatcherStateSafe(stateForTargets);
+              }
+            }
+          }
+
           const detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
           const shouldRescanDetectedTail = pagePick.pageOrder === 'desc'
             && trigger !== 'manual'
