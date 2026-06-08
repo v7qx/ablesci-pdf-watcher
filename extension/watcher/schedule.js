@@ -50,7 +50,22 @@
       return Math.min(max, Math.max(min, Number(minutes) || min));
     }
 
-    function sampleAssistDelayMinutes(opts, speedMode) {
+    function sampleAssistDelayMinutes(opts, speedMode, state = {}) {
+      if (opts?.watcherSpeedMode === 'adaptive') {
+        const baseMedian = 3.0;
+        const lag = Number(state.targetError ?? state.lag ?? 0);
+        const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
+        const thresholds = lagThresholds ? lagThresholds(monthlyTarget) : { severe: 20 };
+        const fLag = 1.0 - Math.max(-0.5, Math.min(0.5, lag / Math.max(1, thresholds.severe)));
+        const cfStreak = Number(state.cfChallengeStreak || 0);
+        const fRisk = 1.0 + cfStreak * 1.5;
+        const dynamicMedian = baseMedian * fLag * fRisk;
+        const median = Math.min(15.0, Math.max(2.0, dynamicMedian));
+        const min = Math.max(1.0, median * 0.5);
+        const max = Math.min(30.0, median * 2.5);
+        return logNormalMinutes(median, min, max);
+      }
+
       const modeName = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
       const mode = sessionModes[modeName] || sessionModes.normal;
       const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
@@ -108,7 +123,7 @@
       if (hold) return hold;
       const guardMinutes = assistGuardMinutes(opts);
       const speedMode = effectiveAssistSpeedMode(opts, state);
-      const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode);
+      const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode, state);
       const targetError = Number(state.targetError ?? state.lag ?? 0);
       const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
       const thresholds = lagThresholds(monthlyTarget);
@@ -117,13 +132,24 @@
       const modelDelay = rawModelDelay;
       const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
       guarded.minutes = clampAssistDelayMinutes(opts, guarded.minutes);
+
+      const cfStreak = Number(state.cfChallengeStreak || 0);
+      let cfBackoffApplied = false;
+      if (cfStreak > 0) {
+        const multiplier = Math.pow(2, cfStreak - 1);
+        const backoffMinutes = guarded.minutes * multiplier;
+        const maxBackoff = 180; // 最大退避 3 小时
+        guarded.minutes = Math.min(maxBackoff, backoffMinutes);
+        cfBackoffApplied = true;
+      }
+
       return {
         minutes: guarded.minutes,
         modelDelayMinutes: modelDelay,
         rawModelDelayMinutes: rawModelDelay,
         guardMinutes,
         ...guarded,
-        reason,
+        reason: cfBackoffApplied ? `${reason}_cf_backoff_${cfStreak}` : reason,
         strategy: 'calendar_target_lognormal',
         speedMode,
         rateMultiplier: 1,

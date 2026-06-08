@@ -87,6 +87,9 @@
         } else if (rawMessage.includes('连续') && rawMessage.includes('次遇到 Ablesci 验证页，已暂停低频值守')) {
           const streak = rawMessage.match(/\d+/)?.[0] || '';
           rawMessage = `Encountered Ablesci verification page for ${streak} consecutive times. Auto watcher has been paused. Please re-enable after manually resolving.`;
+        } else if (rawMessage.includes('检测到 Ablesci 验证页') && rawMessage.includes('退避重试')) {
+          const streak = rawMessage.match(/\d+/)?.[0] || '';
+          rawMessage = `Ablesci verification page detected (${streak} times). Pausing is disabled, utilizing exponential backoff retry (longer intervals).`;
         } else if (rawMessage.includes('检测到 Ablesci 验证页')) {
           const streak = rawMessage.match(/\d+/)?.[0] || '';
           rawMessage = `Ablesci verification page detected (${streak} times). Please resolve in browser; if it continues, the watcher will pause automatically.`;
@@ -203,15 +206,28 @@
       const state = await getWatcherState();
       const threshold = clampNumber(opts.watcherCfPauseThreshold, 3, 1, 10);
       state.cfChallengeStreak = Number(state.cfChallengeStreak || 0) + 1;
-      const reached = state.cfChallengeStreak >= threshold;
+
+      const shouldPause = opts.watcherStopOnCfChallenge === true;
+      const reached = shouldPause && state.cfChallengeStreak >= threshold;
+
       if (opts.watcherCfNotificationEnabled !== false) {
-        const message = reached
-          ? `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`
-          : `检测到 Ablesci 验证页（第 ${state.cfChallengeStreak} 次）。请前往浏览器处理；若继续累积将自动暂停值守。`;
+        let message = '';
+        if (shouldPause) {
+          message = reached
+            ? `连续 ${state.cfChallengeStreak} 次遇到 Ablesci 验证页，已暂停低频值守。手动处理后请重新开启。`
+            : `检测到 Ablesci 验证页（第 ${state.cfChallengeStreak} 次）。请前往浏览器处理；若继续累积将自动暂停值守。`;
+        } else {
+          message = `检测到 Ablesci 验证页（第 ${state.cfChallengeStreak} 次），由于未开启自动暂停，值守将采用退避重试（间隔越来越长）。`;
+        }
+
         const notifyResult = await notifyWatcherNeedsAttention(
           message,
           listUrl,
-          { requireInteraction: true, soundKind: 'urgent', priority: 2 }
+          {
+            requireInteraction: shouldPause,
+            soundKind: shouldPause ? 'urgent' : 'default',
+            priority: shouldPause ? 2 : 1
+          }
         );
         if (notifyResult && notifyResult.ok) {
           await incrementDaily('notified', trigger);

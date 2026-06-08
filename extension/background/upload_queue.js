@@ -91,7 +91,9 @@
           }, taskTimeoutMs);
           await handleUpload(port, payload, abortController.signal, opts);
         } catch (err) {
-          let failureReason = classifyJournalAccessFailureReason(err);
+          const errorMsg = formatTaskError(err);
+          const isAssistClosed = /求助状态出错|只有求助中才可以上传/.test(errorMsg);
+          let failureReason = isAssistClosed ? 'assist_closed' : classifyJournalAccessFailureReason(err);
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
           }
@@ -104,7 +106,7 @@
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
-          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription', 'empty_pdf_file']);
+          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription', 'empty_pdf_file', 'assist_closed', 'tab_drag_locked']);
           if (!normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});
           }
@@ -205,8 +207,33 @@
                 timeoutReason: failureReason,
                 ...cleanerExtra
               });
+            } else if (failureReason === 'assist_closed') {
+              const message = '该求助状态已改变（可能已被他人应助或已关闭），本次应助已取消。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: 'assist_closed',
+                ...cleanerExtra
+              });
+            } else if (failureReason === 'tab_drag_locked') {
+              const message = '由于您正在拖拽浏览器标签页，插件暂时无法操作该标签页，已跳过本次任务。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipReason: 'tab_drag_locked',
+                ...cleanerExtra
+              });
             } else {
-              console.error('[Ablesci PDF Watcher Error]', err);
+              console.error(
+                `[Ablesci PDF Watcher Error] ${formatTaskError(err)}\n求助链接: ${payload?.pageUrl || '未知'}\nDOI: ${payload?.doi || '未知'}`,
+                err
+              );
               post(port, 'error', formatTaskError(err), cleanerExtra);
             }
           }

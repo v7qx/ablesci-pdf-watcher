@@ -41,7 +41,7 @@
     }
 
     function effectiveMonthlyTarget(state, monthlyTarget) {
-      const target = Math.max(0, Number(monthlyTarget || 0));
+      const target = Math.max(0, Number(monthlyTarget || 0)) * 1.2;
       const ratio = firstSyncProgressRatio(state);
       if (ratio <= 0) return target;
       return Math.round(target * Math.max(0, 1 - ratio));

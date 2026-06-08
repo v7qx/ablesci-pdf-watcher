@@ -82,8 +82,12 @@
         const expectedPii = extractScienceDirectPii(pending.articleUrl || pending.pdfUrl || '');
         const actualPii = extractScienceDirectPii(url);
         if (expectedPii && actualPii && expectedPii !== actualPii) {
-          pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPii}，实际 ${actualPii}`));
-          return;
+          const p1 = expectedPii.substring(0, 10);
+          const p2 = actualPii.substring(0, 10);
+          if (p1 !== p2) {
+            pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPii}，实际 ${actualPii}`));
+            return;
+          }
         }
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         pending.lastNativePdfUrl = url;

@@ -158,7 +158,10 @@
 
         function onCreated(item) {
           if (downloadId !== null) return;
-          if (!isLikelyTargetDownload(item, hostnameOf(pdfUrl), pdfUrl)) return;
+          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
+            return;
+          }
+          if (!isLikelyTargetDownload(item, hostnameOf(pdfUrl), pdfUrl).ok) return;
           downloadId = item.id;
           if (timer) {
             clearTimeout(timer);
@@ -232,6 +235,7 @@
         };
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();
+        const seenIgnoredIds = new Set();
 
         function traceUrl(url) {
           const raw = String(url || '');
@@ -312,26 +316,44 @@
           if (settled || !item || seenIds.has(item.id)) return;
           if (!downloadArmed) {
             tracePublisherStep('download-candidate-ignored', { source, reason: 'download_not_armed', downloadId: item.id });
+            if (!seenIgnoredIds.has(item.id)) {
+              seenIgnoredIds.add(item.id);
+              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：未装载拦截器 (download_not_armed)`);
+            }
             return;
           }
           if (isHtmlDownloadItem(item)) {
             tracePublisherStep('download-candidate-ignored', { source, reason: 'html_download_item', downloadId: item.id });
+            if (!seenIgnoredIds.has(item.id)) {
+              seenIgnoredIds.add(item.id);
+              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：检测为 HTML 页面而不是 PDF`);
+            }
             return;
           }
           if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
             tracePublisherStep('download-candidate-ignored', { source, reason: 'tab_mismatch', downloadId: item.id, itemTabId: item.tabId, publisherTabId: tabId });
+            if (!seenIgnoredIds.has(item.id)) {
+              seenIgnoredIds.add(item.id);
+              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：标签页不匹配 (下载来自 tab ${item.tabId}，期望 ${tabId})`);
+            }
             return;
           }
-          if (!isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching)) {
+          const matchResult = isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching);
+          if (!matchResult.ok) {
             tracePublisherStep('download-candidate-ignored', {
               source,
               reason: 'url_mismatch',
+              detail: matchResult.reason,
               downloadId: item.id,
               expectedHost,
               sourceUrl: traceUrl(sourceUrlForMatching),
               itemUrl: traceUrl(item.url),
               finalUrl: traceUrl(item.finalUrl)
             });
+            if (!seenIgnoredIds.has(item.id)) {
+              seenIgnoredIds.add(item.id);
+              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：特征码不匹配 (${matchResult.reason}，URL: ${traceUrl(item.url)})`);
+            }
             return;
           }
           seenIds.add(item.id);

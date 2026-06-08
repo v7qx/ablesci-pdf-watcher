@@ -208,6 +208,13 @@
         return match[0].split('#')[0].split('?')[0].replace(/[)\].,;，。]+$/, '');
       }
       const bodyText = text(document.body);
+      const titleText = document.title || '';
+      const isErrorPage =
+        /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(titleText + ' ' + bodyText) ||
+        /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(titleText + ' ' + bodyText);
+      if (isErrorPage) {
+        return { isErrorPage: true, errorTitle: titleText || '502 Bad Gateway', candidates: [] };
+      }
       if (/Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText)) {
         return { cfChallenge: true, candidates: [] };
       }
@@ -270,7 +277,14 @@
           row.querySelector('.assist-list-title a[href*="/assist/detail"]') ||
           row.querySelector('a[href*="/assist/detail"]');
         const handleAnchor = row.querySelector('.assist-status-badge');
-        const title = text(detailAnchor).replace(/^\[高分\]\s*/, '');
+        let title = '';
+        if (detailAnchor) {
+          const clone = detailAnchor.cloneNode(true);
+          Array.from(clone.querySelectorAll('span')).forEach(span => span.remove());
+          title = text(clone).replace(/^\[高分\]\s*/, '');
+        } else {
+          title = '未知文献';
+        }
         const rowText = text(row);
         const detailUrl = absUrl(detailAnchor?.getAttribute('href') || detailAnchor?.href || '');
         const assistId = row.querySelector('.assist-id-val')?.value || new URLSearchParams(detailUrl.split('?')[1] || '').get('id') || '';
@@ -348,27 +362,32 @@
       }
       function snapshot(ready) {
         const bodyText = text(document.body);
+        const titleText = document.title || '';
         const detailLinkCount = document.querySelectorAll('a[href*="/assist/detail"]').length;
         const rowCount = document.querySelectorAll('ul.assist-list > li, .assist-list li').length;
         const publisherItemCount = document.querySelectorAll('.waiting-publisher-item').length;
         const flyFilterCount = document.querySelectorAll('.fly-filter a').length;
         const cfChallenge = /Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText);
+        const isErrorPage =
+          /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(titleText + ' ' + bodyText) ||
+          /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(titleText + ' ' + bodyText);
         return {
           ready,
           readyState: document.readyState || '',
-          title: document.title || '',
+          title: titleText,
           detailLinkCount,
           rowCount,
           publisherItemCount,
           flyFilterCount,
           cfChallenge,
+          isErrorPage,
           loginLike: /登录|请先登录|login/i.test(bodyText),
           bodyLength: bodyText.length
         };
       }
       function isReady() {
         const snap = snapshot(false);
-        return snap.cfChallenge || snap.detailLinkCount > 0 || snap.rowCount > 0;
+        return snap.cfChallenge || snap.isErrorPage || snap.detailLinkCount > 0 || snap.rowCount > 0;
       }
       if (isReady()) return Promise.resolve(snapshot(true));
       return new Promise(resolve => {

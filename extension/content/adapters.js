@@ -121,12 +121,12 @@
   function getFullDoiFromDocument(doc) {
     doc = doc || document;
     const sources = [
-      '.assist-ai-doi .copy-doi-btn[data-clipboard-text]',
-      '.assist-ai-doi a[href*="doi.org/10."]',
-      '.assist-ai-doi',
       '.assist-doi .copy-doi-btn[data-clipboard-text]',
       '.assist-doi a[href*="doi.org/10."]',
       '.assist-doi',
+      '.assist-ai-doi .copy-doi-btn[data-clipboard-text]',
+      '.assist-ai-doi a[href*="doi.org/10."]',
+      '.assist-ai-doi',
       '.assist-url a[href*="doi.org/10."]'
     ];
 

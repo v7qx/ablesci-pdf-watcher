@@ -22,8 +22,8 @@
   const WATCHER_DAILY_LIMIT_MAX = 500;
   const DOI_FAILURE_SKIP_THRESHOLD = 5;
   const SESSION_MODES = {
-    slow: { median: 10, min: 6, max: 25, sizeWeights: [0, 1] },
-    normal: { median: 6, min: 4, max: 15, sizeWeights: [0, 1] },
+    slow: { median: 6, min: 4, max: 15, sizeWeights: [0, 1] },
+    normal: { median: 4, min: 2, max: 10, sizeWeights: [0, 1] },
     fast: { median: 2, min: 1, max: 5, sizeWeights: [0, 1] }
   };
 

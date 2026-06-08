@@ -109,6 +109,115 @@
       }
     }
 
+    async function initCurrentPageData(pickedListUrl, pagePick, parsed) {
+      try {
+        const chromeApi = typeof chrome !== 'undefined' ? chrome : browser;
+        const currentPageKey = 'autoWatcherCurrentPageData';
+        const storedPageData = (await chromeApi.storage.local.get(currentPageKey))[currentPageKey];
+        const latestIds = new Set((parsed.candidates || []).map(c => String(c.assistId || '')));
+
+        if (!storedPageData || storedPageData.url !== pickedListUrl) {
+          const initialCandidates = (parsed.candidates || []).slice().reverse().map(c => ({
+            assistId: String(c.assistId || ''),
+            title: c.title || '',
+            doi: c.doi || '',
+            detailUrl: c.detailUrl || '',
+            status: 'pending',
+            reason: '',
+            time: 0
+          }));
+          await chromeApi.storage.local.set({
+            [currentPageKey]: {
+              page: pagePick.pickedPage,
+              url: pickedListUrl,
+              order: pagePick.pageOrder,
+              candidates: initialCandidates
+            }
+          });
+        } else {
+          let updated = false;
+          const pageData = storedPageData;
+          if (Array.isArray(pageData.candidates)) {
+            const oldMap = new Map();
+            for (const cand of pageData.candidates) {
+              oldMap.set(String(cand.assistId), cand);
+            }
+
+            const latestCandidatesOrdered = (parsed.candidates || []).slice().reverse();
+            const orderedCandidates = [];
+
+            // 1. 遍历最新在线列表候选（保证其从上到下的物理顺序与网页100%一致）
+            for (const c of latestCandidatesOrdered) {
+              const cid = String(c.assistId || '');
+              if (!cid) continue;
+
+              if (oldMap.has(cid)) {
+                orderedCandidates.push(oldMap.get(cid));
+                oldMap.delete(cid);
+              } else {
+                orderedCandidates.push({
+                  assistId: cid,
+                  title: c.title || '',
+                  doi: c.doi || '',
+                  detailUrl: c.detailUrl || '',
+                  status: 'pending',
+                  reason: '',
+                  time: 0
+                });
+                updated = true;
+              }
+            }
+
+            // 2. Map 中剩下的是消失的候选（已被他人完成、机器人关闭，或之前成功/失败而消失的）
+            if (oldMap.size > 0) {
+              for (const [cid, cand] of oldMap.entries()) {
+                if (cand.status === 'pending' || cand.status === 'processing') {
+                  cand.status = 'closed';
+                  cand.reason = 'assist_closed_or_resolved';
+                  cand.time = Date.now();
+                }
+                orderedCandidates.push(cand);
+                updated = true;
+              }
+            }
+
+            if (updated || orderedCandidates.length !== pageData.candidates.length) {
+              pageData.candidates = orderedCandidates;
+              await chromeApi.storage.local.set({ [currentPageKey]: pageData });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[initCurrentPageData] failed', err);
+      }
+    }
+
+    async function updateCurrentPageCandidateStatus(assistId, status, reason) {
+      try {
+        const chromeApi = typeof chrome !== 'undefined' ? chrome : browser;
+        const key = 'autoWatcherCurrentPageData';
+        const stored = await chromeApi.storage.local.get(key);
+        const pageData = stored[key];
+        if (pageData && Array.isArray(pageData.candidates)) {
+          let updated = false;
+          const assistIdStr = String(assistId || '');
+          for (const cand of pageData.candidates) {
+            if (String(cand.assistId) === assistIdStr) {
+              cand.status = status;
+              cand.reason = reason;
+              cand.time = Date.now();
+              updated = true;
+            }
+          }
+          if (updated) {
+            await chromeApi.storage.local.set({ [key]: pageData });
+          }
+        }
+      } catch (err) {
+        console.warn('[updateCurrentPageCandidateStatus] failed', err);
+      }
+    }
+
     async function runAutoWatcherOnce(trigger = 'alarm') {
       if (stateRef.autoWatcherRunning) {
         await appendWatcherTrace('run_skip_already_running', { reason: 'already_running', trigger });
@@ -388,10 +497,18 @@
           await saveWatcherStateSafe(stateForTargets);
           await incrementDaily('checked', trigger);
           let parsed = await parseListUrl(pickedListUrl);
+          if (parsed.isErrorPage) {
+            await appendWatcherLog({
+              type: 'warning',
+              message: `🔄 ⚠️ 无法扫描列表：科研通网站返回服务错误 (${parsed.errorTitle || '502 Bad Gateway'})，值守已暂停并等待下一次轮询。`
+            });
+            return finish({ ok: false, reason: 'site_error' });
+          }
           if (parsed.cfChallenge) {
-            if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
+            await recordCfChallenge(opts, pickedListUrl, trigger);
             return finish({ ok: false, reason: 'cf_challenge' });
           }
+          await initCurrentPageData(pickedListUrl, pagePick, parsed);
 
           if (isSequentialPageScan && parsed?.listStats?.currentPage && Number.isFinite(parsed.listStats.currentPage)) {
             const realCurrentPage = Number(parsed.listStats.currentPage);
@@ -405,13 +522,22 @@
               });
               pagePick.pickedPage = realCurrentPage;
               attempt.pickedPage = realCurrentPage;
+              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+              if (pagePick.pageOrder === 'desc') {
+                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage + 1;
+              } else if (pagePick.pageOrder === 'asc') {
+                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage - 1;
+              } else {
+                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage;
+              }
+
               if (parsed.listStats.maxPage && Number.isFinite(parsed.listStats.maxPage)) {
                 pagePick.pageMax = Number(parsed.listStats.maxPage);
                 attempt.pageMax = Number(parsed.listStats.maxPage);
                 stateForTargets.detectedMaxPages = stateForTargets.detectedMaxPages || {};
                 stateForTargets.detectedMaxPages[pagePick.urlKey] = Number(parsed.listStats.maxPage);
-                await saveWatcherStateSafe(stateForTargets);
               }
+              await saveWatcherStateSafe(stateForTargets);
             }
           }
 
@@ -420,7 +546,7 @@
             && trigger !== 'manual'
             && pagePick.hasExplicitPageMax !== true
             && Number.isFinite(detectedMaxPage)
-            && detectedMaxPage > Number(pagePick.pickedPage || 0);
+            && detectedMaxPage > Number(pagePick.pageMax || 0);
           if (
             trigger === 'manual' &&
             pagePick.pageOrder === 'desc' &&
@@ -472,9 +598,10 @@
               await incrementDaily('checked', trigger);
               parsed = await parseListUrl(pickedListUrl);
               if (parsed.cfChallenge) {
-                if (opts.watcherStopOnCfChallenge) await recordCfChallenge(opts, pickedListUrl, trigger);
+                await recordCfChallenge(opts, pickedListUrl, trigger);
                 return finish({ ok: false, reason: 'cf_challenge' });
               }
+              await initCurrentPageData(pickedListUrl, pagePick, parsed);
             }
           }
 
@@ -572,6 +699,7 @@
               if (candidateKey && listAllowed.reason === 'not_waiting') {
                 await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
               }
+              await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
               continue;
             }
             if (await wasRecentlyProcessed(candidate)) {
@@ -581,6 +709,7 @@
                 detailUrl: candidate.detailUrl,
                 assistId: candidate.assistId || ''
               });
+              await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
               continue;
             }
 
@@ -591,17 +720,26 @@
               assistId: candidate.assistId || '',
               title: candidate.title || ''
             });
+            await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
             const detail = await inspectDetail(candidate);
             if (!detail.ok) {
               await closeTabQuietly(detail.tabId, 'detail_extract_failed');
+              if (/502 Bad Gateway|科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|没有找到 csrf-token|504 Gateway Time|500 Internal Server/i.test(detail.reason)) {
+                await appendWatcherLog({
+                  type: 'warning',
+                  message: `🔄 ⚠️ 无法提取详情：科研通网站返回服务错误 (${detail.reason})，值守已暂停并等待下一次轮询。`
+                });
+                return finish({ ok: false, reason: 'site_error' });
+              }
               await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
               await incrementDaily('failed', trigger);
-              await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason });
+              await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: pagePick.pickedPage });
               continue;
             }
 
             const payload = detail.payload;
             payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
+            payload.page = pagePick.pickedPage;
             const detailAllowed = isDetailAllowedForWatcher(payload, opts, blacklistedIds);
             const key = getProcessedKey(candidate, payload);
             if (!detailAllowed.ok) {
@@ -609,7 +747,7 @@
               await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
               await updateProcessed(key, 'skipped', detailAllowed.reason);
               await incrementDaily('skipped', trigger);
-              await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason });
+              await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: pagePick.pickedPage });
               continue;
             }
 
@@ -680,7 +818,7 @@
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
         await incrementDaily('failed', trigger);
-        await appendWatcherLog({ trigger, status: 'failed', reason: err?.message || String(err) });
+        await appendWatcherLog({ trigger, status: 'failed', reason: err?.message || String(err), page: typeof pagePick !== 'undefined' ? pagePick?.pickedPage : '' });
         return finish({ ok: false, reason: err?.message || String(err) });
       } finally {
         await appendWatcherTrace('run_finish', { reason: 'finally', trigger });

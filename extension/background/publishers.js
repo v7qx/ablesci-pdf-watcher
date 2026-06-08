@@ -8,8 +8,14 @@
   }
 
   function extractScienceDirectPii(url) {
-    const match = String(url || '').match(/\/pii\/([A-Z0-9]+)/i);
-    return match ? match[1] : '';
+    const s = String(url || '');
+    let match = s.match(/\/pii\/([A-Z0-9]+)/i);
+    if (match) return match[1].toUpperCase();
+    match = s.match(/1-s2\.0-([A-Z0-9]+)/i);
+    if (match) return match[1].toUpperCase();
+    match = s.match(/\b([SB][A-Z0-9]{16})\b/i);
+    if (match) return match[1].toUpperCase();
+    return '';
   }
 
   function isDoiHost(host) {
@@ -208,16 +214,59 @@
     const mime = String(item?.mime || '');
     const sourcePii = extractScienceDirectPii(sourceUrl);
     const actualPii = extractScienceDirectPii(url);
-    const sourceHost = (() => {
-      try { return new URL(String(sourceUrl || '')).hostname; } catch (_) { return ''; }
-    })();
-    const finalHost = (() => {
-      try { return new URL(url).hostname; } catch (_) { return ''; }
-    })();
-    const expected = String(expectedHost || '').toLowerCase();
+
+    const getHostname = (u) => {
+      const s = String(u || '').trim();
+      if (!s) return '';
+      try {
+        if (/^https?:\/\//i.test(s)) return new URL(s).hostname;
+        return new URL('https://' + s).hostname;
+      } catch (_) {
+        const match = s.match(/^(?:https?:\/\/)?([^/]+)/i);
+        return match ? match[1].split(':')[0] : '';
+      }
+    };
+
+    const sourceHost = getHostname(sourceUrl);
+    const finalHost = getHostname(url);
+    const expected = getHostname(expectedHost || '').toLowerCase();
     const pdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url) || looksLikePdfDownloadUrl(sourceUrl);
-    if (!pdfLike) return false;
-    if (sourcePii && actualPii && sourcePii !== actualPii) return false;
+
+    if (!pdfLike) {
+      return { ok: false, reason: `pdfLike_check_failed (filename: "${filename}", mime: "${mime}", looksLikeUrl: ${looksLikePdfDownloadUrl(url)}, looksLikeSource: ${looksLikePdfDownloadUrl(sourceUrl)})` };
+    }
+    if (sourcePii && actualPii && sourcePii !== actualPii) {
+      const p1 = sourcePii.substring(0, 10);
+      const p2 = actualPii.substring(0, 10);
+      if (p1 !== p2) {
+        return { ok: false, reason: `pii_mismatch (sourcePii: "${sourcePii}", actualPii: "${actualPii}")` };
+      }
+    }
+
+    // IEEE arnumber 校验
+    const extractIeeeArnumber = (u) => {
+      const s = String(u || '').trim();
+      const match = s.match(/(?:arnumber=|document\/)(\d+)/i);
+      return match ? match[1] : '';
+    };
+    const sourceAr = extractIeeeArnumber(sourceUrl);
+    const actualAr = extractIeeeArnumber(url);
+    if (sourceAr && actualAr && sourceAr !== actualAr) {
+      return { ok: false, reason: `ieee_arnumber_mismatch (sourceAr: "${sourceAr}", actualAr: "${actualAr}")` };
+    }
+
+    // RSC ID 校验
+    const extractRscId = (u) => {
+      const s = String(u || '').trim();
+      const match = s.match(/\/content\/article(?:pdf|html|landing)\/\d{4}\/[a-z]{2}\/([a-z0-9]+)/i);
+      return match ? match[1].toLowerCase() : '';
+    };
+    const sourceRsc = extractRscId(sourceUrl);
+    const actualRsc = extractRscId(url);
+    if (sourceRsc && actualRsc && sourceRsc !== actualRsc) {
+      return { ok: false, reason: `rsc_id_mismatch (sourceRsc: "${sourceRsc}", actualRsc: "${actualRsc}")` };
+    }
+
     const sourceDoi = (() => {
       const match = decodeURIComponent(String(sourceUrl || '')).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
       return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
@@ -226,13 +275,45 @@
       const match = decodeURIComponent(String(url || '')).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
       return match ? match[1].toLowerCase().replace(/\.pdf$/i, '').trim() : '';
     })();
-    if (sourceDoi && actualDoi && sourceDoi !== actualDoi && !sourceDoi.startsWith(actualDoi) && !actualDoi.startsWith(sourceDoi)) return false;
-    if (expected && finalHost.toLowerCase() === expected) return true;
-    if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return true;
-    if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return true;
-    if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return true;
-    if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return true;
-    return false;
+    if (sourceDoi && actualDoi && sourceDoi !== actualDoi && !sourceDoi.startsWith(actualDoi) && !actualDoi.startsWith(sourceDoi)) {
+      return { ok: false, reason: `doi_mismatch (sourceDoi: "${sourceDoi}", actualDoi: "${actualDoi}")` };
+    }
+
+    // Oxford (OUP) DOI 后缀匹配（限制仅在 expected 匹配 Oxford 时生效，避免误杀 SD 等其它出版社）
+    if (expected === 'academic.oup.com' && sourceDoi && !actualDoi) {
+      const parts = sourceDoi.split('/');
+      const suffix = parts[parts.length - 1]; // 例如 gkad123
+      if (suffix && suffix.length >= 4) {
+        const lowerUrl = url.toLowerCase();
+        const lowerSuffix = suffix.toLowerCase();
+        if (!lowerUrl.includes(lowerSuffix)) {
+          return { ok: false, reason: `oxford_doi_suffix_mismatch (suffix: "${lowerSuffix}", url: "${lowerUrl}")` };
+        }
+      }
+    }
+
+    if (expected && finalHost.toLowerCase() === expected) return { ok: true };
+    if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return { ok: true };
+    if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
+    if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return { ok: true };
+    if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return { ok: true };
+
+    // 当初始请求为 DOI (doi.org) 跳转时，允许匹配支持的各大出版社 PDF 下载主机
+    if (isDoiHost(expected) || isDoiHost(sourceHost)) {
+      if (isScienceDirectRelatedHost(finalHost)) return { ok: true };
+      if (isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
+      if (isAipRelatedDownloadHost(finalHost)) return { ok: true };
+      if (/(^|\.)springer\.com$/i.test(finalHost) || /(^|\.)springeropen\.com$/i.test(finalHost) || /(^|\.)biomedcentral\.com$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)wiley\.com$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)acs\.org$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)rsc\.org$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)ieee\.org$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)nature\.com$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)iopscience\.iop\.org$/i.test(finalHost) || /(^|\.)iop\.org$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)cnpereading\.com$/i.test(finalHost)) return { ok: true };
+    }
+
+    return { ok: false, reason: `host_mismatch (expected: "${expected}", finalHost: "${finalHost}", sourceHost: "${sourceHost}")` };
   }
 
   function isExpectedPublisherPage(pending, pageUrl) {

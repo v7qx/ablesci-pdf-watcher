@@ -39,19 +39,6 @@
       </div>
     </section>
 
-    <section class="card" id="debugToolCard">
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>开发调试工具 (模拟应助)</strong>
-          <span>无需在网站上真实求助或认领，可在此处输入 DOI 或文献 URL（支持 dx.doi.org、Wiley、Springer、ACS、IEEE 等链接），直接模拟并测试插件的前后台应助探测与下载逻辑（会自动以仅下载模式运行，不会触发实际上传）。</span>
-          <div class="debug-tool-input-row" style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
-            <input id="debugDoiInput" type="text" placeholder="输入 DOI 或 文献 URL，例如: 10.1002/..." style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.95em; height: 32px; box-sizing: border-box;">
-            <button id="btnDebugSimulate" class="secondary" type="button" style="height: 32px; padding: 0 16px; white-space: nowrap; line-height: 30px;">开始模拟</button>
-          </div>
-          <div id="debugLogContainer" style="margin-top: 12px; padding: 12px; background: #fafafa; border: 1px dashed var(--border); border-radius: 4px; display: none; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.9em; white-space: pre-wrap; color: var(--text-muted); line-height: 1.5;"></div>
-        </div>
-      </div>
-    </section>
 
     <details class="card">
       <summary>上传规则</summary>
@@ -91,18 +78,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>调试模式</strong>
-          <span>只下载并校验 PDF，不自动上传；完成时显示准备上传的文件信息。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="调试模式：仅下载不上传">
-            <input id="debugDownloadOnly" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>智能推送</strong>
           <span>提交成功后，按网站返回结果决定是否显示相关文献的智能推送提示。</span>
         </div>
@@ -117,6 +92,7 @@
 
     <details class="card">
       <summary>更多设置</summary>
+
       <div class="setting-row">
         <div class="setting-copy">
           <strong>按钮显示名称</strong>
@@ -157,9 +133,9 @@
         </div>
         <div class="setting-control">
           <select id="watcherLanguage">
-            <option value="auto">跟随浏览器系统 (Auto)</option>
-            <option value="zh">简体中文 (Chinese)</option>
-            <option value="en">English</option>
+            <option value="auto">自动 / Auto</option>
+            <option value="zh">中文 / Chinese</option>
+            <option value="en">英文 / English</option>
           </select>
         </div>
       </div>
@@ -220,7 +196,27 @@
             <span></span>
           </label>
           <button id="copyDiagnostic" class="secondary" type="button">复制</button>
-          <span id="diagnosticStatus" class="pill">未复制</span>
+        </div>
+      </div>
+      <div class="setting-row" style="display: block;">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <div class="setting-copy">
+            <strong>调试模式</strong>
+          </div>
+          <div class="setting-control">
+            <label class="toggle" title="调试模式：仅下载不上传">
+              <input id="debugDownloadOnly" type="checkbox">
+              <span></span>
+            </label>
+          </div>
+        </div>
+        <div id="debugDownloadToolContainer" style="margin-top: 14px; padding: 14px; background: #f9fafb; border: 1px solid var(--border); border-radius: 6px;">
+          <strong style="font-size: 12px; color: var(--text-normal); display: block; margin-bottom: 6px;">开发调试工具 (模拟应助)</strong>
+          <div class="debug-tool-input-row" style="display: flex; gap: 8px; align-items: center;">
+            <input id="debugDoiInput" type="text" placeholder="输入 DOI 或 文献 URL，例如: 10.1002/..." style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; height: 32px; box-sizing: border-box;">
+            <button id="btnDebugSimulate" class="secondary" type="button" style="height: 32px; padding: 0 16px; white-space: nowrap; line-height: 30px; font-size: 12px;">开始模拟</button>
+          </div>
+          <div id="debugLogContainer" style="margin-top: 12px; padding: 12px; background: #ffffff; border: 1px dashed var(--border); border-radius: 4px; display: none; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; color: var(--text-muted); line-height: 1.6;"></div>
         </div>
       </div>
     </details>
@@ -329,9 +325,13 @@
     </details>
 
     <section class="card">
-      <h2 class="card-title">实验：低频值守</h2>
-      <details class="setting-details nested-setting-details">
-        <summary>基础设置</summary>
+      <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <span>实验：低频值守</span>
+      </div>
+      <details class="setting-details">
+        <summary>值守参数配置</summary>
+        <details class="setting-details nested-setting-details">
+          <summary>基础设置</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>启用低频值守</strong>
@@ -351,10 +351,9 @@
         </div>
         <div class="setting-control">
           <select id="watcherSpeedMode" aria-label="值守速度模式">
-            <option value="adaptive">自适应 (中位数 2~6 分钟)</option>
             <option value="fast">极速模式 (中位数 2 分钟)</option>
-            <option value="normal">快速模式 (中位数 6 分钟)</option>
-            <option value="slow">普通慢速 (中位数 10 分钟)</option>
+            <option value="normal">常规速度 (中位数 4 分钟)</option>
+            <option value="slow">普通慢速 (中位数 6 分钟)</option>
           </select>
         </div>
       </div>
@@ -553,6 +552,7 @@
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
         </div>
       </div>
+      </details>
       </details>
       <div class="setting-row watcher-action-row">
         <div class="watcher-action-layout">

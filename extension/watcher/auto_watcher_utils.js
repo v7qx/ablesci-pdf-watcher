@@ -269,6 +269,9 @@
       ) {
         pageMeta.range.max = detectedMaxPage;
       }
+      if (u.searchParams.get('page_min') === 'half') {
+        pageMeta.range.min = Math.max(1, Math.floor(pageMeta.range.max / 2));
+      }
       meta.urlKey = urlKey;
       meta.pageOrder = pageMeta.pageOrder;
       meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;

@@ -185,10 +185,36 @@
       }
     }
 
+    async function syncCurrentPageDataStatus(entry) {
+      try {
+        const assistId = String(entry.assistId || entry.id || '').slice(0, 60);
+        if (!assistId) return;
+        const key = 'autoWatcherCurrentPageData';
+        const stored = await chromeApi.storage.local.get(key);
+        const pageData = stored[key];
+        if (pageData && Array.isArray(pageData.candidates)) {
+          let updated = false;
+          for (const cand of pageData.candidates) {
+            if (String(cand.assistId) === assistId) {
+              cand.status = String(entry.status || 'unknown');
+              cand.reason = String(entry.reason || '');
+              cand.time = Date.now();
+              updated = true;
+            }
+          }
+          if (updated) {
+            await chromeApi.storage.local.set({ [key]: pageData });
+          }
+        }
+      } catch (_) {}
+    }
+
     async function appendWatcherLog(entry) {
       try {
+        await syncCurrentPageDataStatus(entry);
         watcherLogBuffer.push({
           time: new Date().toISOString(),
+          page: entry.page ? String(entry.page) : '',
           assistId: String(entry.assistId || entry.id || '').slice(0, 60),
           title: normalizeText(entry.title || '').slice(0, 160),
           doi: String(entry.doi || '').slice(0, 120),

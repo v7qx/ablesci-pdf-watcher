@@ -44,7 +44,10 @@
         const text = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
         const classes = a.className || '';
         const piiMatch = href.match(/\/science\/article\/pii\/([^/?#]+)\/(?:pdf|pdfft)/i);
-        const sameArticle = !!currentPii && !!piiMatch && piiMatch[1] === currentPii;
+        const sameArticle = !!currentPii && !!piiMatch && (
+          piiMatch[1] === currentPii ||
+          (piiMatch[1].substring(0, 10) === currentPii.substring(0, 10))
+        );
         const looksLikeNativeViewPdf = /View PDF|Download PDF/i.test(text) ||
           /accessbar|utility|link-button|ViewPDF/i.test(`${classes} ${a.id || ''}`) ||
           /View PDF/i.test(a.getAttribute('aria-label') || '');

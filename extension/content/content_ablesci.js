@@ -548,7 +548,17 @@
     return match ? cleanJournalName(match[1]) : '';
   }
 
+  function isAblesciErrorPage() {
+    const bodyText = String(document.body ? document.body.innerText || document.body.textContent || '' : '');
+    const titleText = String(document.title || '');
+    return /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(titleText + ' ' + bodyText) ||
+           /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(titleText + ' ' + bodyText);
+  }
+
   function collectPayload() {
+    if (isAblesciErrorPage()) {
+      throw new Error('科研通网站返回服务错误（502 Bad Gateway 或其他网络错误）');
+    }
     if (isUploadBlocked()) {
       throw new Error('当前页面看起来已经有人上传、待确认、已完成或已关闭，已停止。');
     }

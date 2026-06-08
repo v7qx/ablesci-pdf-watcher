@@ -147,6 +147,7 @@ body {
 .muted-inline-label {
   color: var(--muted);
   font-size: 13px;
+  white-space: nowrap;
 }
 
 #watcherSpeedMode {

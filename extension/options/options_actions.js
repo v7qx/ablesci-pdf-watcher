@@ -21,6 +21,8 @@
       openLocalStorageDirFromNative
     } = deps;
 
+    let currentSimulatePort = null;
+
     function showText(id, msg, isErr) {
       const node = el(id);
       const val = typeof globalThis.t === 'function' ? globalThis.t(msg) : msg;
@@ -92,13 +94,13 @@
     async function copyDiagnostic() {
       const opts = await loadOptions();
       if (opts.diagnosticsEnabled !== true) {
-        showPill('diagnosticStatus', '诊断未开启', true);
+        showText('status', '诊断未开启', true);
         return;
       }
       const stored = await chromeApi.storage.local.get(lastDiagnosticKey);
       const diagnostic = stored[lastDiagnosticKey];
       if (!diagnostic) {
-        showPill('diagnosticStatus', '暂无信息', true);
+        showText('status', '暂无诊断信息。', true);
         return;
       }
 
@@ -107,9 +109,9 @@
       try {
         const ok = await copyTextToClipboard(text);
         if (!ok) throw new Error('copy_failed');
-        showPill('diagnosticStatus', '已复制');
+        showText('status', '已复制诊断信息。');
       } catch (_) {
-        showPill('diagnosticStatus', '复制失败', true);
+        showText('status', '复制失败', true);
       }
     }
 
@@ -245,12 +247,18 @@
 
     async function clearAutoWatcherState() {
       const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherState' });
-      showText('status', res.ok ? '已清除 watcher 已处理记录。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
+      const msg = res.ok
+        ? '已清除 watcher 已处理记录。'
+        : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
+      showText('status', msg, !res.ok);
     }
 
     async function clearAutoWatcherLogs() {
       const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherLogs' });
-      showText('status', res.ok ? '已清除 watcher 日志和 trace。' : '清除失败：' + (res.reason || '未知错误'), !res.ok);
+      const msg = res.ok
+        ? '已清除 watcher 日志和 trace。'
+        : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
+      showText('status', msg, !res.ok);
     }
 
     async function simulateAssist() {
@@ -258,6 +266,17 @@
       const btn = el('btnDebugSimulate');
       const logContainer = el('debugLogContainer');
       if (!input || !btn || !logContainer) return;
+
+      if (btn.textContent === '暂停模拟') {
+        if (currentSimulatePort) {
+          try { currentSimulatePort.disconnect(); } catch (_) {}
+          currentSimulatePort = null;
+        }
+        btn.textContent = '开始模拟';
+        btn.disabled = false;
+        appendSimulateLog('exception', '手动暂停了模拟；保留当前日志方便复制。');
+        return;
+      }
 
       const rawVal = input.value.trim();
       if (!rawVal) {
@@ -275,33 +294,114 @@
         }
       }
 
-      btn.disabled = true;
-      btn.textContent = '模拟中...';
+      function escapeHtml(s) {
+        return String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function appendSimulateLog(type, text, isHtml = false) {
+        let emoji = 'ℹ️';
+        let color = 'var(--text-muted)';
+        let bold = false;
+
+        if (type === 'progress') {
+          if (text.includes('通过') || text.includes('成功') || text.includes('完成') || text.includes('MD5')) {
+            emoji = '🟢';
+            color = '#166534';
+          } else if (text.includes('失败') || text.includes('错误') || text.includes('超时')) {
+            emoji = '🔴';
+            color = '#991b1b';
+          } else if (text.includes('等待') || text.includes('验证')) {
+            emoji = '🟡';
+            color = '#b45309';
+          } else {
+            emoji = '🔄';
+            color = '#0284c7';
+          }
+        } else if (type === 'done') {
+          emoji = '✅';
+          color = '#15803d';
+          bold = true;
+        } else if (type === 'error') {
+          emoji = '❌';
+          color = '#b91c1c';
+          bold = true;
+        } else if (type === 'exception') {
+          emoji = '⚠️';
+          color = '#d97706';
+          bold = true;
+        }
+
+        const safeText = isHtml ? text : escapeHtml(text);
+        const styledLine = `<div style="color: ${color}; font-weight: ${bold ? 'bold' : 'normal'}; margin-bottom: 6px; font-size: 11px; line-height: 1.4;">${emoji} ${safeText}</div>`;
+
+        logContainer.innerHTML += styledLine;
+        logContainer.scrollTop = logContainer.scrollHeight;
+      }
+
+      btn.disabled = false;
+      btn.textContent = '暂停模拟';
+      logContainer.innerHTML = '';
       logContainer.style.display = 'block';
-      logContainer.textContent = `[模拟应助] 开始测试: ${pdfUrl}\n[模拟应助] 正在连接插件后台任务队列...\n`;
+
+      appendSimulateLog('progress', `开始文献探测: ${pdfUrl}`);
+      appendSimulateLog('progress', '正在连接插件后台任务队列...');
 
       try {
         const port = chromeApi.runtime.connect({ name: 'ablesci-pdf-upload' });
+        currentSimulatePort = port;
+
+        port.onDisconnect.addListener(() => {
+          if (currentSimulatePort === port) {
+            currentSimulatePort = null;
+            btn.disabled = false;
+            btn.textContent = '开始模拟';
+          }
+        });
 
         port.onMessage.addListener(msg => {
           if (!msg) return;
           if (msg.type === 'progress') {
-            logContainer.textContent += `[进度] ${msg.payload}\n`;
-            logContainer.scrollTop = logContainer.scrollHeight;
+            appendSimulateLog('progress', msg.message || '');
           } else if (msg.type === 'done') {
-            logContainer.textContent += `\n[完成] 测试结束！返回结果：\n${msg.payload || ''}\n`;
-            if (msg.extra?.html) {
-              logContainer.textContent += `\n[详细反馈] ${msg.extra.html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '')}\n`;
+            let resText = msg.message || '';
+            if (resText === 'done' || resText === 'success' || resText === 'upload_success') {
+              resText = '文献静默下载且 PDF 格式校验成功。';
             }
-            logContainer.scrollTop = logContainer.scrollHeight;
+            appendSimulateLog('done', `测试完成！返回结果：${resText}`);
+
+            // 格式化展示真实可用的校验结果
+            if (msg.filename || msg.md5) {
+              const displaySize = msg.size ? ` (${~~(msg.size / 1024)} KB)` : '';
+              appendSimulateLog('done', `📄 文件名称: ${msg.filename || '-'}${displaySize}`);
+              appendSimulateLog('done', `🔑 文件 MD5: ${msg.md5 || '-'}`);
+            }
+
+            if (msg.pdfCleanerResult) {
+              const res = msg.pdfCleanerResult;
+              const clText = res.clean_status === 'cleaned' ? '去水印成功' : (res.clean_status === 'no_watermark' ? '无水印' : '去水印失败');
+              appendSimulateLog('done', `✨ 水印清洗: ${clText} (删除对象 ${res.removed_objects || 0} 个, 删除文字 ${res.removed_texts || 0} 处)`);
+            }
+
+            if (msg.extra?.html) {
+              const cleanText = msg.extra.html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').trim();
+              if (cleanText) {
+                appendSimulateLog('done', `系统反馈：${cleanText}`);
+              }
+            }
             btn.disabled = false;
             btn.textContent = '开始模拟';
+            currentSimulatePort = null;
             port.disconnect();
           } else if (msg.type === 'error') {
-            logContainer.textContent += `\n[错误] 应助出错：${msg.payload || '未知错误'}\n`;
-            logContainer.scrollTop = logContainer.scrollHeight;
+            appendSimulateLog('error', `应助出错：${msg.message || '未知错误'}`);
             btn.disabled = false;
             btn.textContent = '开始模拟';
+            currentSimulatePort = null;
             port.disconnect();
           }
         });
@@ -320,9 +420,10 @@
         });
 
       } catch (err) {
-        logContainer.textContent += `\n[异常] 启动模拟失败: ${err.message || String(err)}\n`;
+        appendSimulateLog('exception', `启动模拟失败: ${err.message || String(err)}`);
         btn.disabled = false;
         btn.textContent = '开始模拟';
+        currentSimulatePort = null;
       }
     }
 

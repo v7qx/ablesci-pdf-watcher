@@ -143,6 +143,9 @@
         recomend: false,
         reload: false,
         downloadOnly: true,
+        filename: stat?.filename,
+        md5: stat?.md5,
+        size: stat?.size,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
@@ -158,6 +161,9 @@
         reload: false,
         downloadOnly: true,
         debugOnly: true,
+        filename: stat?.filename,
+        md5: stat?.md5,
+        size: stat?.size,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
     }

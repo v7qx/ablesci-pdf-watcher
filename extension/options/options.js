@@ -105,9 +105,9 @@ const TEXT_MAP = {
   "现有快捷应助按钮之前": "Before existing assist buttons",
   "显示语言": "Display Language",
   "设置插件配置页和应助按钮的显示语言。": "Set the language for both options page and injected buttons.",
-  "跟随浏览器系统 (Auto)": "System Default (Auto)",
-  "简体中文 (Chinese)": "简体中文 (Chinese)",
-  "English": "English",
+  "自动 / Auto": "Auto",
+  "中文 / Chinese": "Chinese",
+  "英文 / English": "English",
   "保留浏览器下载记录": "Keep Browser Download History",
   "异常 HTML 下载会保留记录，便于确认。": "Keep download history for failed HTML pages for debugging.",
   "求助链接当前窗口打开": "Open Links in Current Tab",
@@ -123,6 +123,12 @@ const TEXT_MAP = {
   "诊断未开启": "Diagnostics disabled",
   "复制": "Copy",
   "未复制": "Not Copied",
+  "已清除 watcher 已处理记录。": "Watcher processed records cleared.",
+  "已清除 watcher 日志和 trace。": "Watcher logs and traces cleared.",
+  "清除失败：": "Clear failed: ",
+  "未知错误": "Unknown error",
+  "暂无诊断信息。": "No diagnostic info available.",
+  "已复制诊断信息。": "Diagnostic info copied.",
 
   "运行数据": "Running Status",
   "值守状态": "Watcher Status",
@@ -137,15 +143,15 @@ const TEXT_MAP = {
   "今日应助计数": "Today Assists",
 
   "实验：低频值守": "Experimental: Auto Watcher",
+  "值守参数配置": "Watcher Parameter Settings",
   "基础设置": "Basic Settings",
   "启用低频值守": "Enable Auto Watcher",
   "默认关闭。只在浏览器运行且扩展启用时按低频 alarm 检查。": "Disabled by default. Periodically checks via low-frequency alarm when browser is running.",
   "值守速度模式": "Watcher Speed Mode",
   "控制自动值守的运行速率。极速与快速模式下将获得更密集的应助响应。": "Controls the execution rate of the auto watcher. Faster modes run checks more frequently.",
-  "自适应 (中位数 2~6 分钟)": "Adaptive (Median 2~6 min)",
   "极速模式 (中位数 2 分钟)": "Fast Mode (Median 2 min)",
-  "快速模式 (中位数 6 分钟)": "Normal Mode (Median 6 min)",
-  "普通慢速 (中位数 10 分钟)": "Slow Mode (Median 10 min)",
+  "常规速度 (中位数 4 分钟)": "Normal Mode (Median 4 min)",
+  "普通慢速 (中位数 6 分钟)": "Slow Mode (Median 6 min)",
   "月目标": "Monthly Target",
   "按本月时间进度估算当前应完成量，用于自适应模式下计算调度间隔。": "Target used to compute dynamic scheduling interval based on monthly progress.",
 
@@ -546,6 +552,7 @@ async function save(saveOptions = {}) {
 
 function showPill(id, msg, isErr) {
   const node = el(id);
+  if (!node) return;
   const val = t(msg);
   node.textContent = val;
   node.title = val || '';
