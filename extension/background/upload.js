@@ -13,6 +13,7 @@
       getOptions,
       throwIfAborted,
       isDoiUrl,
+      extractScienceDirectPii,
       cleanupOrphanPublisherTabs,
       post,
       downloadPdf,
@@ -135,7 +136,7 @@
       return base.slice(0, prefixLen) + '...' + base.slice(base.length - suffixLen) + ext;
     }
 
-    function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null) {
+    function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null, pii = '') {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
       const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
       post(port, 'done', `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
@@ -146,11 +147,12 @@
         filename: stat?.filename,
         md5: stat?.md5,
         size: stat?.size,
+        pii,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
 
-    function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null) {
+    function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null, pii = '') {
       const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
       const truncatedName = truncateFilename(name, 35);
       const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
@@ -164,6 +166,7 @@
         filename: stat?.filename,
         md5: stat?.md5,
         size: stat?.size,
+        pii,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
@@ -276,6 +279,11 @@
       const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', { ...opts, payloadContext: payload }, port, signal);
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
+
+      let pii = '';
+      if (extractScienceDirectPii) {
+        pii = extractScienceDirectPii(payload.pdfUrl || payload.pageUrl || item.url || item.finalUrl || '');
+      }
 
       if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
         await recordManualWatcherDaily('downloaded').catch(() => {});
@@ -397,7 +405,7 @@
           message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
         });
         post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
-        debugDownloadOnlyDone(port, stat, pdfCleanerResult);
+        debugDownloadOnlyDone(port, stat, pdfCleanerResult, pii);
         return;
       }
 
@@ -406,19 +414,19 @@
       if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件小于 ${formatConfiguredSize(opts.minAutoUploadMB || defaultOptions.minAutoUploadMB, opts.minAutoUploadUnit || defaultOptions.minAutoUploadUnit)}（当前 ${formatBytes(size)}），已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-small-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii);
         return;
       }
       if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件大于 ${formatConfiguredSize(opts.maxAutoUploadMB || defaultOptions.maxAutoUploadMB, opts.maxAutoUploadUnit || defaultOptions.maxAutoUploadUnit)}（当前 ${formatBytes(size)}），超过自动上传范围，已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-large-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii);
         return;
       }
 
       if (payload.downloadOnly) {
         await saveDiagnostic({ ...diag, stage: 'download-only-risk', downloadItem: downloadMeta, fileSize: size, reasons: downloadOnlyReasons });
-        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat, pdfCleanerResult);
+        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat, pdfCleanerResult, pii);
         return;
       }
 
@@ -434,7 +442,7 @@
         if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
           await recordManualWatcherDaily('uploaded').catch(() => {});
         }
-        postDoneFromSiteResponse(port, permit, '上传成功', doneExtraForCleaner(pdfCleanerResult));
+        postDoneFromSiteResponse(port, permit, '上传成功', { ...doneExtraForCleaner(pdfCleanerResult), pii });
         return;
       }
 
@@ -471,7 +479,7 @@
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
         await recordAccessEnvironmentSuccess(payload);
-        postDoneFromSiteResponse(port, parsed, '上传成功', doneExtraForCleaner(pdfCleanerResult));
+        postDoneFromSiteResponse(port, parsed, '上传成功', { ...doneExtraForCleaner(pdfCleanerResult), pii });
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
@@ -483,6 +491,7 @@
           html: `OSS 上传完成，请检查 Ablesci 页面状态。${cleanerHtml}`,
           recomend: false,
           reload: true,
+          pii,
           ...cleanerExtra
         });
       }

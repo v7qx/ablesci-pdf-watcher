@@ -9,9 +9,16 @@
   let stopTimer = null;
   let loginPrompted = false;
   let challengePrompted = false;
+  let skipBookChapter = true;
+
+  chrome.storage.local.get({ watcherSkipBookChapter: true }, function (res) {
+    if (res && res.watcherSkipBookChapter !== undefined) {
+      skipBookChapter = !!res.watcherSkipBookChapter;
+    }
+  });
 
   function getScienceDirectPii() {
-    const m = location.pathname.match(/\/science\/article\/(?:abs\/)?pii\/([^/?#]+)/i);
+    const m = location.pathname.match(/\/(?:science\/article|science\/chapter)\/(?:abs\/)?pii\/([^/?#]+)/i);
     return m ? m[1] : null;
   }
 
@@ -135,6 +142,31 @@
     if (!common.isScienceDirect()) return;
     if (!(await common.canControlCurrentPublisherPage())) {
       console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending ScienceDirect task');
+      stopObserver();
+      return;
+    }
+
+    const isBookOverview = /\/(?:science\/)?book\//i.test(location.pathname);
+    if (isBookOverview) {
+      sendScienceDirectMessage({
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'ScienceDirect 书籍或章节暂不支持自动应助（跳转到了书籍总览页）。',
+        source: 'sciencedirect_book_overview'
+      });
+      stopObserver();
+      return;
+    }
+
+    const pii = getScienceDirectPii();
+    const isBookChapter = pii && pii.toUpperCase().startsWith('B');
+    if (isBookChapter && skipBookChapter) {
+      sendScienceDirectMessage({
+        articleUrl: makeScienceDirectArticleUrl() || location.href,
+        unsupported: true,
+        error: 'ScienceDirect 识别为书籍章节，已按设置自动跳过。',
+        source: 'sciencedirect_book_chapter'
+      });
       stopObserver();
       return;
     }

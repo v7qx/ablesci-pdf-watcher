@@ -13,7 +13,7 @@
     if (match) return match[1].toUpperCase();
     match = s.match(/1-s2\.0-([A-Z0-9]+)/i);
     if (match) return match[1].toUpperCase();
-    match = s.match(/\b([SB][A-Z0-9]{16})\b/i);
+    match = s.match(/\b([SB][A-Z0-9]{16,23})\b/i);
     if (match) return match[1].toUpperCase();
     return '';
   }
@@ -29,7 +29,7 @@
     for (const match of s2Matches) {
       piis.push(match[1].toUpperCase());
     }
-    const rawMatches = s.matchAll(/\b([SB][A-Z0-9]{16})\b/gi);
+    const rawMatches = s.matchAll(/\b([SB][A-Z0-9]{16,23})\b/gi);
     for (const match of rawMatches) {
       piis.push(match[1].toUpperCase());
     }

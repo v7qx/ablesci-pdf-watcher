@@ -381,6 +381,10 @@
               appendSimulateLog('done', `🔑 文件 MD5: ${msg.md5 || '-'}`);
             }
 
+            if (msg.pii) {
+              appendSimulateLog('done', `🧬 文献 PII: ${msg.pii}`);
+            }
+
             if (msg.pdfCleanerResult) {
               const res = msg.pdfCleanerResult;
               const clText = res.clean_status === 'cleaned' ? '去水印成功' : (res.clean_status === 'no_watermark' ? '无水印' : '去水印失败');

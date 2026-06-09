@@ -322,6 +322,7 @@ const {
   getOptions,
   throwIfAborted,
   isDoiUrl,
+  extractScienceDirectPii,
   cleanupOrphanPublisherTabs,
   post,
   downloadPdf,
