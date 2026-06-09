@@ -44,6 +44,7 @@ const {
 const {
   isScienceDirectUrl,
   extractScienceDirectPii,
+  extractAllScienceDirectPiis,
   isDoiHost,
   isNatureUrl,
   isSpringerUrl,
@@ -290,6 +291,7 @@ const {
   hostnameOf,
   isScienceDirectUrl,
   extractScienceDirectPii,
+  extractAllScienceDirectPiis,
   isDoiHost,
   isNatureUrl,
   isCnpeUrl,

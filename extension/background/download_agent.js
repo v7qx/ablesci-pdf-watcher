@@ -354,6 +354,9 @@
               seenIgnoredIds.add(item.id);
               post(port, 'progress', `⚠️ 忽略下载 #${item.id}：特征码不匹配 (${matchResult.reason}，URL: ${traceUrl(item.url)})`);
             }
+            if (tabId !== null && item.tabId === tabId && (looksLikePdfDownloadUrl(item.url) || looksLikePdfDownloadUrl(item.finalUrl))) {
+              finishError(new Error(`下载特征码不匹配：${matchResult.reason}。URL: ${item.url}`));
+            }
             return;
           }
           seenIds.add(item.id);

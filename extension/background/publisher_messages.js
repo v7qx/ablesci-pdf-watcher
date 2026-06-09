@@ -10,6 +10,7 @@
       hostnameOf,
       isScienceDirectUrl,
       extractScienceDirectPii,
+      extractAllScienceDirectPiis,
       isDoiHost,
       isNatureUrl,
       isCnpeUrl,
@@ -79,13 +80,21 @@
       }
 
       if (isScienceDirectAssetPdfUrl(url)) {
-        const expectedPii = extractScienceDirectPii(pending.articleUrl || pending.pdfUrl || '');
-        const actualPii = extractScienceDirectPii(url);
-        if (expectedPii && actualPii && expectedPii !== actualPii) {
-          const p1 = expectedPii.substring(0, 10);
-          const p2 = actualPii.substring(0, 10);
-          if (p1 !== p2) {
-            pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPii}，实际 ${actualPii}`));
+        const expectedPiis = extractAllScienceDirectPiis(pending.articleUrl || pending.pdfUrl || '');
+        const actualPiis = extractAllScienceDirectPiis(url);
+        if (expectedPiis.length > 0 && actualPiis.length > 0) {
+          let matched = false;
+          for (const sp of expectedPiis) {
+            for (const ap of actualPiis) {
+              if (sp.substring(0, 10) === ap.substring(0, 10)) {
+                matched = true;
+                break;
+              }
+            }
+            if (matched) break;
+          }
+          if (!matched) {
+            pending.finishError?.(new Error(`ScienceDirect PDF PII 不匹配：期望 ${expectedPiis.join(',')}，实际 ${actualPiis.join(',')}`));
             return;
           }
         }

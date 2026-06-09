@@ -18,6 +18,24 @@
     return '';
   }
 
+  function extractAllScienceDirectPiis(url) {
+    const s = String(url || '');
+    const piis = [];
+    const piiMatches = s.matchAll(/\/pii\/([A-Z0-9]+)/gi);
+    for (const match of piiMatches) {
+      piis.push(match[1].toUpperCase());
+    }
+    const s2Matches = s.matchAll(/1-s2\.0-([A-Z0-9]+)/gi);
+    for (const match of s2Matches) {
+      piis.push(match[1].toUpperCase());
+    }
+    const rawMatches = s.matchAll(/\b([SB][A-Z0-9]{16})\b/gi);
+    for (const match of rawMatches) {
+      piis.push(match[1].toUpperCase());
+    }
+    return Array.from(new Set(piis.filter(Boolean)));
+  }
+
   function isDoiHost(host) {
     return /(^|\.)doi\.org$/i.test(String(host || '')) || /(^|\.)dx\.doi\.org$/i.test(String(host || ''));
   }
@@ -212,8 +230,8 @@
     const url = String(item?.finalUrl || item?.url || '');
     const filename = String(item?.filename || '');
     const mime = String(item?.mime || '');
-    const sourcePii = extractScienceDirectPii(sourceUrl);
-    const actualPii = extractScienceDirectPii(url);
+    const sourcePiis = extractAllScienceDirectPiis(sourceUrl);
+    const actualPiis = extractAllScienceDirectPiis(url);
 
     const getHostname = (u) => {
       const s = String(u || '').trim();
@@ -235,11 +253,19 @@
     if (!pdfLike) {
       return { ok: false, reason: `pdfLike_check_failed (filename: "${filename}", mime: "${mime}", looksLikeUrl: ${looksLikePdfDownloadUrl(url)}, looksLikeSource: ${looksLikePdfDownloadUrl(sourceUrl)})` };
     }
-    if (sourcePii && actualPii && sourcePii !== actualPii) {
-      const p1 = sourcePii.substring(0, 10);
-      const p2 = actualPii.substring(0, 10);
-      if (p1 !== p2) {
-        return { ok: false, reason: `pii_mismatch (sourcePii: "${sourcePii}", actualPii: "${actualPii}")` };
+    if (sourcePiis.length > 0 && actualPiis.length > 0) {
+      let matched = false;
+      for (const sp of sourcePiis) {
+        for (const ap of actualPiis) {
+          if (sp.substring(0, 10) === ap.substring(0, 10)) {
+            matched = true;
+            break;
+          }
+        }
+        if (matched) break;
+      }
+      if (!matched) {
+        return { ok: false, reason: `pii_mismatch (sourcePiis: "${sourcePiis.join(',')}", actualPiis: "${actualPiis.join(',')}")` };
       }
     }
 
@@ -337,6 +363,7 @@
   globalThis.AblesciBackgroundPublishers = {
     isScienceDirectUrl,
     extractScienceDirectPii,
+    extractAllScienceDirectPiis,
     isDoiHost,
     isNatureUrl,
     isSpringerUrl,
