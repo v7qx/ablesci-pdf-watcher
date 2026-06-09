@@ -681,6 +681,36 @@
         ])
       );
 
+      const sizeInterceptedLogs = logs.filter(log => {
+        const r = String(log.reason || '');
+        return r.includes('PDF 文件小于') || r.includes('PDF 文件大于') || r.includes('smaller than') || r.includes('larger than');
+      });
+      const sizeInterceptedLines = [];
+      if (sizeInterceptedLogs.length > 0) {
+        sizeInterceptedLines.push(
+          isEn ? '## File Size Intercepted' : '## 文件大小拦截记录',
+          '',
+          isEn
+            ? '| Time | DOI | Journal | Reason | Detail |'
+            : '| 时间 | DOI | 期刊 (Journal) | 拦截原因 (Reason) | 详情 (Detail) |',
+          '| --- | --- | --- | --- | --- |',
+          ...sizeInterceptedLogs.map(log => {
+            let detailVal = reportDetailValue(log);
+            if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
+              detailVal = isEn ? `[Click](${detailVal})` : `[点击查看详情](${detailVal})`;
+            }
+            return formatMarkdownTableRow([
+              formatBeijingTimeOnly(log.time),
+              log.doi || '',
+              log.journalName || '',
+              translateReason(log.reason || '', isEn),
+              detailVal
+            ]);
+          }),
+          ''
+        );
+      }
+
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
@@ -688,6 +718,7 @@
         '',
         ...summaryLines,
         '',
+        ...sizeInterceptedLines,
         '## Skips And Decisions',
         '',
         isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
