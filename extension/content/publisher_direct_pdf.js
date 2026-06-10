@@ -104,6 +104,23 @@
     return false;
   }
 
+  function hasSpringerAccessDeniedPage() {
+    if (common.currentPublisher() !== 'springer') return false;
+    const accessMeta = document.querySelector('meta[name="access"]');
+    if (accessMeta && accessMeta.getAttribute('content') === 'No') {
+      return true;
+    }
+    const hasAccessContainer = !!document.querySelector('.app-article-access, .app-article-access__heading, .app-article-access__container');
+    const hasAddToCartButton = !!document.querySelector('button[onclick*="addToCart"], a[href*="/buy-now"]');
+    if (hasAccessContainer || hasAddToCartButton) {
+      const result = findPdfLink();
+      if (!result.selected) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function ieeeArticleNumberFromUrl(url) {
     try {
       const u = new URL(String(url || ''), location.href);
@@ -244,6 +261,17 @@
         accessDenied: true,
         error: 'Wiley 页面明确显示无正文访问权限，已停止本次下载。',
         source: 'wiley_access_denied_page'
+      });
+      stopObserver();
+      return;
+    }
+    if (publisher === 'springer' && hasSpringerAccessDeniedPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('springer', {
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'Springer 页面明确显示无正文访问权限，已停止本次下载。',
+        source: 'springer_access_denied_page'
       });
       stopObserver();
       return;
