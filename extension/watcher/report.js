@@ -350,6 +350,28 @@
       return `${log.detailUrlHostPath?.host || ''}${log.detailUrlHostPath?.path || ''}`;
     }
 
+    function detailLink(value, isEn) {
+      const raw = String(value || '');
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        return isEn ? `[View details](${raw})` : `[查看详情](${raw})`;
+      }
+      return raw;
+    }
+
+    function shortEventReason(reason, isEn) {
+      const r = String(reason || '');
+      if (r.includes('PDF 文件小于') || r.includes('smaller than')) {
+        return isEn ? 'PDF too small, upload skipped.' : 'PDF 过小，未上传。';
+      }
+      if (r.includes('PDF 文件大于') || r.includes('larger than')) {
+        return isEn ? 'PDF too large, upload skipped.' : 'PDF 过大，未上传。';
+      }
+      if (r.includes('已仅下载并校验 PDF') || r.includes('download_only')) {
+        return isEn ? 'Downloaded only.' : '仅下载。';
+      }
+      return translateReason(r, isEn);
+    }
+
     async function writeReportFile(filename, content, mime, opts) {
       if (opts.watcherDailyReportEnabled && deps.sendNativeMessage) {
         try {
@@ -400,6 +422,9 @@
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
+      const journalAccessStats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
+        ? Object.values(state.journalAccessStats)
+        : [];
       const cleanerResults = logs
         .map(log => log.pdfCleanerResult)
         .filter(result => result && result.enabled);
@@ -425,7 +450,7 @@
       }
 
       const csvHeader = [
-        'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalName', 'detailUrl', 'status', 'reason',
+        'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalShortName', 'journalName', 'detailUrl', 'status', 'reason',
         'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath', 'pdfCleanerCleanedPath',
         'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
@@ -527,6 +552,7 @@
           trigger: log.trigger || '',
           assistId: log.assistId || '',
           doi: log.doi || '',
+          journalShortName: log.journalShortName || '',
           journalName: log.journalName || '',
           detailUrl: reportDetailValue(log),
           status: translateStep(log.status || '', isEn),
@@ -538,6 +564,18 @@
           pdfCleanerError: log.pdfCleanerResult?.error || log.pdfCleanerResult?.errorCode || '',
           pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || '',
           pdfCleanerCleanedPath: log.pdfCleanerResult?.preservedCleanedPath || ''
+        })),
+        ...journalAccessStats.map(entry => reportRow('journal_access_cache', {
+          time: entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
+          assistId: entry.lastAssistId || '',
+          journalShortName: entry.shortName || '',
+          status: 'cached',
+          reason: entry.reason || '',
+          publisher: entry.publisher || '',
+          details: reportJson({
+            hitCount: Number(entry.hitCount || 0) || 0,
+            expiresAt: entry.expiresAt || ''
+          })
         }))
       ];
       const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
@@ -699,10 +737,7 @@
             : '| 时间 | DOI | 期刊 (Journal) | 拦截原因 (Reason) | 详情 (Detail) |',
           '| --- | --- | --- | --- | --- |',
           ...sizeInterceptedLogs.map(log => {
-            let detailVal = reportDetailValue(log);
-            if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
-              detailVal = isEn ? `[Click](${detailVal})` : `[点击查看详情](${detailVal})`;
-            }
+            const detailVal = detailLink(reportDetailValue(log), isEn);
             return formatMarkdownTableRow([
               formatBeijingTimeOnly(log.time),
               log.doi || '',
@@ -729,16 +764,44 @@
             : '| 时间 | DOI | 期刊 (Journal) | 拦截原因 (Reason) | 详情 (Detail) |',
           '| --- | --- | --- | --- | --- |',
           ...doiNotFoundLogs.map(log => {
-            let detailVal = reportDetailValue(log);
-            if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
-              detailVal = isEn ? `[Click](${detailVal})` : `[点击查看详情](${detailVal})`;
-            }
+            const detailVal = detailLink(reportDetailValue(log), isEn);
             return formatMarkdownTableRow([
               formatBeijingTimeOnly(log.time),
               log.doi || '',
               log.journalName || '',
               translateReason(log.reason || '', isEn),
               detailVal
+            ]);
+          }),
+          ''
+        );
+      }
+
+      const cleanerErrorLogs = logs.filter(log => {
+        const result = log.pdfCleanerResult;
+        if (!result || !result.enabled) return false;
+        const status = String(result.status || '');
+        return status === 'error' || status === 'failed' || !!result.error || !!result.errorCode;
+      });
+      const cleanerErrorLines = [];
+      if (cleanerErrorLogs.length > 0) {
+        cleanerErrorLines.push(
+          isEn ? '## PDF Cleaner Errors' : '## PDF 去水印错误记录',
+          '',
+          isEn
+            ? '| Time | DOI | Journal | Error | Detail | Date |'
+            : '| 时间 | DOI | 期刊 (Journal) | 错误 (Error) | 详情 (Detail) | 日期 |',
+          '| --- | --- | --- | --- | --- | --- |',
+          ...cleanerErrorLogs.map(log => {
+            const result = log.pdfCleanerResult || {};
+            const errorText = result.error || result.errorCode || result.status || '';
+            return formatMarkdownTableRow([
+              formatBeijingTimeOnly(log.time),
+              log.doi || '',
+              log.journalName || '',
+              errorText,
+              detailLink(reportDetailValue(log), isEn),
+              formatBeijingDateOnly(log.time)
             ]);
           }),
           ''
@@ -754,6 +817,7 @@
         '',
         ...sizeInterceptedLines,
         ...doiNotFoundLines,
+        ...cleanerErrorLines,
         '## Skips And Decisions',
         '',
         isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
@@ -769,26 +833,24 @@
         '',
         '## Recent Events',
         '',
-        isEn ? '| Time | Trigger | Status | Reason | PDF Cleaner | Journal | DOI | Detail |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | PDF 去水印 | 期刊 (Journal) | DOI | 详情 (Detail) |',
-        '| --- | --- | --- | --- | --- | --- | --- | --- |',
+        isEn ? '| Time | Trigger | Status | Reason | PDF Cleaner | Journal | DOI | Detail | Date |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | PDF 去水印 | 期刊 (Journal) | DOI | 详情 (Detail) | 日期 |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
         ...logs.filter(log => log.status === 'success')
           .slice()
           .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
           .slice(0, 30)
           .map(log => {
-          let detailVal = reportDetailValue(log);
-          if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
-            detailVal = isEn ? `[Click for details](${detailVal})` : `[点击查看详情](${detailVal})`;
-          }
+          const detailVal = detailLink(reportDetailValue(log), isEn);
           return formatMarkdownTableRow([
-            formatBeijingDateTime(log.time),
+            formatBeijingTimeOnly(log.time),
             log.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (log.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : log.trigger),
             translateStep(log.status || '', isEn),
-            translateReason(log.reason || '', isEn),
+            shortEventReason(log.reason || '', isEn),
             cleanerStatusText(log.pdfCleanerResult),
             log.journalName || '',
             log.doi || '',
-            detailVal
+            detailVal,
+            formatBeijingDateOnly(log.time)
           ]);
         }),
         ''

@@ -19,6 +19,8 @@
       waitForAssistListDom,
       saveWatcherState,
       describeWatcherReason,
+      recordJournalAccessBlocked,
+      clearJournalAccessBlocked,
       isDetailAllowedForWatcher,
       isListCandidateAllowed,
       enrichCandidateJournalFromMap
@@ -257,9 +259,33 @@
           if (msg.type === 'done' && msg.blocked) {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             const isDoiFailure = msg.skipReason === 'doi_not_found' || msg.skipReason === 'doi_resolution_failed';
+            const blockReason = msg.skipReason || msg.message || 'blocked';
+            const blockText = [blockReason, msg.message || ''].join(' ');
+            const shouldTryRecordJournalAccess = blockReason === 'explicit_no_subscription' ||
+              blockReason === 'no_access' ||
+              /does not subscribe to this content on ScienceDirect|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限/i.test(blockText);
+            let journalAccessRecorded = null;
+            if (shouldTryRecordJournalAccess) {
+              try {
+                journalAccessRecorded = await recordJournalAccessBlocked?.(context.candidate, context.payload, blockReason);
+              } catch (err) {
+                journalAccessRecorded = false;
+                await appendWatcherTrace('journal_access_record_error', {
+                  reason: err?.message || String(err),
+                  sourceReason: blockReason,
+                  detailUrl: context.detailUrl,
+                  assistId: context.key,
+                  journalShortName: context.candidate?.journalShortName || context.payload?.journalShortName || '',
+                  journalName: context.payload?.journalName || ''
+                });
+              }
+            }
             await Promise.allSettled([
               appendWatcherTrace('queue_message_blocked', {
-                reason: msg.message || 'blocked',
+                reason: blockReason,
+                message: msg.message || '',
+                journalAccessRecordAttempted: shouldTryRecordJournalAccess,
+                journalAccessRecorded,
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 assistId: context.key,
@@ -287,6 +313,7 @@
               cleanReason = '上传成功';
             }
             await Promise.allSettled([
+              clearJournalAccessBlocked?.(context.candidate, context.payload),
               context.payload?.downloadOnly !== true ? incrementDaily('uploaded', context.trigger) : Promise.resolve(),
               appendWatcherTrace('queue_message_done', {
                 reason: cleanReason,
@@ -381,6 +408,7 @@
 
       const portContext = {
         key,
+        candidate,
         payload,
         detailUrl: candidate.detailUrl,
         detailTabId,

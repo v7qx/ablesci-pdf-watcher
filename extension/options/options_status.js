@@ -32,7 +32,10 @@
       const isEnabled = stored.watcherEnabled !== false;
       const daily = state.daily?.[todayKeyBeijing()] || {};
       const downloaded = Math.max(0, Number(daily.downloaded || 0));
-      const dailyLimit = Math.max(0, Number(stored.watcherDailyLimit || defaultOptions.watcherDailyLimit || 0));
+      const dailyLimitSource = Object.prototype.hasOwnProperty.call(stored, 'watcherDailyLimit')
+        ? stored.watcherDailyLimit
+        : defaultOptions.watcherDailyLimit;
+      const dailyLimit = Math.max(0, Number(dailyLimitSource || 0));
       const schedule = nextDisplaySchedule(state);
       advancedStatusCache = { state, schedule, isEnabled };
       setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
@@ -57,7 +60,7 @@
       setText('watcherNextRunAt', isEnabled ? formatBeijingDateTime(schedule.nextRunAt) : '值守已关闭');
       setText('watcherNextAssistAt', isEnabled ? formatBeijingDateTime(schedule.nextAssistAt) : '值守已关闭');
       setText('watcherAssistCountdown', isEnabled ? countdownText(schedule.assistCountdownAt) : '已停止');
-      setText('watcherWakeCountdown', dailyLimit > 0 ? String(dailyLimit) : '-');
+      setText('watcherWakeCountdown', dailyLimit > 0 ? String(dailyLimit) : '不限制');
       const downloadedAuto = Math.max(0, Number(daily.downloadedAuto || 0));
       let downloadedManual = Math.max(0, Number(daily.downloadedManual || 0));
       if (downloaded > 0 && downloadedAuto === 0 && downloadedManual === 0) {

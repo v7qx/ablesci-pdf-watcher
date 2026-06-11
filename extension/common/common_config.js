@@ -1,7 +1,7 @@
 'use strict';
 
 (function () {
-  const WATCHER_DAILY_LIMIT_MAX = 500;
+  const WATCHER_DAILY_LIMIT_MAX = 1000;
 
   const DEFAULT_OPTIONS = {
     nativeHostName: 'com.ablesci.pdf_watcher',
@@ -19,6 +19,7 @@
     autoRemoveHtmlDownloads: true,
     smartRecommendPush: true,
     openAssistLinksInCurrentTab: false,
+    hideScienceDirectNoAccessRows: false,
     buttonLabel: '上传PDF',
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
@@ -166,6 +167,7 @@
       buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),
       buttonTextColor: normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor),
       buttonPosition: normalizeButtonPosition(opts.buttonPosition),
+      hideScienceDirectNoAccessRows: opts.hideScienceDirectNoAccessRows === true,
       watcherSchedulerMode: schedulerMode,
       watcherSpeedMode: speedMode,
       ...intervals,

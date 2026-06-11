@@ -218,14 +218,26 @@ const TEXT_MAP = {
   "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
   "清除已处理": "Clear Processed Cache",
   "清除日志/Trace": "Clear Logs & Traces",
+  "ScienceDirect 无权限期刊缓存": "ScienceDirect No-Access Journal Cache",
+  "记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。": "Stores journal short names with explicit no-subscription results for list-page markers and auto-watcher prefiltering.",
+  "隐藏列表命中项": "Hide Matched Rows",
+  "在求助列表页隐藏命中本地无权限缓存的 ScienceDirect 求助": "Hide ScienceDirect requests matched by the local no-access cache on list pages.",
+  "清空": "Clear",
+  "未加载": "Not Loaded",
+  "暂无缓存。": "No cache entries.",
+  "已清空 ScienceDirect 无权限期刊缓存。": "ScienceDirect no-access journal cache cleared.",
+  "有效缓存": "Valid Cache",
+  "条": "entries",
+  "最近": "Recent",
 
   "值守操作": "Watcher Actions",
-  "手动触发一次检查，或复制当前排查配置。": "Run a manual check or copy troubleshooting config.",
+  "手动触发一次检查，或复制当前排查日志。": "Run a manual check or copy troubleshooting logs.",
   "立即检查": "Run Watcher Now",
-  "复制配置": "Copy Config",
+  "复制日志": "Copy Logs",
 
   "值守已关闭": "Watcher Disabled",
   "已停止": "Stopped",
+  "不限制": "Unlimited",
   "发送中": "Sending",
 
   "保存": "Save",
@@ -270,7 +282,7 @@ const TEXT_MAP = {
   "与下次应助保持同一时间口径，便于复制和核对。": "Matches the time scale of the next run for easy comparison and copying.",
   "距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。": "Time remaining before the next auto assist run.",
   "当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。": "Current daily assist limit. Shows total limit only.",
-  "今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。": "Assists processed today. Uses download counts matching daily limit criteria.",
+  "今日进入下载/校验流程的应助次数，按自动和手动分开显示；用于每日上限，不代表上传成功数。": "Assists that entered download/validation today, split by automatic and manual runs. Used for the daily limit; not the successful upload count.",
 
   // Watcher outcome translations
   "candidate_handled": "Candidate assist processed successfully",
@@ -537,7 +549,6 @@ async function save(saveOptions = {}) {
     if (opts.diagnosticsEnabled !== true) {
       await chrome.storage.local.remove(LAST_DIAGNOSTIC_KEY);
     }
-    await chrome.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
     showText('status', '已保存。已打开的 Ablesci 页面会自动更新，少数情况下刷新页面后生效。');
     const activeLangBefore = globalThis.watcherActiveLanguage;
     const activeLangAfter = getActualLanguage(opts.watcherLanguage);
@@ -589,6 +600,8 @@ const {
   testWatcherNotification,
   clearAutoWatcherState,
   clearAutoWatcherLogs,
+  refreshJournalAccessCacheSummary,
+  clearJournalAccessCache,
   simulateAssist,
   handleDocumentCopy,
   handleWindowBlur
@@ -615,6 +628,7 @@ document.addEventListener('copy', handleDocumentCopy);
 
 document.addEventListener('DOMContentLoaded', () => {
   load().then(() => {
+    refreshJournalAccessCacheSummary?.();
     startAdvancedCountdownTimer();
   });
 
@@ -641,6 +655,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[AUTO_WATCHER_STATE_KEY] || changes.watcherWorkdays || changes.watcherWorkWindows || changes.watcherEnabled) {
     renderAdvancedWatcherStatus().catch(() => {});
   }
+  if (changes[AUTO_WATCHER_STATE_KEY]) {
+    refreshJournalAccessCacheSummary?.();
+  }
 });
 window.addEventListener('blur', () => {
   handleWindowBlur();
@@ -655,4 +672,5 @@ el('testWatcherNotification')?.addEventListener('click', testWatcherNotification
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
+el('clearJournalAccessCache')?.addEventListener('click', clearJournalAccessCache);
 el('btnDebugSimulate')?.addEventListener('click', simulateAssist);

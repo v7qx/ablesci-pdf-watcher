@@ -685,7 +685,7 @@
           for (const rawCandidate of candidates) {
             const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
             if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
-            const listAllowed = isListCandidateAllowed(candidate, opts);
+            const listAllowed = isListCandidateAllowed(candidate, opts, stateForTargets);
             if (!listAllowed.ok) {
               const candidateKey = getProcessedKey(candidate);
               await appendWatcherTrace('candidate_skip_list_filter', {
@@ -694,10 +694,22 @@
                 trigger,
                 detailUrl: candidate.detailUrl,
                 assistId: candidate.assistId || '',
-                title: candidate.title || ''
+                title: candidate.title || '',
+                journalShortName: candidate.journalShortName || '',
+                journalAccess: listAllowed.journalAccess || null
               });
               if (candidateKey && listAllowed.reason === 'not_waiting') {
                 await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
+              }
+              if (listAllowed.reason === 'journal_blocked_rule') {
+                await appendWatcherLog({
+                  ...candidate,
+                  trigger,
+                  status: 'skipped',
+                  reason: listAllowed.reason,
+                  page: pagePick.pickedPage,
+                  journalShortName: listAllowed.journalAccess?.shortName || candidate.journalShortName || ''
+                });
               }
               await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
               continue;

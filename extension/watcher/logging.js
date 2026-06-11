@@ -218,6 +218,7 @@
           assistId: String(entry.assistId || entry.id || '').slice(0, 60),
           title: normalizeText(entry.title || '').slice(0, 160),
           doi: String(entry.doi || '').slice(0, 120),
+          journalShortName: normalizeText(entry.journalShortName || '').slice(0, 120),
           journalName: normalizeText(entry.journalName || entry.journalShortName || '').slice(0, 120),
           detailUrl: String(entry.detailUrl || '').slice(0, 500),
           trigger: normalizeText(entry.trigger || '').slice(0, 60),

@@ -182,7 +182,7 @@
           <span>按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。</span>
         </div>
         <div class="setting-control setting-control-compact">
-          <input id="watcherDailyLimit" class="compact-number" type="number" min="0" max="500" step="1" value="10" aria-label="每日应助上限">
+          <input id="watcherDailyLimit" class="compact-number" type="number" min="0" max="1000" step="1" value="10" aria-label="每日应助上限">
         </div>
       </div>
       <div class="setting-row">
@@ -318,7 +318,7 @@
             <div class="metric-field" title="与下次应助保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
             <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
             <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="今日已经进入处理流程的应助次数。使用与每日限制同口径的 downloaded 计数，不再显示自动/手动运行次数，也不显示内部派生目标分母。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
+            <div class="metric-field" title="今日进入下载/校验流程的应助次数，按自动和手动分开显示；用于每日上限，不代表上传成功数。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
           </div>
         </div>
       </div>
@@ -552,17 +552,31 @@
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
         </div>
       </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>ScienceDirect 无权限期刊缓存</strong>
+          <span id="journalAccessCacheSummary">记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle-option" title="在求助列表页隐藏命中本地无权限缓存的 ScienceDirect 求助">
+            <span class="toggle"><input id="hideScienceDirectNoAccessRows" type="checkbox"><span></span></span>
+            <span class="toggle-text">隐藏列表命中项</span>
+          </label>
+          <button id="clearJournalAccessCache" class="secondary" type="button">清空</button>
+          <span id="journalAccessCacheStatus" class="pill">未加载</span>
+        </div>
+      </div>
       </details>
       </details>
       <div class="setting-row watcher-action-row">
         <div class="watcher-action-layout">
           <div class="setting-copy watcher-action-copy">
             <strong>值守操作</strong>
-            <span id="watcherActionDesc">手动触发一次检查，或复制当前排查配置。</span>
+            <span id="watcherActionDesc">手动触发一次检查，或复制当前排查日志。</span>
           </div>
           <div class="setting-control watcher-action-buttons">
             <button id="runAutoWatcherNow" class="secondary" type="button">立即检查</button>
-            <button id="copyAutoWatcherConfig" class="secondary" type="button">复制配置</button>
+            <button id="copyAutoWatcherConfig" class="secondary" type="button">复制日志</button>
           </div>
         </div>
         <div class="watcher-status-panel">

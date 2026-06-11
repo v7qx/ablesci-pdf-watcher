@@ -170,7 +170,7 @@
                 reload: false,
                 downloadOnly: true,
                 blocked: true,
-                skipReason: 'no_access',
+                skipReason: failureReason,
                 ...cleanerExtra
               });
             } else if (failureReason === 'doi_not_found' || failureReason === 'doi_resolution_failed') {

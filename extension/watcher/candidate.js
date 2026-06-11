@@ -13,6 +13,7 @@
       highRiskFailThreshold,
       doiFailureSkipThreshold
     } = config;
+    const JOURNAL_ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
     function candidatePublisherName(candidate) {
       return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
@@ -68,6 +69,56 @@
     function journalShortNameMapFromState(state = {}) {
       const map = state.journalShortNameMap || state[journalShortNameMapKey] || {};
       return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    }
+
+    function journalAccessStatsFromState(state = {}) {
+      const map = state.journalAccessStats || {};
+      return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    }
+
+    function isScienceDirectCandidate(candidate = {}, payload = null) {
+      const alias = candidatePublisherName(candidate);
+      if (/elsevier|sciencedirect/i.test(alias)) return true;
+      const haystack = [
+        candidate.publisherName,
+        candidate.listUrl,
+        candidate.detailUrl,
+        candidate.doi,
+        candidate.rowText,
+        payload?.publisherName,
+        payload?.doi,
+        payload?.pdfUrl,
+        payload?.articleUrl
+      ].map(value => String(value || '')).join(' ');
+      return /elsevier|sciencedirect|sciencedirect\.com|10\.1016\//i.test(haystack);
+    }
+
+    function journalAccessEntryForCandidate(candidate, state = {}) {
+      const shortName = normalizeText(candidate?.journalShortName || '');
+      const key = normalizeJournalKey(shortName);
+      if (!key || !isScienceDirectCandidate(candidate)) return null;
+      const entry = journalAccessStatsFromState(state)[key];
+      if (!entry || typeof entry !== 'object') return null;
+      if (entry.publisher !== 'sciencedirect') return null;
+      if (entry.reason !== 'explicit_no_subscription') return null;
+      const expiresAt = Date.parse(entry.expiresAt || '');
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+      return { key, entry };
+    }
+
+    async function traceJournalAccessRecordSkipped(reason, candidate = {}, payload = null, extra = {}) {
+      await appendWatcherTrace('journal_access_record_skipped', {
+        reason,
+        sourceReason: extra.sourceReason || '',
+        assistId: payload?.assistId || candidate?.assistId || '',
+        detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+        listUrl: candidate?.listUrl || '',
+        publisherName: candidate?.publisherName || payload?.publisherName || '',
+        journalShortName: candidate?.journalShortName || payload?.journalShortName || '',
+        journalName: payload?.journalName || '',
+        doi: payload?.doi || candidate?.doi || '',
+        ...extra
+      });
     }
 
     function journalShortNameMapEntry(map, shortName) {
@@ -159,6 +210,9 @@
         detail_remark: '详情页存在备注，已按设置跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
         list_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (列表页)',
+        list_supplement: '已按设置跳过补充材料求助 (列表页)',
+        list_book_chapter: '已按设置跳过书籍章节求助 (列表页)',
+        list_patent_report: '已按设置跳过专利/报告类求助 (列表页)',
         detail_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (详情页)',
         detail_blacklist_user: '求助人 ID 处于黑名单中，已跳过',
         journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
@@ -301,6 +355,7 @@
         return {
           assistId,
           detailUrl,
+          listUrl: location.href,
           title,
           rowText,
           doi,
@@ -417,7 +472,7 @@
       });
     }
 
-    function isListCandidateAllowed(candidate, opts) {
+    function isListCandidateAllowed(candidate, opts, state = {}) {
       const textValue = [candidate.rowText, candidate.title, candidate.statusText].join(' ');
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
       if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
@@ -425,7 +480,108 @@
       if (opts.watcherSkipCorrigendum && candidate.title && /^Corrigendum\s+to/i.test(String(candidate.title).trim())) {
         return { ok: false, reason: 'list_corrigendum' };
       }
+      if (opts.watcherSkipSupplement && (candidate.documentType === 'supplement' || candidate.supplement)) {
+        return { ok: false, reason: 'list_supplement' };
+      }
+      if (opts.watcherSkipBookChapter && candidate.documentType === 'book_chapter') {
+        return { ok: false, reason: 'list_book_chapter' };
+      }
+      if (opts.watcherSkipPatentReport && candidate.documentType === 'patent_report') {
+        return { ok: false, reason: 'list_patent_report' };
+      }
+      const accessBlocked = journalAccessEntryForCandidate(candidate, state);
+      if (accessBlocked) {
+        return {
+          ok: false,
+          reason: 'journal_blocked_rule',
+          journalAccess: {
+            key: accessBlocked.key,
+            shortName: accessBlocked.entry.shortName || candidate.journalShortName || '',
+            lastAt: accessBlocked.entry.lastAt || '',
+            expiresAt: accessBlocked.entry.expiresAt || '',
+            hitCount: Number(accessBlocked.entry.hitCount || 0) || 0,
+            lastAssistId: accessBlocked.entry.lastAssistId || ''
+          }
+        };
+      }
       return { ok: true };
+    }
+
+    function isCacheableScienceDirectNoAccess(reason) {
+      return reason === 'explicit_no_subscription' ||
+        reason === 'no_access' ||
+        /does not subscribe to this content on ScienceDirect|ScienceDirect\s+明确返回无正文订阅权限|明确返回无正文订阅权限|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限/i.test(String(reason || ''));
+    }
+
+    async function recordJournalAccessBlocked(candidate, payload = null, reason = '') {
+      if (!isCacheableScienceDirectNoAccess(reason)) {
+        await traceJournalAccessRecordSkipped('non_cacheable_reason', candidate, payload, { sourceReason: reason || '' });
+        return false;
+      }
+      if (!isScienceDirectCandidate(candidate, payload)) {
+        await traceJournalAccessRecordSkipped('not_sciencedirect_candidate', candidate, payload, { sourceReason: reason || '' });
+        return false;
+      }
+      const state = await getWatcherState();
+      let shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+      if (!shortName && payload?.journalName) {
+        const fullKey = normalizeJournalKey(payload.journalName);
+        const map = journalShortNameMapFromState(state);
+        const matched = Object.values(map).find(entry => {
+          if (!entry || typeof entry !== 'object') return false;
+          return journalRuleNames(entry).some(name => normalizeJournalKey(name) === fullKey);
+        });
+        shortName = normalizeText(matched?.short || '');
+      }
+      const key = normalizeJournalKey(shortName);
+      if (!key) {
+        await traceJournalAccessRecordSkipped('missing_journal_short_name', candidate, payload, { sourceReason: reason || '' });
+        return false;
+      }
+      const stats = journalAccessStatsFromState(state);
+      const existing = stats[key] || {};
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      stats[key] = {
+        shortName,
+        publisher: 'sciencedirect',
+        reason: 'explicit_no_subscription',
+        lastAt: nowIso,
+        expiresAt: new Date(now + JOURNAL_ACCESS_TTL_MS).toISOString(),
+        hitCount: Math.max(0, Number(existing.hitCount || 0) || 0) + 1,
+        lastAssistId: payload?.assistId || candidate?.assistId || ''
+      };
+      state.journalAccessStats = stats;
+      await saveWatcherState(state);
+      await appendWatcherTrace('journal_access_blocked_recorded', {
+        reason: 'explicit_no_subscription',
+        sourceReason: reason || '',
+        assistId: payload?.assistId || candidate?.assistId || '',
+        detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+        shortName,
+        expiresAt: stats[key].expiresAt
+      });
+      return true;
+    }
+
+    async function clearJournalAccessBlocked(candidate, payload = null) {
+      if (!isScienceDirectCandidate(candidate, payload)) return false;
+      const shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+      const key = normalizeJournalKey(shortName);
+      if (!key) return false;
+      const state = await getWatcherState();
+      const stats = journalAccessStatsFromState(state);
+      if (!stats[key]) return false;
+      delete stats[key];
+      state.journalAccessStats = stats;
+      await saveWatcherState(state);
+      await appendWatcherTrace('journal_access_blocked_cleared', {
+        reason: 'upload_success_same_journal',
+        assistId: payload?.assistId || candidate?.assistId || '',
+        detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+        shortName
+      });
+      return true;
     }
 
     function isDetailAllowedForWatcher(payload, opts, blacklistedIds = []) {
@@ -485,8 +641,11 @@
       candidateJournalNames,
       journalShortNameMapFromState,
       journalShortNameMapEntry,
+      journalAccessStatsFromState,
       enrichCandidateJournalFromMap,
       rememberJournalShortNameMapping,
+      recordJournalAccessBlocked,
+      clearJournalAccessBlocked,
       isLikelyRscCandidate,
       describeWatcherReason,
       orderCandidatesForRun,

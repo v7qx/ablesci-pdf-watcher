@@ -132,6 +132,7 @@
       const traceLogs = Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [];
       const state = stored[autoWatcherStateKey] || {};
       const processed = state.processed || {};
+      const journalAccessEntries = validJournalAccessEntries(state);
       const diagnostic = stored[lastDiagnosticKey] || null;
       const manifest = chromeApi.runtime.getManifest();
 
@@ -183,6 +184,15 @@
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
           currentSession: state.currentSession || null,
+          journalAccessStatsCount: journalAccessEntries.length,
+          journalAccessStatsPreview: journalAccessEntries.slice(0, 5).map(entry => ({
+            shortName: entry.shortName || '',
+            reason: entry.reason || '',
+            lastAt: entry.lastAt || '',
+            expiresAt: entry.expiresAt || '',
+            hitCount: Number(entry.hitCount || 0) || 0,
+            lastAssistId: entry.lastAssistId || ''
+          })),
           journalShortNameMapCount: Object.keys(state.journalShortNameMap || {}).length,
           journalShortNameMapPreview: Object.entries(state.journalShortNameMap || {}).slice(0, 10).map(([key, value]) => ({
             key,
@@ -259,6 +269,54 @@
         ? '已清除 watcher 日志和 trace。'
         : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
       showText('status', msg, !res.ok);
+    }
+
+    function validJournalAccessEntries(state = {}) {
+      const stats = state.journalAccessStats || {};
+      const now = Date.now();
+      return Object.values(stats)
+        .filter(entry => entry && typeof entry === 'object')
+        .filter(entry => entry.publisher === 'sciencedirect')
+        .filter(entry => entry.reason === 'explicit_no_subscription')
+        .filter(entry => {
+          const expiresAt = Date.parse(entry.expiresAt || '');
+          return Number.isFinite(expiresAt) && expiresAt > now;
+        })
+        .sort((a, b) => Date.parse(b.lastAt || '') - Date.parse(a.lastAt || ''));
+    }
+
+    function journalAccessCountText(count) {
+      const isEn = globalThis.watcherActiveLanguage === 'en';
+      return isEn ? `${count} entries` : `${count} 条`;
+    }
+
+    async function refreshJournalAccessCacheSummary() {
+      const summary = el('journalAccessCacheSummary');
+      const status = el('journalAccessCacheStatus');
+      if (!summary || !status) return;
+      const data = await chromeApi.storage.local.get({ [autoWatcherStateKey]: {} });
+      const entries = validJournalAccessEntries(data[autoWatcherStateKey] || {});
+      if (!entries.length) {
+        summary.textContent = typeof globalThis.t === 'function' ? globalThis.t('暂无缓存。') : '暂无缓存。';
+        showPill('journalAccessCacheStatus', journalAccessCountText(0));
+        return;
+      }
+      const recent = entries.slice(0, 5).map(entry => entry.shortName).filter(Boolean);
+      const prefix = typeof globalThis.t === 'function' ? globalThis.t('最近') : '最近';
+      const separator = globalThis.watcherActiveLanguage === 'en' ? ', ' : '、';
+      summary.textContent = `${prefix}: ${recent.join(separator)}`;
+      summary.title = summary.textContent;
+      showPill('journalAccessCacheStatus', journalAccessCountText(entries.length));
+    }
+
+    async function clearJournalAccessCache() {
+      const data = await chromeApi.storage.local.get({ [autoWatcherStateKey]: {} });
+      const state = data[autoWatcherStateKey] || {};
+      delete state.journalAccessStats;
+      await chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
+      await chromeApi.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
+      await refreshJournalAccessCacheSummary();
+      showText('status', '已清空 ScienceDirect 无权限期刊缓存。');
     }
 
     async function simulateAssist() {
@@ -466,6 +524,8 @@
       testWatcherNotification,
       clearAutoWatcherState,
       clearAutoWatcherLogs,
+      refreshJournalAccessCacheSummary,
+      clearJournalAccessCache,
       simulateAssist,
       handleDocumentCopy,
       handleWindowBlur

@@ -131,6 +131,8 @@ async function recordManualWatcherDaily(field) {
   daily[field] = Number(daily[field] || 0) + 1;
   if (field === 'downloaded') {
     daily.downloadedManual = Number(daily.downloadedManual || 0) + 1;
+  }
+  if (field === 'uploaded') {
     state.monthDone = Number(state.monthDone || 0) + 1;
     state.actualDone = Number(state.actualDone || 0) + 1;
     const previousTargetError = Number(state.targetError || state.lag || 0);

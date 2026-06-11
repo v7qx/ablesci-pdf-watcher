@@ -31,7 +31,7 @@
       const prefix = currentMonth + '-';
       return Object.entries(state.daily || {})
         .filter(([key]) => key.startsWith(prefix))
-        .reduce((sum, [, value]) => sum + Number(value.downloaded || 0), 0);
+        .reduce((sum, [, value]) => sum + Number(value.uploaded || 0), 0);
     }
 
     function firstSyncProgressRatio(state) {

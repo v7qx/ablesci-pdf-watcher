@@ -107,8 +107,10 @@
           } else {
             state.daily[key].downloadedManual = Number(state.daily[key].downloadedManual || 0) + 1;
           }
-          if (Number.isFinite(state.actualTotalAssists)) {
-            state.actualTotalAssists += 1;
+        }
+        if (field === 'uploaded') {
+          if (Number.isFinite(Number(state.actualTotalAssists))) {
+            state.actualTotalAssists = Number(state.actualTotalAssists) + 1;
           }
         }
       });
