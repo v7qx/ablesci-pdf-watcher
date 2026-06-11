@@ -163,7 +163,7 @@
             } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
               const message = accessEnvironmentPause?.paused
                 ? accessEnvironmentPause.message
-                : '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。';
+                : '当前出版商无正文订阅权限，任务已跳过。';
               post(port, 'done', message, {
                 html: escapeHtml(message),
                 recomend: false,

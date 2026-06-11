@@ -231,6 +231,7 @@ const TEXT_MAP = {
   "保存": "Save",
 
   // Background/Watcher errors & status messages for options display
+  "当前出版商无正文订阅权限，任务已跳过。": "No subscription access, task skipped.",
   "当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。": "The publisher page shows no full-text subscription access. This task has been skipped and the journal permission status recorded.",
   "ScienceDirect 需要登录或机构访问后才能继续。插件已保留这次为登录阻塞，不计入无权限期刊；完成登录后可重新触发。": "ScienceDirect requires login or institutional access. The plugin has flagged this as login blocked, which is excluded from no-access journals; you can retry after logging in.",
   "检测到出版商验证页，已中断本次任务并计入验证次数；达到阈值后会自动暂停低频值守。": "Publisher verification page (Cloudflare) detected. Task aborted and challenge count incremented; auto watcher will pause if threshold is reached.",

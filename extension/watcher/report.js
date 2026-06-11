@@ -218,7 +218,7 @@
         if (mAnomaly) {
           return `Consecutive no-access occurred ${mAnomaly[1]} times in a short period, involving ${mAnomaly[2]} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
         }
-        if (r.includes('当前出版商页面显示无正文订阅权限')) {
+        if (r.includes('当前出版商页面显示无正文订阅权限') || r.includes('当前出版商无正文订阅权限')) {
           return 'No full-text subscription access. Task skipped.';
         }
         if (r.includes('需要登录或机构访问')) {
@@ -543,7 +543,7 @@
       const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
       const skipDecisionRows = [
         ...logs
-          .filter(log => /skipped|failed/i.test(String(log.status || '')) || /skip|filter|not_due|limit|risk|zero|no_candidate/i.test(String(log.reason || '')))
+          .filter(log => String(log.status) === 'skipped' || String(log.status) === 'failed')
           .map(log => {
             const cleanDetail = reportDetailValue(log) || log.journalName || log.doi || '';
             let formattedDetail = cleanDetail;
@@ -559,7 +559,11 @@
             };
           }),
         ...traces
-          .filter(trace => /skip|not_due|session_size|zero|outside|limit|risk|no_candidate|filter/i.test(`${trace.step || ''} ${trace.reason || ''}`))
+          .filter(trace => {
+            const textToTest = `${trace.step || ''} ${trace.reason || ''}`;
+            return /skip|not_due|zero|outside|limit|risk|no_candidate/i.test(textToTest)
+              && !/passed|start|allowed|success|done|running/i.test(textToTest);
+          })
           .map(trace => ({
             time: trace.time,
             trigger: trace.trigger || '',
@@ -711,6 +715,36 @@
         );
       }
 
+      const doiNotFoundLogs = logs.filter(log => {
+        const r = String(log.reason || '');
+        return r.includes('DOI 解析失败') || r.includes('DOI 不存在') || r.includes('doi_not_found') || r.includes('doi_resolution_failed') || r.includes('doi_missing') || r.includes('缺少 DOI 信息') || r.includes('DOI Not Found') || r.includes('DOI missing');
+      });
+      const doiNotFoundLines = [];
+      if (doiNotFoundLogs.length > 0) {
+        doiNotFoundLines.push(
+          isEn ? '## DOI Not Found Record' : '## DOI 未找到或解析失败记录',
+          '',
+          isEn
+            ? '| Time | DOI | Journal | Reason | Detail |'
+            : '| 时间 | DOI | 期刊 (Journal) | 拦截原因 (Reason) | 详情 (Detail) |',
+          '| --- | --- | --- | --- | --- |',
+          ...doiNotFoundLogs.map(log => {
+            let detailVal = reportDetailValue(log);
+            if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
+              detailVal = isEn ? `[Click](${detailVal})` : `[点击查看详情](${detailVal})`;
+            }
+            return formatMarkdownTableRow([
+              formatBeijingTimeOnly(log.time),
+              log.doi || '',
+              log.journalName || '',
+              translateReason(log.reason || '', isEn),
+              detailVal
+            ]);
+          }),
+          ''
+        );
+      }
+
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
@@ -719,6 +753,7 @@
         ...summaryLines,
         '',
         ...sizeInterceptedLines,
+        ...doiNotFoundLines,
         '## Skips And Decisions',
         '',
         isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
@@ -736,7 +771,11 @@
         '',
         isEn ? '| Time | Trigger | Status | Reason | PDF Cleaner | Journal | DOI | Detail |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | PDF 去水印 | 期刊 (Journal) | DOI | 详情 (Detail) |',
         '| --- | --- | --- | --- | --- | --- | --- | --- |',
-        ...logs.filter(log => log.status !== 'queued_upload' && log.status !== 'queued_download_only').slice(0, 12).map(log => {
+        ...logs.filter(log => log.status === 'success')
+          .slice()
+          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+          .slice(0, 30)
+          .map(log => {
           let detailVal = reportDetailValue(log);
           if (detailVal.startsWith('http://') || detailVal.startsWith('https://')) {
             detailVal = isEn ? `[Click for details](${detailVal})` : `[点击查看详情](${detailVal})`;
