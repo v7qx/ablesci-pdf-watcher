@@ -511,7 +511,7 @@
       function isUnsupportedSpringerBookPdfUrl(url) {
         const s = String(url || '');
         return /:\/\/link\.springer\.com\/content\/pdf\/10\.[^/]+\/978-[^?#]+(?:\.pdf)?(?:[?#].*)?$/i.test(s) ||
-          /:\/\/link\.springer\.com\/content\/pdf\/10\.[^?#]+_[^/?#]+(?:\.pdf)?(?:[?#].*)?$/i.test(s);
+          /:\/\/link\.springer\.com\/content\/pdf\/10\.[^?#]+_(?!reference\b)[^/?#]+(?:\.pdf)?(?:[?#].*)?$/i.test(s);
       }
 
       if (isScienceDirectUrl(pdfUrl) || isDoiUrl(pdfUrl)) {

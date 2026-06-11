@@ -203,7 +203,7 @@
         const href = normalize(raw);
         const marker = markerOf(el, href);
         const visible = el.tagName === 'META' || common.isVisible(el);
-        const textScore = /\b(pdf|download pdf|full text pdf)\b/i.test(marker) ? 2 : 0;
+        const textScore = (el.tagName !== 'META' && /\b(pdf|download pdf|full text pdf)\b/i.test(marker)) ? 2 : 0;
         const hrefScore = isPdfHref(href) ? 3 : 0;
         const publisherScore = publisher === 'wiley'
           ? (/\/doi\/pdfdirect\//i.test(href || '') ? 6 : (/\/doi\/pdf\//i.test(href || '') ? 4 : 0))

@@ -174,8 +174,13 @@
 
   function springerArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
-    const match = s.match(/^https?:\/\/link\.springer\.com\/content\/pdf\/(10\.[^?#]+?)(?:\.pdf)?(?:[?#].*)?$/i);
-    return match ? `https://link.springer.com/article/${match[1]}` : '';
+    const match = s.match(/^https?:\/\/link\.springer\.com\/content\/pdf\/(10\.[^?#]+?)(?:_reference)?(?:\.pdf)?(?:[?#].*)?$/i);
+    if (!match) return '';
+    let doi = match[1];
+    if (doi.endsWith('_reference')) {
+      doi = doi.substring(0, doi.length - 10);
+    }
+    return `https://link.springer.com/article/${doi}`;
   }
 
   function wileyArticleUrlFromPdfUrl(url) {
