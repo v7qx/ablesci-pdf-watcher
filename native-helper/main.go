@@ -223,6 +223,9 @@ func handleDeleteFile(req Request) error {
 	if !isPDFPath(path) {
 		return errors.New("refuse to delete non-pdf file")
 	}
+	if err := ensureAllowedPDFPath(path); err != nil {
+		return err
+	}
 
 	if _, _, err := inspectPDF(path); err != nil {
 		return fmt.Errorf("refuse to delete file that is not a valid PDF: %w", err)
@@ -978,10 +981,9 @@ func handleCleanPDF(req Request) error {
 		}
 		cleanerPath = filepath.Join(filepath.Dir(exePath), "zotero-access-cleaner.exe")
 	}
-
-	// Verify cleaner exists
-	if _, err := os.Stat(cleanerPath); err != nil {
-		return fmt.Errorf("去水印工具未找到，请在设置中配置正确的绝对路径。错误: %w", err)
+	cleanerPath, err = cleanCleanerExecutablePath(cleanerPath)
+	if err != nil {
+		return err
 	}
 
 	// 2. Create temp file for summary JSON
@@ -993,37 +995,16 @@ func handleCleanPDF(req Request) error {
 	tmpFile.Close()
 	defer os.Remove(summaryPath)
 
-	// 3. Prepare arguments
 	preserveOriginal := req.Extra["preserve_original"] == "true"
-	args := []string{
-		"-input", path,
-		"-apply",
-		"-replace",
-	}
-	if preserveOriginal {
-		args = append(args, "-preserve-original-on-cleaned")
-	} else {
-		args = append(args, "-no-backup")
-	}
-	args = append(args, "-summary-json", summaryPath)
-
-	if patternsPath := req.Extra["patterns_path"]; patternsPath != "" {
-		args = append(args, "-patterns", patternsPath)
-	}
-	if engine := req.Extra["engine"]; engine != "" {
-		args = append(args, "-engine", engine)
-	}
-	if timeoutStr := req.Extra["timeout_seconds"]; timeoutStr != "" {
-		args = append(args, "-timeout-seconds", timeoutStr)
-	}
-
-	// 4. Set process timeout
 	timeoutSeconds := 60
 	if timeoutStr := req.Extra["timeout_seconds"]; timeoutStr != "" {
 		if val, err := strconv.Atoi(timeoutStr); err == nil && val > 0 {
 			timeoutSeconds = val
 		}
 	}
+	args := buildCleanerArgs(cleanerPath, path, summaryPath, req.Extra, preserveOriginal, timeoutSeconds)
+
+	// 4. Set process timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds+5)*time.Second)
 	defer cancel()
 
@@ -1146,4 +1127,88 @@ func envWithCleanerToolDirs(cleanerPath string) []string {
 		env = append(env, pathKey+"="+pathValue)
 	}
 	return env
+}
+
+func cleanCleanerExecutablePath(p string) (string, error) {
+	p = strings.Trim(p, "\" ")
+	if p == "" {
+		return "", errors.New("missing cleaner path")
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	resolved, err := resolveExistingPath(abs)
+	if err != nil {
+		return "", fmt.Errorf("去水印工具未找到，请在设置中配置正确的绝对路径。错误: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("去水印工具未找到，请在设置中配置正确的绝对路径。错误: %w", err)
+	}
+	if info.IsDir() {
+		return "", errors.New("去水印工具路径不能是目录")
+	}
+
+	base := strings.ToLower(filepath.Base(resolved))
+	if base != "zotero-access-cleaner.exe" && base != "zotero-pdf-toolbox.exe" {
+		return "", fmt.Errorf("去水印工具文件名不受支持：%s", filepath.Base(resolved))
+	}
+	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(resolved), ".exe") {
+		return "", errors.New("去水印工具必须是 .exe 可执行文件")
+	}
+	return resolved, nil
+}
+
+func buildCleanerArgs(cleanerPath, inputPath, summaryPath string, extra map[string]string, preserveOriginal bool, timeoutSeconds int) []string {
+	patternsPath := ""
+	engine := ""
+	if extra != nil {
+		patternsPath = strings.TrimSpace(extra["patterns_path"])
+		engine = strings.TrimSpace(extra["engine"])
+	}
+	timeoutArg := strconv.Itoa(timeoutSeconds)
+
+	if strings.EqualFold(filepath.Base(cleanerPath), "zotero-pdf-toolbox.exe") {
+		args := []string{
+			"clean-access",
+			"--input", inputPath,
+			"--replace",
+		}
+		if preserveOriginal {
+			args = append(args, "--backup-suffix", ".original.pdf")
+		} else {
+			args = append(args, "--no-backup")
+		}
+		args = append(args, "--summary-json", summaryPath)
+		if patternsPath != "" {
+			args = append(args, "--patterns", patternsPath)
+		}
+		if engine != "" {
+			args = append(args, "--engine", engine)
+		}
+		args = append(args, "--timeout-seconds", timeoutArg)
+		return args
+	}
+
+	args := []string{
+		"-input", inputPath,
+		"-apply",
+		"-replace",
+	}
+	if preserveOriginal {
+		args = append(args, "-preserve-original-on-cleaned")
+	} else {
+		args = append(args, "-no-backup")
+	}
+	args = append(args, "-summary-json", summaryPath)
+	if patternsPath != "" {
+		args = append(args, "-patterns", patternsPath)
+	}
+	if engine != "" {
+		args = append(args, "-engine", engine)
+	}
+	args = append(args, "-timeout-seconds", timeoutArg)
+	return args
 }

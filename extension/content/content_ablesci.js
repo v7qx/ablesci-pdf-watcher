@@ -313,9 +313,69 @@
 
 
   function stripHtml(s) {
-    const div = document.createElement('div');
-    div.innerHTML = String(s || '');
-    return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim();
+    try {
+      const doc = new DOMParser().parseFromString(String(s || ''), 'text/html');
+      return (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+    } catch (_) {
+      return String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  function safeDisplayHref(rawHref) {
+    try {
+      const url = new URL(rawHref, location.href);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+      return url.href;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function appendSanitizedHtmlNode(target, source) {
+    if (!source) return;
+    if (source.nodeType === Node.TEXT_NODE) {
+      target.appendChild(document.createTextNode(source.textContent || ''));
+      return;
+    }
+    if (source.nodeType !== Node.ELEMENT_NODE) return;
+
+    const tag = source.tagName.toLowerCase();
+    if (['script', 'style', 'template', 'iframe', 'object', 'embed', 'svg', 'math'].includes(tag)) return;
+    const inlineTags = new Set(['span', 'strong', 'b', 'em', 'i']);
+    const blockTags = new Set(['br', 'p', 'div', 'ul', 'ol', 'li']);
+    let nextTarget = target;
+
+    if (tag === 'a') {
+      const href = safeDisplayHref(source.getAttribute('href') || '');
+      if (href) {
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        anchor.rel = 'noopener noreferrer';
+        anchor.target = '_blank';
+        target.appendChild(anchor);
+        nextTarget = anchor;
+      }
+    } else if (inlineTags.has(tag) || blockTags.has(tag)) {
+      const el = document.createElement(tag);
+      target.appendChild(el);
+      nextTarget = el;
+    }
+
+    for (const child of Array.from(source.childNodes || [])) {
+      appendSanitizedHtmlNode(nextTarget, child);
+    }
+  }
+
+  function setSanitizedHtml(target, html) {
+    target.textContent = '';
+    try {
+      const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+      for (const child of Array.from(doc.body?.childNodes || [])) {
+        appendSanitizedHtmlNode(target, child);
+      }
+    } catch (_) {
+      target.textContent = stripHtml(html);
+    }
   }
 
   function reloadPageSoon(delay = 0) {
@@ -389,7 +449,7 @@
 
     const content = document.createElement('div');
     content.className = 'ablesci-native-layer-content layui-layer-content';
-    content.innerHTML = rawHtml;
+    setSanitizedHtml(content, rawHtml);
     attachCurrentTabAssistLinkBehavior(content);
 
     const btnBar = document.createElement('div');

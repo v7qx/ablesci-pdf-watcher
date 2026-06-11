@@ -31,6 +31,88 @@ func TestEnsureAllowedPDFPathRejectsOutsideAllowedDirs(t *testing.T) {
 	}
 }
 
+func TestCleanCleanerExecutablePathAllowsKnownToolNames(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "zotero-pdf-toolbox.exe")
+	if err := os.WriteFile(path, []byte("test"), 0755); err != nil {
+		t.Fatalf("write cleaner exe: %v", err)
+	}
+	resolved, err := cleanCleanerExecutablePath(path)
+	if err != nil {
+		t.Fatalf("expected cleaner path to be allowed: %v", err)
+	}
+	if filepath.Base(resolved) != "zotero-pdf-toolbox.exe" {
+		t.Fatalf("unexpected cleaner basename: %s", filepath.Base(resolved))
+	}
+}
+
+func TestCleanCleanerExecutablePathRejectsUnknownToolName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "not-cleaner.exe")
+	if err := os.WriteFile(path, []byte("test"), 0755); err != nil {
+		t.Fatalf("write fake exe: %v", err)
+	}
+	if _, err := cleanCleanerExecutablePath(path); err == nil {
+		t.Fatal("expected unknown cleaner executable name to be rejected")
+	}
+}
+
+func TestBuildCleanerArgsUsesToolboxContract(t *testing.T) {
+	args := buildCleanerArgs(
+		filepath.Join("C:", "Tools", "zotero-pdf-toolbox.exe"),
+		"paper.pdf",
+		"summary.json",
+		map[string]string{"patterns_path": "patterns.json", "engine": "qpdf"},
+		true,
+		45,
+	)
+	want := []string{
+		"clean-access",
+		"--input", "paper.pdf",
+		"--replace",
+		"--backup-suffix", ".original.pdf",
+		"--summary-json", "summary.json",
+		"--patterns", "patterns.json",
+		"--engine", "qpdf",
+		"--timeout-seconds", "45",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %v want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q; all args=%v", i, args[i], want[i], args)
+		}
+	}
+}
+
+func TestBuildCleanerArgsKeepsLegacyAccessCleanerFlags(t *testing.T) {
+	args := buildCleanerArgs(
+		filepath.Join("C:", "Tools", "zotero-access-cleaner.exe"),
+		"paper.pdf",
+		"summary.json",
+		nil,
+		false,
+		60,
+	)
+	want := []string{
+		"-input", "paper.pdf",
+		"-apply",
+		"-replace",
+		"-no-backup",
+		"-summary-json", "summary.json",
+		"-timeout-seconds", "60",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %v want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q; all args=%v", i, args[i], want[i], args)
+		}
+	}
+}
+
 func TestValidateOSSHostAllowsAliyunPublicEndpoints(t *testing.T) {
 	hosts := []string{
 		"https://ables1.oss-cn-shanghai.aliyuncs.com/",

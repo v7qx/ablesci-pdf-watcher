@@ -32,6 +32,16 @@
       return String(url || '').replace(/^https?:\/\//i, '');
     }
 
+    function normalizeHttpUrl(rawUrl) {
+      try {
+        const url = new URL(String(rawUrl || '').trim());
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        return url.href;
+      } catch (_) {
+        return '';
+      }
+    }
+
     function tracePublisherStep(pending, step, details = {}) {
       appendDiagnosticTrace?.(pending.payloadSummary || {}, {
         ...details,
@@ -122,6 +132,21 @@
       if (!isExpectedPublisherPage(pending, msg.pageUrl || '')) {
         sendResponse({ ok: false, ignored: true, reason: 'publisher page mismatch' });
         return false;
+      }
+
+      if (msg.pdfUrl) {
+        const safePdfUrl = normalizeHttpUrl(msg.pdfUrl);
+        if (!safePdfUrl) {
+          tracePublisherStep(pending, 'publisher-pdf-url-rejected', {
+            publisher: msg.publisher || pending.publisher || '',
+            articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+            source: msg.source || '',
+            reason: 'unsafe_pdf_url_scheme'
+          });
+          sendResponse({ ok: false, ignored: true, reason: 'unsafe_pdf_url_scheme' });
+          return false;
+        }
+        if (safePdfUrl !== msg.pdfUrl) msg = { ...msg, pdfUrl: safePdfUrl };
       }
 
       if (!msg.publisherChallenge) markPublisherChallengePassed(pending);

@@ -34,6 +34,45 @@
       };
     }
 
+    const sensitiveDiagnosticKeyRe = /token|cookie|session|sid|auth|authorization|credential|password|passwd|secret|ticket|jwt|key|signature|sign|csrf|saml|shib/i;
+
+    function sanitizeDiagnosticUrl(match) {
+      try {
+        const url = new URL(match);
+        for (const key of Array.from(url.searchParams.keys())) {
+          if (sensitiveDiagnosticKeyRe.test(key)) url.searchParams.set(key, '<redacted>');
+        }
+        url.hash = '';
+        return url.toString();
+      } catch (_) {
+        return match;
+      }
+    }
+
+    function sanitizeDiagnosticString(value) {
+      const raw = redactLocalPaths(String(value || ''));
+      return raw.replace(/https?:\/\/[^\s"'<>]+/ig, sanitizeDiagnosticUrl);
+    }
+
+    function sanitizeDiagnosticValue(value, key = '', depth = 0) {
+      if (key !== '_signature' && sensitiveDiagnosticKeyRe.test(key)) return '<redacted>';
+      if (value == null) return value;
+      if (typeof value === 'string') return sanitizeDiagnosticString(value);
+      if (typeof value === 'number' || typeof value === 'boolean') return value;
+      if (depth >= 6) return '[truncated]';
+      if (Array.isArray(value)) {
+        return value.slice(0, 100).map(item => sanitizeDiagnosticValue(item, key, depth + 1));
+      }
+      if (typeof value === 'object') {
+        const out = {};
+        for (const [childKey, childValue] of Object.entries(value)) {
+          out[childKey] = sanitizeDiagnosticValue(childValue, childKey, depth + 1);
+        }
+        return out;
+      }
+      return String(value || '');
+    }
+
     function traceSignature(entry = {}) {
       return [
         entry.step || '',
@@ -46,7 +85,7 @@
         entry.itemUrl || '',
         entry.finalUrl || '',
         entry.pdfUrl || ''
-      ].map(value => String(value || '')).join('|');
+      ].map(value => String(sanitizeDiagnosticValue(value) || '')).join('|');
     }
 
     function diagnosticEnabled(opts) {
@@ -125,7 +164,7 @@
       } catch (_) {
         return;
       }
-      const clean = JSON.parse(JSON.stringify(diag || {}));
+      const clean = sanitizeDiagnosticValue(JSON.parse(JSON.stringify(diag || {})));
       await chromeApi.storage.local.set({ [lastDiagnosticKey]: clean });
       console.debug('[Ablesci PDF Watcher Diagnostic]', clean);
     }

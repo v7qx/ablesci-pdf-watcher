@@ -36,6 +36,14 @@
       appendDiagnosticTrace
     } = deps;
 
+    function ensureHttpUrl(rawUrl, label = 'URL') {
+      try {
+        const url = new URL(String(rawUrl || '').trim());
+        if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+      } catch (_) {}
+      throw new Error(`${label} 协议不受支持，已拒绝处理。`);
+    }
+
     function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -123,6 +131,7 @@
 
     async function downloadByDownloadsAPI(pdfUrl, filenameRel, signal = null, options = {}) {
       throwIfAborted(signal);
+      pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const downloadId = await chromeApi.downloads.download({
         url: pdfUrl,
@@ -137,6 +146,7 @@
     }
 
     async function downloadByBackgroundTab(pdfUrl, options = {}) {
+      pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
       const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const signal = options.signal || null;
@@ -203,6 +213,7 @@
     }
 
     async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
+      pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
       const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const active = options.active !== false;
@@ -223,7 +234,7 @@
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
-        const articleUrl = publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl;
+        const articleUrl = ensureHttpUrl(publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl, '出版商页面 URL');
         const payloadSummary = {
           assistId: options.payload?.assistId || '',
           doi: options.payload?.doi || '',
@@ -389,7 +400,7 @@
 
         async function downloadDirectFromPublisherUrl(url, source = 'publisher_direct_download') {
           if (settled) return null;
-          const nextUrl = String(url || '').trim();
+          const nextUrl = ensureHttpUrl(url, '出版商 PDF URL');
           if (!nextUrl) throw new Error('出版商返回的 PDF 地址为空');
           sourceUrlForMatching = nextUrl;
           expectedHost = hostnameOf(sourceUrlForMatching);
@@ -495,6 +506,7 @@
     }
 
     async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
+      pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
       const filenameRel = makeDownloadFilename('', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
       const revealAfterMs = 60000;
