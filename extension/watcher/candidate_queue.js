@@ -1,0 +1,284 @@
+'use strict';
+
+// Responsibility: lightweight persisted queue for assist-list candidates.
+(function () {
+  function createWatcherCandidateQueueApi(config) {
+    const {
+      getWatcherState,
+      updateWatcherState,
+      appendWatcherTrace,
+      getListUrlKey
+    } = config;
+
+    const QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
+    const SEEN_TTL_MS = 48 * 60 * 60 * 1000;
+    const MAX_ITEMS = 300;
+    const PROCESS_LIMIT = 80;
+    const PAGE_BACKOFF_MS = 30 * 60 * 1000;
+    const LOW_YIELD_BACKOFF_MS = 10 * 60 * 1000;
+
+    function queueCandidateKey(candidate = {}) {
+      return String(candidate.assistId || candidate.detailUrl || '').trim();
+    }
+
+    function normalizeCandidateQueue(rawQueue = {}) {
+      const now = Date.now();
+      const queue = rawQueue && typeof rawQueue === 'object' && !Array.isArray(rawQueue) ? rawQueue : {};
+      const seen = {};
+      for (const [key, value] of Object.entries(queue.seen || {})) {
+        const t = Number(value?.lastSeenAt || value?.consumedAt || 0);
+        if (key && Number.isFinite(t) && now - t <= SEEN_TTL_MS) {
+          seen[key] = value;
+        }
+      }
+
+      const unique = new Map();
+      const items = Array.isArray(queue.items) ? queue.items : [];
+      for (const item of items) {
+        const key = queueCandidateKey(item);
+        const t = Number(item?.lastSeenAt || item?.enqueuedAt || 0);
+        if (!key || !Number.isFinite(t) || now - t > QUEUE_TTL_MS) continue;
+        if (!unique.has(key)) unique.set(key, item);
+      }
+
+      const refillBackoff = {};
+      for (const [key, value] of Object.entries(queue.refillBackoff || {})) {
+        const nextAfter = Number(value?.nextAfter || 0);
+        if (key && Number.isFinite(nextAfter) && nextAfter > now) {
+          refillBackoff[key] = value;
+        }
+      }
+
+      return {
+        items: Array.from(unique.values()).slice(0, MAX_ITEMS),
+        seen,
+        refillBackoff,
+        pageSignatures: queue.pageSignatures && typeof queue.pageSignatures === 'object' && !Array.isArray(queue.pageSignatures)
+          ? queue.pageSignatures
+          : {},
+        refillCursors: queue.refillCursors && typeof queue.refillCursors === 'object' && !Array.isArray(queue.refillCursors)
+          ? queue.refillCursors
+          : {},
+        updatedAt: queue.updatedAt || ''
+      };
+    }
+
+    function sanitizeQueueCandidate(candidate = {}, pagePick = {}, listUrl = '') {
+      const now = Date.now();
+      return {
+        assistId: String(candidate.assistId || '').slice(0, 80),
+        detailUrl: String(candidate.detailUrl || '').slice(0, 500),
+        listUrl: String(candidate.listUrl || listUrl || '').slice(0, 500),
+        title: String(candidate.title || '').slice(0, 240),
+        rowText: String(candidate.rowText || '').slice(0, 1200),
+        doi: String(candidate.doi || '').slice(0, 160),
+        hasDoi: candidate.hasDoi === true,
+        publisherName: String(candidate.publisherName || pagePick.publisher || '').slice(0, 160),
+        journalShortName: String(candidate.journalShortName || '').slice(0, 160),
+        reported: candidate.reported === true,
+        rejected: candidate.rejected === true,
+        supplement: candidate.supplement === true,
+        documentType: String(candidate.documentType || '').slice(0, 80),
+        documentTypeText: String(candidate.documentTypeText || '').slice(0, 160),
+        statusText: String(candidate.statusText || '').slice(0, 160),
+        sticky: candidate.sticky === true,
+        index: Number.isFinite(Number(candidate.index)) ? Number(candidate.index) : 0,
+        page: Number.isFinite(Number(pagePick.pickedPage)) ? Number(pagePick.pickedPage) : '',
+        pageOrder: pagePick.pageOrder || '',
+        urlKey: pagePick.urlKey || '',
+        enqueuedAt: Number(candidate.enqueuedAt || now),
+        lastSeenAt: now
+      };
+    }
+
+    function pageBackoffKey(pagePick = {}) {
+      if (!pagePick.urlKey || !Number.isFinite(Number(pagePick.pickedPage))) return '';
+      return `${pagePick.urlKey}#${Number(pagePick.pickedPage)}`;
+    }
+
+    function pageSignature(candidates) {
+      const ids = (Array.isArray(candidates) ? candidates : [])
+        .map(candidate => queueCandidateKey(candidate))
+        .filter(Boolean)
+        .slice(0, 30);
+      return ids.join('|');
+    }
+
+    function numericOrEmpty(value) {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? n : '';
+    }
+
+    function adjustedCursorPage(cursor, currentMaxPage = '') {
+      const page = Number(cursor?.page);
+      if (!Number.isFinite(page) || page <= 0) return '';
+      const cursorMax = Number(cursor?.maxPage || cursor?.pageMax || 0);
+      const currentMax = Number(currentMaxPage || cursorMax || 0);
+      let adjusted = page;
+      if (Number.isFinite(cursorMax) && cursorMax > 0 && Number.isFinite(currentMax) && currentMax > 0) {
+        adjusted = page + (currentMax - cursorMax);
+      }
+      const min = Number(cursor?.pageMin || 1);
+      const max = Number(currentMax || cursor?.pageMax || adjusted);
+      const lower = Number.isFinite(min) && min > 0 ? min : 1;
+      const upper = Number.isFinite(max) && max >= lower ? max : adjusted;
+      return Math.min(upper, Math.max(lower, Math.round(adjusted)));
+    }
+
+    async function enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, candidatesOverride = null) {
+      const parsedCandidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+      const rawCandidates = Array.isArray(candidatesOverride) ? candidatesOverride : parsedCandidates;
+      const backoffKey = pageBackoffKey(pagePick);
+      const snapshotSignature = pageSignature(parsedCandidates);
+      const parsedMaxPage = numericOrEmpty(parsed?.listStats?.maxPage);
+      const result = { added: 0, refreshed: 0, parsedCount: parsedCandidates.length, queueableCount: rawCandidates.length, queueSize: 0 };
+      await updateWatcherState(state => {
+        const queue = normalizeCandidateQueue(state.assistCandidateQueue);
+        const existing = new Map(queue.items.map(item => [queueCandidateKey(item), item]));
+        for (const candidate of rawCandidates) {
+          const item = sanitizeQueueCandidate(candidate, pagePick, pickedListUrl);
+          const key = queueCandidateKey(item);
+          if (!key) continue;
+          if (existing.has(key)) {
+            Object.assign(existing.get(key), item, { enqueuedAt: existing.get(key).enqueuedAt || item.enqueuedAt });
+            result.refreshed += 1;
+          } else if (!queue.seen[key]) {
+            queue.items.push(item);
+            existing.set(key, item);
+            result.added += 1;
+          }
+          queue.seen[key] = {
+            lastSeenAt: Date.now(),
+            page: item.page,
+            listUrl: item.listUrl,
+            journalShortName: item.journalShortName || ''
+          };
+        }
+        if (backoffKey) {
+          const previousSignature = queue.pageSignatures[backoffKey]?.signature || '';
+          const repeatedSignature = !!snapshotSignature && previousSignature === snapshotSignature;
+          if (result.added <= 0 && parsedCandidates.length > 0) {
+            queue.refillBackoff[backoffKey] = {
+              nextAfter: Date.now() + (repeatedSignature ? PAGE_BACKOFF_MS : LOW_YIELD_BACKOFF_MS),
+              reason: repeatedSignature ? 'page_snapshot_repeated' : 'page_snapshot_no_new_candidates',
+              parsedCount: parsedCandidates.length,
+              queueableCount: rawCandidates.length,
+              page: pagePick.pickedPage,
+              listUrl: pickedListUrl,
+              signature: snapshotSignature
+            };
+          } else {
+            delete queue.refillBackoff[backoffKey];
+          }
+          queue.pageSignatures[backoffKey] = {
+            signature: snapshotSignature,
+            parsedCount: parsedCandidates.length,
+            queueableCount: rawCandidates.length,
+            added: result.added,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+          const cursorMaxPage = parsedMaxPage || numericOrEmpty(pagePick.pageMax);
+          queue.refillCursors[pagePick.urlKey] = {
+            page: Number(pagePick.pickedPage),
+            pageOrder: pagePick.pageOrder || '',
+            pageMin: pagePick.pageMin || '',
+            pageMax: pagePick.pageMax || '',
+            maxPage: cursorMaxPage,
+            listUrl: pickedListUrl,
+            updatedAt: new Date().toISOString()
+          };
+          if (parsedMaxPage) {
+            state.detectedMaxPages = state.detectedMaxPages || {};
+            state.detectedMaxPages[pagePick.urlKey] = parsedMaxPage;
+          }
+        }
+        queue.items = queue.items.slice(0, MAX_ITEMS);
+        queue.updatedAt = new Date().toISOString();
+        result.queueSize = queue.items.length;
+        state.assistCandidateQueue = queue;
+      });
+      await appendWatcherTrace('candidate_queue_refilled', {
+        reason: 'list_snapshot_enqueued',
+        trigger,
+        listUrl: pickedListUrl,
+        pickedPage: pagePick.pickedPage,
+        parsedCount: result.parsedCount,
+        queueableCount: result.queueableCount,
+        added: result.added,
+        refreshed: result.refreshed,
+        queueSize: result.queueSize
+      });
+      return result;
+    }
+
+    function stateWithQueueRefillCursor(listUrl, state = {}, currentMaxPage = '') {
+      if (typeof getListUrlKey !== 'function') return state;
+      const urlKey = getListUrlKey(listUrl);
+      const queue = normalizeCandidateQueue(state.assistCandidateQueue);
+      const cursor = queue.refillCursors[urlKey];
+      const currentMax = numericOrEmpty(currentMaxPage) || numericOrEmpty(state?.detectedMaxPages?.[urlKey]) || numericOrEmpty(cursor?.maxPage);
+      const page = adjustedCursorPage(cursor, currentMax);
+      if (!urlKey || !Number.isFinite(Number(page)) || Number(page) <= 0) return state;
+      return {
+        ...state,
+        detectedMaxPages: currentMax
+          ? { ...(state.detectedMaxPages || {}), [urlKey]: currentMax }
+          : state.detectedMaxPages,
+        lastVisitedPages: {
+          ...(state.lastVisitedPages || {}),
+          [urlKey]: Number(page)
+        },
+        assistCandidateQueue: queue
+      };
+    }
+
+    async function queuedCandidatesSnapshot(limit = PROCESS_LIMIT) {
+      const state = await getWatcherState();
+      const queue = normalizeCandidateQueue(state.assistCandidateQueue);
+      return queue.items.slice(0, Math.max(1, limit));
+    }
+
+    async function removeQueuedCandidate(candidate, reason) {
+      const key = queueCandidateKey(candidate);
+      if (!key) return;
+      await updateWatcherState(state => {
+        const queue = normalizeCandidateQueue(state.assistCandidateQueue);
+        queue.items = queue.items.filter(item => queueCandidateKey(item) !== key);
+        queue.seen[key] = {
+          ...(queue.seen[key] || {}),
+          consumedAt: Date.now(),
+          lastSeenAt: Date.now(),
+          status: reason || 'consumed',
+          page: candidate.page || queue.seen[key]?.page || '',
+          listUrl: candidate.listUrl || queue.seen[key]?.listUrl || '',
+          journalShortName: candidate.journalShortName || queue.seen[key]?.journalShortName || ''
+        };
+        queue.updatedAt = new Date().toISOString();
+        state.assistCandidateQueue = queue;
+      });
+    }
+
+    async function shouldSkipBackedOffPage(pagePick) {
+      const key = pageBackoffKey(pagePick);
+      if (!key) return false;
+      const state = await getWatcherState();
+      const queue = normalizeCandidateQueue(state.assistCandidateQueue);
+      const entry = queue.refillBackoff[key];
+      return !!entry && Number(entry.nextAfter || 0) > Date.now();
+    }
+
+    return {
+      enqueueParsedCandidates,
+      queuedCandidatesSnapshot,
+      removeQueuedCandidate,
+      shouldSkipBackedOffPage,
+      stateWithQueueRefillCursor
+    };
+  }
+
+  globalThis.AblesciWatcherCandidateQueueModule = {
+    createWatcherCandidateQueueApi
+  };
+})();

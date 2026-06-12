@@ -209,6 +209,11 @@ const TEXT_MAP = {
   "可选绝对路径。留空时 Native Helper 写入用户 Downloads 下的 ablesci-watcher-reports。": "Optional absolute path. If empty, Go Helper writes to ablesci-watcher-reports under user Downloads.",
   "Trace 级别": "Trace Level",
   "默认关闭。需要排查时再打开，避免长期占用本地存储。": "Off by default. Enable only for debugging to save local storage.",
+  "默认关闭。需要排查时再打开，避免长期占用本地存储；性能 Trace 可单独开启。": "Off by default. Enable only for debugging to save local storage; performance trace can be enabled separately.",
+  "性能记录": "Performance Recording",
+  "记录值守阶段耗时；本地 JSONL 会通过 Helper 写入日报目录下的 performance 文件夹。": "Record watcher stage timings. Local JSONL is written by Helper under the performance folder in the report directory.",
+  "写入 Trace": "Write Trace",
+  "本地 JSONL": "Local JSONL",
   "关闭": "Off",
   "简略": "Compact",
   "标准": "Normal",
@@ -216,6 +221,7 @@ const TEXT_MAP = {
 
   "本地记录维护": "Local Cache Cleanup",
   "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
+  "仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理 ScienceDirect 无权限期刊缓存。": "Clears local processed records, watcher logs, and traces; does not clear the ScienceDirect no-access journal cache.",
   "清除已处理": "Clear Processed Cache",
   "清除日志/Trace": "Clear Logs & Traces",
   "ScienceDirect 无权限期刊缓存": "ScienceDirect No-Access Journal Cache",
@@ -522,6 +528,8 @@ async function save(saveOptions = {}) {
   opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
   // PRIVATE_WATCHER_ONLY: Add compact trace level
   opts.watcherTraceLevel = ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
+  opts.watcherPerfTraceEnabled = opts.watcherPerfTraceEnabled === true;
+  opts.watcherPerfFileEnabled = opts.watcherPerfFileEnabled === true;
   opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
   opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
   opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);

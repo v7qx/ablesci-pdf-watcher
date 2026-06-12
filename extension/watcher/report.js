@@ -74,7 +74,15 @@
       'alarm_disabled': '禁用定时闹钟',
       'alarm_scheduled': '定时闹钟已排程',
       'assist_next_scheduled': '下一次应助已排程',
-      'sync_web_assist_count': '同步网页应助数'
+      'sync_web_assist_count': '同步网页应助数',
+      'perf_watcher_checkpoint': '性能检查点',
+      'perf_watcher_run': '值守总耗时',
+      'perf_list_parse': '列表解析耗时',
+      'perf_queue_refill': '队列补充耗时',
+      'perf_list_scan_page': '列表页扫描耗时',
+      'perf_detail_inspect': '详情页检查耗时',
+      'perf_candidate_handle': '候选处理耗时',
+      'perf_native_message': 'Native Helper 耗时'
     };
 
     const STEP_TRANSLATIONS_EN = {
@@ -112,7 +120,15 @@
       'alarm_disabled': 'Alarm Disabled',
       'alarm_scheduled': 'Alarm Scheduled',
       'assist_next_scheduled': 'Next Run Scheduled',
-      'sync_web_assist_count': 'Sync Web Assist Count'
+      'sync_web_assist_count': 'Sync Web Assist Count',
+      'perf_watcher_checkpoint': 'Performance Checkpoint',
+      'perf_watcher_run': 'Watcher Run Duration',
+      'perf_list_parse': 'List Parse Duration',
+      'perf_queue_refill': 'Queue Refill Duration',
+      'perf_list_scan_page': 'List Page Scan Duration',
+      'perf_detail_inspect': 'Detail Inspect Duration',
+      'perf_candidate_handle': 'Candidate Handle Duration',
+      'perf_native_message': 'Native Helper Duration'
     };
 
     const REASON_TRANSLATIONS = {
@@ -141,6 +157,8 @@
       'reported': '已被举报/处理过',
       'rejected': '已被拒绝',
       'no_access': '无订阅访问权限',
+      'journal_blocked_rule': '命中本地期刊规则',
+      'journal_blocked_rule_summary': '本轮命中本地期刊规则，已聚合显示',
       'between_candidates': '候选任务间延迟等待',
       'session_completed': '本轮会话已圆满完成',
       'quota_reset': '限额重置',
@@ -174,6 +192,8 @@
       'reported': 'Already reported/handled',
       'rejected': 'Already rejected',
       'no_access': 'No subscription access',
+      'journal_blocked_rule': 'Local journal rule matched',
+      'journal_blocked_rule_summary': 'Local journal rule matches grouped for this run',
       'between_candidates': 'Cooldown delay between candidates',
       'session_completed': 'Session completed successfully',
       'quota_reset': 'Quota reset',

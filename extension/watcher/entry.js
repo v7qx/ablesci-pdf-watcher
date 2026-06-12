@@ -132,7 +132,19 @@
           return true;
         }
         if (msg?.type === 'ablesciClearAutoWatcherState') {
-          chromeApi.storage.local.remove(autoWatcherStateKey).then(() => sendResponse({ ok: true }));
+          chromeApi.storage.local.get(autoWatcherStateKey)
+            .then(stored => {
+              const state = stored[autoWatcherStateKey] && typeof stored[autoWatcherStateKey] === 'object'
+                ? stored[autoWatcherStateKey]
+                : {};
+              delete state.processed;
+              delete state.doiFailures;
+              delete state.recentProcessed;
+              state._version = Number(state._version || 0) + 1;
+              state.processedClearedAt = new Date().toISOString();
+              return chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
+            })
+            .then(() => sendResponse({ ok: true }));
           return true;
         }
         if (msg?.type === 'ablesciClearAutoWatcherLogs') {

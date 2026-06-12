@@ -56,6 +56,8 @@
     watcherNotificationEnabled: false,
     // PRIVATE_WATCHER_ONLY: default trace level to off
     watcherTraceLevel: 'off',
+    watcherPerfTraceEnabled: false,
+    watcherPerfFileEnabled: false,
     watcherReportDir: '',
     watcherNoDownloadTimeoutMinutes: 1.5,
     watcherDownloadTimeoutMinutes: 4,
@@ -193,6 +195,8 @@
       watcherNotificationEnabled: opts.watcherNotificationEnabled !== false,
       // PRIVATE_WATCHER_ONLY: Add compact trace level
       watcherTraceLevel: ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
+      watcherPerfTraceEnabled: opts.watcherPerfTraceEnabled === true,
+      watcherPerfFileEnabled: opts.watcherPerfFileEnabled === true,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60),
       watcherDownloadTimeoutMinutes: clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120),

@@ -140,6 +140,8 @@ func run() error {
 		return handleOpenLocalStorageDir(req)
 	case "write_text_file":
 		return handleWriteTextFile(req)
+	case "append_text_file":
+		return handleAppendTextFile(req)
 	case "read_text_file":
 		return handleReadTextFile(req)
 	default:
@@ -514,6 +516,34 @@ func handleWriteTextFile(req Request) error {
 		return err
 	}
 	return writeResponse(Response{OK: true, Action: "write_text_file", Path: path, Filename: filename, Size: int64(len(req.Content))})
+}
+
+func handleAppendTextFile(req Request) error {
+	filename := sanitizeReportFilename(req.Filename)
+	if filename == "" {
+		return errors.New("missing report filename")
+	}
+	dir, err := reportDir(req.Dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, filename)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	n, err := file.WriteString(req.Content)
+	if err != nil {
+		return err
+	}
+	return writeResponse(Response{OK: true, Action: "append_text_file", Path: path, Filename: filename, Size: int64(n)})
 }
 
 func handleUploadOSS(req Request) error {

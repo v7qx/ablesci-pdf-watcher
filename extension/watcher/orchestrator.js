@@ -53,7 +53,12 @@
       recordAttemptFinish,
       writeDailyReports,
       flushWatcherLogs,
-      flushWatcherTrace
+      flushWatcherTrace,
+      enqueueParsedCandidates,
+      queuedCandidatesSnapshot,
+      removeQueuedCandidate,
+      shouldSkipBackedOffPage,
+      stateWithQueueRefillCursor
     } = config;
 
     async function syncActualAssistCount(state, opts) {
@@ -218,6 +223,267 @@
       }
     }
 
+    async function readBlacklistedIds(opts, trigger) {
+      const blacklistedIds = [];
+      if (!opts.watcherEnableBlacklist) return blacklistedIds;
+      try {
+        const res = await depsRef.sendNativeMessage(opts.nativeHostName, {
+          action: 'read_text_file',
+          path: opts.watcherBlacklistPath || ''
+        });
+        if (res && res.ok && res.body) {
+          const lines = res.body.split(/\r?\n/);
+          for (let line of lines) {
+            line = line.trim();
+            if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+            const commentIdx = line.indexOf('#') >= 0 ? line.indexOf('#') : (line.indexOf('//') >= 0 ? line.indexOf('//') : -1);
+            if (commentIdx >= 0) line = line.substring(0, commentIdx).trim();
+            const parts = line.split(/[\s,，]+/).map(p => p.trim()).filter(Boolean);
+            blacklistedIds.push(...parts);
+          }
+        }
+      } catch (err) {
+        console.error('[Blacklist] failed to read blacklist file in auto watcher:', err);
+        await appendWatcherTrace('blacklist_read_error_ignored', {
+          reason: 'blacklist_read_error_ignored',
+          trigger,
+          error: err.message || String(err)
+        });
+      }
+      return blacklistedIds;
+    }
+
+    async function appendJournalBlockedSummary(summary, trigger) {
+      if (!summary || summary.count <= 0) return;
+      const examples = Array.from(summary.examples || []).slice(0, 5);
+      const journals = Array.from(summary.journals || []).slice(0, 5);
+      await appendWatcherLog({
+        trigger,
+        status: 'skipped',
+        reason: 'journal_blocked_rule_summary',
+        journalName: `命中本地期刊规则 ${summary.count} 条；示例 ID: ${examples.join(', ') || '-'}；期刊: ${journals.join(', ') || '-'}`,
+        page: summary.page || ''
+      });
+    }
+
+    async function queueableCandidatesFromList(candidates, opts, trigger, pagePick) {
+      const stateForListFilter = await getWatcherState();
+      const queueable = [];
+      const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
+      for (const rawCandidate of Array.isArray(candidates) ? candidates : []) {
+        const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForListFilter);
+        const listAllowed = isListCandidateAllowed(candidate, opts, stateForListFilter);
+        if (listAllowed.ok) {
+          queueable.push(candidate);
+          continue;
+        }
+        await appendWatcherTrace('candidate_skip_list_filter', {
+          reason: listAllowed.reason,
+          reasonText: describeWatcherReason(listAllowed.reason),
+          trigger,
+          detailUrl: candidate.detailUrl,
+          assistId: candidate.assistId || '',
+          title: candidate.title || '',
+          journalShortName: candidate.journalShortName || '',
+          journalAccess: listAllowed.journalAccess || null,
+          source: 'list_page_refill'
+        });
+        if (listAllowed.reason === 'journal_blocked_rule') {
+          journalBlockedSummary.count += 1;
+          if (candidate.assistId) journalBlockedSummary.examples.add(candidate.assistId);
+          const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
+          if (shortName) journalBlockedSummary.journals.add(shortName);
+        }
+        await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
+      }
+      await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+      return queueable;
+    }
+
+    async function processCandidateBatch(candidates, context) {
+      const {
+        opts,
+        trigger,
+        blacklistedIds,
+        targetSessionSize,
+        getHandledCount,
+        setHandledCount,
+        pagePick = {},
+        fromQueue = false
+      } = context;
+      const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
+      let handledAny = false;
+
+      for (const rawCandidate of candidates) {
+        const stateForCandidate = await getWatcherState();
+        const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForCandidate);
+        const candidatePage = candidate.page || pagePick.pickedPage || '';
+        if (getHandledCount() >= targetSessionSize) break;
+        const listAllowed = isListCandidateAllowed(candidate, opts, stateForCandidate);
+        if (!listAllowed.ok) {
+          const candidateKey = getProcessedKey(candidate);
+          await appendWatcherTrace('candidate_skip_list_filter', {
+            reason: listAllowed.reason,
+            reasonText: describeWatcherReason(listAllowed.reason),
+            trigger,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            title: candidate.title || '',
+            journalShortName: candidate.journalShortName || '',
+            journalAccess: listAllowed.journalAccess || null,
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          });
+          if (candidateKey && listAllowed.reason === 'not_waiting') {
+            await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
+          }
+          if (listAllowed.reason === 'journal_blocked_rule') {
+            journalBlockedSummary.count += 1;
+            if (candidate.assistId) journalBlockedSummary.examples.add(candidate.assistId);
+            const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
+            if (shortName) journalBlockedSummary.journals.add(shortName);
+          }
+          await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
+          await removeQueuedCandidate(candidate, listAllowed.reason);
+          continue;
+        }
+        if (await wasRecentlyProcessed(candidate)) {
+          await appendWatcherTrace('candidate_skip_processed', {
+            reason: 'processed_before',
+            trigger,
+            detailUrl: candidate.detailUrl,
+            assistId: candidate.assistId || '',
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          });
+          await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
+          await removeQueuedCandidate(candidate, 'processed_before');
+          continue;
+        }
+
+        await appendWatcherTrace('candidate_detail_start', {
+          reason: 'candidate_passed_list_filter',
+          trigger,
+          detailUrl: candidate.detailUrl,
+          assistId: candidate.assistId || '',
+          title: candidate.title || '',
+          source: fromQueue ? 'candidate_queue' : 'list_page'
+        });
+        await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
+        const detailStartedAt = Date.now();
+        const detail = await inspectDetail(candidate);
+        await appendWatcherTrace('perf_detail_inspect', {
+          reason: detail.ok ? 'detail_inspect_ok' : 'detail_inspect_failed',
+          trigger,
+          durationMs: Date.now() - detailStartedAt,
+          assistId: candidate.assistId || '',
+          source: fromQueue ? 'candidate_queue' : 'list_page',
+          detailReason: detail.reason || ''
+        });
+        if (!detail.ok) {
+          await closeTabQuietly(detail.tabId, 'detail_extract_failed');
+          if (/502 Bad Gateway|科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|没有找到 csrf-token|504 Gateway Time|500 Internal Server/i.test(detail.reason)) {
+            await appendWatcherLog({
+              type: 'warning',
+              message: `🔄 ⚠️ 无法提取详情：科研通网站返回服务错误 (${detail.reason})，值守已暂停并等待下一次轮询。`
+            });
+            await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+            return { stop: true, result: { ok: false, reason: 'site_error' }, handledAny };
+          }
+          await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
+          await incrementDaily('failed', trigger);
+          await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: candidatePage });
+          await removeQueuedCandidate(candidate, detail.reason);
+          continue;
+        }
+
+        const payload = detail.payload;
+        payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
+        payload.page = candidatePage;
+        const detailAllowed = isDetailAllowedForWatcher(payload, opts, blacklistedIds);
+        const key = getProcessedKey(candidate, payload);
+        if (!detailAllowed.ok) {
+          await appendWatcherTrace('candidate_skip_detail_filter', {
+            reason: detailAllowed.reason,
+            reasonText: describeWatcherReason(detailAllowed.reason),
+            trigger,
+            detailUrl: candidate.detailUrl,
+            tabId: detail.tabId,
+            assistId: key,
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          });
+          await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
+          await updateProcessed(key, 'skipped', detailAllowed.reason);
+          await incrementDaily('skipped', trigger);
+          await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: candidatePage });
+          await removeQueuedCandidate(candidate, detailAllowed.reason);
+          continue;
+        }
+
+        const handleStartedAt = Date.now();
+        const handledResult = await handleAllowedPayload(candidate, payload, opts, detail.tabId, null, trigger);
+        await appendWatcherTrace('perf_candidate_handle', {
+          reason: 'candidate_handle_done',
+          trigger,
+          durationMs: Date.now() - handleStartedAt,
+          assistId: key,
+          handled: typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true,
+          stopRun: handledResult?.stopRun === true,
+          source: fromQueue ? 'candidate_queue' : 'list_page'
+        });
+        const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
+        if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
+        if (handled || handledResult?.stopRun === true) {
+          await removeQueuedCandidate(candidate, handledResult?.reason || 'handled');
+        }
+        if (handled) {
+          const nextHandledCount = getHandledCount() + 1;
+          setHandledCount(nextHandledCount);
+          handledAny = true;
+          await appendWatcherTrace('candidate_handled', {
+            reason: handledResult?.reason || 'handled',
+            trigger,
+            detailUrl: candidate.detailUrl,
+            tabId: detail.tabId,
+            assistId: key,
+            handledCount: nextHandledCount,
+            targetSessionSize,
+            stopRun: handledResult?.stopRun === true,
+            paused: handledResult?.paused === true,
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          });
+          if (handledResult?.stopRun === true) {
+            await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+            return { stop: true, result: { ok: false, reason: handledResult.reason || 'upload_failed_stop_run' }, handledAny };
+          }
+          if (nextHandledCount >= targetSessionSize || depsRef.hasActiveTask()) {
+            await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+            return { stop: true, result: { ok: true, reason: nextHandledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' }, handledAny };
+          }
+        }
+      }
+      await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+      return { stop: false, handledAny };
+    }
+
+    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef) {
+      const queued = await queuedCandidatesSnapshot();
+      if (queued.length <= 0) return { stop: false };
+      await appendWatcherTrace('candidate_queue_consume_start', {
+        reason: 'consume_existing_queue',
+        trigger,
+        queueSize: queued.length,
+        targetSessionSize
+      });
+      return await processCandidateBatch(queued, {
+        opts,
+        trigger,
+        blacklistedIds,
+        targetSessionSize,
+        getHandledCount: () => handledCountRef.value,
+        setHandledCount: value => { handledCountRef.value = value; },
+        fromQueue: true
+      });
+    }
+
     async function runAutoWatcherOnce(trigger = 'alarm') {
       if (stateRef.autoWatcherRunning) {
         await appendWatcherTrace('run_skip_already_running', { reason: 'already_running', trigger });
@@ -258,9 +524,22 @@
         alpha: ''
       };
       let manualScheduleSnapshot = null;
+      const runPerfStartedAt = Date.now();
+      let lastPerfAt = runPerfStartedAt;
       function finish(result) {
         runResult = result;
         return result;
+      }
+      async function appendPerfCheckpoint(name, extra = {}) {
+        const now = Date.now();
+        await appendWatcherTrace('perf_watcher_checkpoint', {
+          reason: name,
+          trigger,
+          elapsedMs: now - runPerfStartedAt,
+          deltaMs: now - lastPerfAt,
+          ...extra
+        });
+        lastPerfAt = now;
       }
       function snapshotScheduleFields(state = {}) {
         const keys = [
@@ -299,10 +578,16 @@
       }
       try {
         await appendWatcherTrace('run_start', { reason: 'watcher_triggered', trigger });
+        await appendPerfCheckpoint('run_start');
         const opts = normalizeOptions(await depsRef.getOptions());
         currentRunOpts = opts;
         await recordRunStart(trigger, opts);
+        await appendPerfCheckpoint('options_loaded', {
+          perfTraceEnabled: opts.watcherPerfTraceEnabled === true,
+          perfFileEnabled: opts.watcherPerfFileEnabled === true
+        });
         const initialState = await getWatcherState();
+        await appendPerfCheckpoint('initial_state_loaded');
         if (trigger === 'manual') {
           manualScheduleSnapshot = snapshotScheduleFields(initialState);
         }
@@ -411,6 +696,7 @@
         }
 
         let handledCount = 0;
+        const handledCountRef = { value: 0 };
         const sessionCap = sessionExecutionCap(opts, stateForTargets, false);
         const riskForSizing = riskSnapshot(stateForTargets, opts);
         let targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : Math.min(1, sessionCap);
@@ -453,6 +739,14 @@
         });
         if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero' });
 
+        const blacklistedIds = await readBlacklistedIds(opts, trigger);
+        await appendPerfCheckpoint('blacklist_loaded', { blacklistCount: blacklistedIds.length });
+        let queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef);
+        handledCount = handledCountRef.value;
+        await appendPerfCheckpoint('queue_consumed_before_refill', { handledCount, stop: queuedResult.stop === true });
+        if (queuedResult.stop) return finish(queuedResult.result);
+        if (handledCount >= targetSessionSize) return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
+
         const runListUrls = listUrlsForRun(opts);
         await appendWatcherTrace('run_source_order', {
           reason: 'randomized_publisher_order',
@@ -461,12 +755,31 @@
         });
         for (const listUrl of runListUrls) {
           let sequentialPageScanCount = 0;
-          const maxSequentialPageScans = trigger === 'manual' ? 1 : 5;
+          const maxSequentialPageScans = 5;
           while (sequentialPageScanCount < maxSequentialPageScans) {
-          const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateForTargets);
+          const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateWithQueueRefillCursor(listUrl, stateForTargets));
           let pickedListUrl = pagePick.pickedListUrl;
           const isSequentialPageScan = pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc';
+          if (await shouldSkipBackedOffPage(pagePick)) {
+            await appendWatcherTrace('list_scan_skip_backoff', {
+              reason: 'candidate_queue_page_backoff',
+              trigger,
+              configuredUrl: listUrl,
+              publisher: pagePick.publisher,
+              pageOrder: pagePick.pageOrder,
+              urlKey: pagePick.urlKey,
+              pickedPage: pagePick.pickedPage
+            });
+            if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+              stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+              sequentialPageScanCount += 1;
+              continue;
+            }
+            break;
+          }
           attempt.listScanStarted = true;
+          const listScanStartedAt = Date.now();
           attempt.pickedListUrl = pickedListUrl;
           attempt.pickedPage = pagePick.pickedPage;
           attempt.pageCurve = pagePick.pageCurve;
@@ -496,7 +809,17 @@
           stateForTargets.lastPickedListUrl = pickedListUrl;
           await saveWatcherStateSafe(stateForTargets);
           await incrementDaily('checked', trigger);
+          const parseStartedAt = Date.now();
           let parsed = await parseListUrl(pickedListUrl);
+          await appendWatcherTrace('perf_list_parse', {
+            reason: 'list_parse_done',
+            trigger,
+            durationMs: Date.now() - parseStartedAt,
+            pickedPage: pagePick.pickedPage,
+            urlKey: pagePick.urlKey,
+            parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+            maxPage: parsed?.listStats?.maxPage || ''
+          });
           if (parsed.isErrorPage) {
             await appendWatcherLog({
               type: 'warning',
@@ -541,7 +864,70 @@
             }
           }
 
-          const detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
+          let detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
+          if (
+            isSequentialPageScan &&
+            pagePick.urlKey &&
+            Number.isFinite(detectedMaxPage) &&
+            detectedMaxPage > 0
+          ) {
+            const adjustedState = stateWithQueueRefillCursor(listUrl, stateForTargets, detectedMaxPage);
+            const adjustedPagePick = randomizeAssistListUrlWithMeta(listUrl, adjustedState);
+            const adjustedPage = Number(adjustedPagePick.pickedPage);
+            const currentPickedPage = Number(pagePick.pickedPage);
+            if (
+              adjustedPagePick.urlKey === pagePick.urlKey &&
+              adjustedPagePick.pageOrder === pagePick.pageOrder &&
+              Number.isFinite(adjustedPage) &&
+              Number.isFinite(currentPickedPage) &&
+              adjustedPage > 0 &&
+              adjustedPage !== currentPickedPage
+            ) {
+              await appendWatcherTrace('list_scan_refill_cursor_rebased', {
+                reason: 'detected_max_page_changed',
+                trigger,
+                configuredUrl: listUrl,
+                previousListUrl: pickedListUrl,
+                previousPickedPage: pagePick.pickedPage,
+                adjustedPickedPage: adjustedPage,
+                detectedMaxPage,
+                urlKey: pagePick.urlKey
+              });
+              pickedListUrl = adjustedPagePick.pickedListUrl;
+              Object.assign(pagePick, adjustedPagePick);
+              attempt.pickedListUrl = pickedListUrl;
+              attempt.pickedPage = pagePick.pickedPage;
+              attempt.pageMax = pagePick.pageMax;
+              stateForTargets.lastPickedListUrl = pickedListUrl;
+              await saveWatcherStateSafe(stateForTargets);
+              await incrementDaily('checked', trigger);
+              const reparseStartedAt = Date.now();
+              parsed = await parseListUrl(pickedListUrl);
+              await appendWatcherTrace('perf_list_parse', {
+                reason: 'list_reparse_after_rebase_done',
+                trigger,
+                durationMs: Date.now() - reparseStartedAt,
+                pickedPage: pagePick.pickedPage,
+                urlKey: pagePick.urlKey,
+                parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+                maxPage: parsed?.listStats?.maxPage || ''
+              });
+              if (parsed.isErrorPage) {
+                await appendWatcherLog({
+                  type: 'warning',
+                  message: `🔄 ⚠️ 无法扫描列表：科研通网站返回服务错误 (${parsed.errorTitle || '502 Bad Gateway'})，值守已暂停并等待下一次轮询。`
+                });
+                return finish({ ok: false, reason: 'site_error' });
+              }
+              if (parsed.cfChallenge) {
+                await recordCfChallenge(opts, pickedListUrl, trigger);
+                return finish({ ok: false, reason: 'cf_challenge' });
+              }
+              await initCurrentPageData(pickedListUrl, pagePick, parsed);
+              detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
+            }
+          }
+
           const shouldRescanDetectedTail = pagePick.pageOrder === 'desc'
             && trigger !== 'manual'
             && pagePick.hasExplicitPageMax !== true
@@ -596,7 +982,17 @@
               stateForTargets.lastPickedListUrl = pickedListUrl;
               await saveWatcherStateSafe(stateForTargets);
               await incrementDaily('checked', trigger);
+              const tailParseStartedAt = Date.now();
               parsed = await parseListUrl(pickedListUrl);
+              await appendWatcherTrace('perf_list_parse', {
+                reason: 'tail_list_parse_done',
+                trigger,
+                durationMs: Date.now() - tailParseStartedAt,
+                pickedPage: pagePick.pickedPage,
+                urlKey: pagePick.urlKey,
+                parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+                maxPage: parsed?.listStats?.maxPage || ''
+              });
               if (parsed.cfChallenge) {
                 await recordCfChallenge(opts, pickedListUrl, trigger);
                 return finish({ ok: false, reason: 'cf_challenge' });
@@ -641,174 +1037,51 @@
           await resetCfChallengeStreak();
 
           const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
-          const handledBeforePage = handledCount;
+          const refillStartedAt = Date.now();
+          const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick);
+          await enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, queueableCandidates);
+          await appendWatcherTrace('perf_queue_refill', {
+            reason: 'queue_refill_done',
+            trigger,
+            durationMs: Date.now() - refillStartedAt,
+            pickedPage: pagePick.pickedPage,
+            parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+            orderedCount: candidates.length,
+            queueableCount: queueableCandidates.length
+          });
+          const latestStateAfterQueue = await getWatcherState();
+          stateForTargets.assistCandidateQueue = latestStateAfterQueue.assistCandidateQueue;
+          stateForTargets.detectedMaxPages = latestStateAfterQueue.detectedMaxPages || stateForTargets.detectedMaxPages;
+          if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+            stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+            stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+            await appendWatcherTrace('list_scan_page_cursor_advanced', {
+              reason: 'sequential_page_snapshot_enqueued_in_memory',
+              trigger,
+              listUrl: pickedListUrl,
+              configuredUrl: listUrl,
+              publisher: pagePick.publisher,
+              pageOrder: pagePick.pageOrder,
+              urlKey: pagePick.urlKey,
+              pickedPage: Number(pagePick.pickedPage),
+              currentPage: parsed?.listStats?.currentPage || '',
+              maxPage: parsed?.listStats?.maxPage || ''
+            });
+          }
           await appendWatcherTrace('list_scan_candidates', {
             reason: 'ordered_candidates',
             trigger,
             listUrl: pickedListUrl,
             parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-            orderedCount: candidates.length
+            orderedCount: candidates.length,
+            queueableCount: queueableCandidates.length
           });
 
-          let blacklistedIds = [];
-          if (opts.watcherEnableBlacklist) {
-            try {
-              const res = await depsRef.sendNativeMessage(opts.nativeHostName, {
-                action: 'read_text_file',
-                path: opts.watcherBlacklistPath || ''
-              });
-              if (res && res.ok && res.body) {
-                const lines = res.body.split(/\r?\n/);
-                for (let line of lines) {
-                  line = line.trim();
-                  if (!line || line.startsWith('#') || line.startsWith('//')) {
-                    continue;
-                  }
-                  const commentIdx = line.indexOf('#') >= 0 ? line.indexOf('#') : (line.indexOf('//') >= 0 ? line.indexOf('//') : -1);
-                  if (commentIdx >= 0) {
-                    line = line.substring(0, commentIdx).trim();
-                  }
-                  const parts = line.split(/[\s,，]+/).map(p => p.trim()).filter(Boolean);
-                  blacklistedIds.push(...parts);
-                }
-              }
-            } catch (err) {
-              console.error('[Blacklist] failed to read blacklist file in auto watcher:', err);
-              await appendWatcherTrace('blacklist_read_error_ignored', {
-                reason: 'blacklist_read_error_ignored',
-                trigger,
-                error: err.message || String(err)
-              });
-            }
-          }
-
-          for (const rawCandidate of candidates) {
-            const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForTargets);
-            if (handledCount >= targetSessionSize) return finish({ ok: true, reason: 'session_target_reached' });
-            const listAllowed = isListCandidateAllowed(candidate, opts, stateForTargets);
-            if (!listAllowed.ok) {
-              const candidateKey = getProcessedKey(candidate);
-              await appendWatcherTrace('candidate_skip_list_filter', {
-                reason: listAllowed.reason,
-                reasonText: describeWatcherReason(listAllowed.reason),
-                trigger,
-                detailUrl: candidate.detailUrl,
-                assistId: candidate.assistId || '',
-                title: candidate.title || '',
-                journalShortName: candidate.journalShortName || '',
-                journalAccess: listAllowed.journalAccess || null
-              });
-              if (candidateKey && listAllowed.reason === 'not_waiting') {
-                await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
-              }
-              if (listAllowed.reason === 'journal_blocked_rule') {
-                await appendWatcherLog({
-                  ...candidate,
-                  trigger,
-                  status: 'skipped',
-                  reason: listAllowed.reason,
-                  page: pagePick.pickedPage,
-                  journalShortName: listAllowed.journalAccess?.shortName || candidate.journalShortName || ''
-                });
-              }
-              await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
-              continue;
-            }
-            if (await wasRecentlyProcessed(candidate)) {
-              await appendWatcherTrace('candidate_skip_processed', {
-                reason: 'processed_before',
-                trigger,
-                detailUrl: candidate.detailUrl,
-                assistId: candidate.assistId || ''
-              });
-              await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
-              continue;
-            }
-
-            await appendWatcherTrace('candidate_detail_start', {
-              reason: 'candidate_passed_list_filter',
-              trigger,
-              detailUrl: candidate.detailUrl,
-              assistId: candidate.assistId || '',
-              title: candidate.title || ''
-            });
-            await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
-            const detail = await inspectDetail(candidate);
-            if (!detail.ok) {
-              await closeTabQuietly(detail.tabId, 'detail_extract_failed');
-              if (/502 Bad Gateway|科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|没有找到 csrf-token|504 Gateway Time|500 Internal Server/i.test(detail.reason)) {
-                await appendWatcherLog({
-                  type: 'warning',
-                  message: `🔄 ⚠️ 无法提取详情：科研通网站返回服务错误 (${detail.reason})，值守已暂停并等待下一次轮询。`
-                });
-                return finish({ ok: false, reason: 'site_error' });
-              }
-              await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
-              await incrementDaily('failed', trigger);
-              await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: pagePick.pickedPage });
-              continue;
-            }
-
-            const payload = detail.payload;
-            payload.journalShortName = payload.journalShortName || candidate.journalShortName || '';
-            payload.page = pagePick.pickedPage;
-            const detailAllowed = isDetailAllowedForWatcher(payload, opts, blacklistedIds);
-            const key = getProcessedKey(candidate, payload);
-            if (!detailAllowed.ok) {
-              await appendWatcherTrace('candidate_skip_detail_filter', { reason: detailAllowed.reason, reasonText: describeWatcherReason(detailAllowed.reason), trigger, detailUrl: candidate.detailUrl, tabId: detail.tabId, assistId: key });
-              await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
-              await updateProcessed(key, 'skipped', detailAllowed.reason);
-              await incrementDaily('skipped', trigger);
-              await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: pagePick.pickedPage });
-              continue;
-            }
-
-            const handledResult = await handleAllowedPayload(candidate, payload, opts, detail.tabId, null, trigger);
-            const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
-            if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
-            if (handled) {
-              handledCount += 1;
-              await appendWatcherTrace('candidate_handled', {
-                reason: handledResult?.reason || 'handled',
-                trigger,
-                detailUrl: candidate.detailUrl,
-                tabId: detail.tabId,
-                assistId: key,
-                handledCount,
-                targetSessionSize,
-                stopRun: handledResult?.stopRun === true,
-                paused: handledResult?.paused === true
-              });
-              if (handledResult?.stopRun === true) {
-                return finish({ ok: false, reason: handledResult.reason || 'upload_failed_stop_run' });
-              }
-              if (handledCount >= targetSessionSize || depsRef.hasActiveTask()) {
-                return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
-              }
-            }
-          }
-          if (isSequentialPageScan && handledCount === handledBeforePage) {
-            if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
-              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-              stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
-              await saveWatcherStateSafe(stateForTargets);
-              await appendWatcherTrace('list_scan_page_progress_saved', {
-                reason: 'sequential_page_exhausted_no_handled_candidate',
-                trigger,
-                listUrl: pickedListUrl,
-                configuredUrl: listUrl,
-                publisher: pagePick.publisher,
-                pageOrder: pagePick.pageOrder,
-                urlKey: pagePick.urlKey,
-                pickedPage: Number(pagePick.pickedPage),
-                currentPage: parsed?.listStats?.currentPage || '',
-                maxPage: parsed?.listStats?.maxPage || ''
-              });
-            }
+          if (isSequentialPageScan) {
             sequentialPageScanCount += 1;
             if (sequentialPageScanCount < maxSequentialPageScans) {
               await appendWatcherTrace('list_scan_continue_next_page', {
-                reason: 'sequential_page_no_handled_candidate',
+                reason: 'sequential_page_snapshot_enqueued',
                 trigger,
                 listUrl: pickedListUrl,
                 configuredUrl: listUrl,
@@ -822,10 +1095,22 @@
               continue;
             }
           }
+          await appendWatcherTrace('perf_list_scan_page', {
+            reason: 'list_scan_page_done',
+            trigger,
+            durationMs: Date.now() - listScanStartedAt,
+            pickedPage: pagePick.pickedPage,
+            parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+            queueableCount: queueableCandidates.length
+          });
           break;
           }
         }
 
+        queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef);
+        handledCount = handledCountRef.value;
+        await appendPerfCheckpoint('queue_consumed_after_refill', { handledCount, stop: queuedResult.stop === true });
+        if (queuedResult.stop) return finish(queuedResult.result);
         return finish({ ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' });
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
@@ -833,6 +1118,13 @@
         await appendWatcherLog({ trigger, status: 'failed', reason: err?.message || String(err), page: typeof pagePick !== 'undefined' ? pagePick?.pickedPage : '' });
         return finish({ ok: false, reason: err?.message || String(err) });
       } finally {
+        await appendWatcherTrace('perf_watcher_run', {
+          reason: 'run_finish',
+          trigger,
+          durationMs: Date.now() - runPerfStartedAt,
+          ok: runResult?.ok === true,
+          resultReason: runResult?.reason || 'unknown'
+        });
         await appendWatcherTrace('run_finish', { reason: 'finally', trigger });
         await recordRunFinish(trigger, runResult || { ok: false, reason: 'unknown' }).catch(() => {});
         if (trigger !== 'manual' && currentRunOpts) {

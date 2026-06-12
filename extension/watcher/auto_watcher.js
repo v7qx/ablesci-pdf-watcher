@@ -55,6 +55,7 @@
     todayKey,
     normalizeText,
     normalizeListUrls,
+    getListUrlKey,
     randomizeAssistListUrlWithMeta,
     randomizeAssistListUrl,
     listUrlsForRun
@@ -63,6 +64,7 @@
   const { createWatcherStateApi } = globalThis.AblesciWatcherStateModule;
   const { createWatcherReportApi } = globalThis.AblesciWatcherReportModule;
   const { createWatcherCandidateApi } = globalThis.AblesciWatcherCandidateModule;
+  const { createWatcherCandidateQueueApi } = globalThis.AblesciWatcherCandidateQueueModule;
   const { createWatcherRunnerApi } = globalThis.AblesciWatcherRunnerModule;
   const { createWatcherTargetApi } = globalThis.AblesciWatcherTargetModule;
   const { createWatcherMarketApi } = globalThis.AblesciWatcherMarketModule;
@@ -236,6 +238,18 @@
     watcherLogFlushBatchSize: WATCHER_LOG_FLUSH_BATCH_SIZE,
     badgeRefreshIntervalMs: BADGE_REFRESH_INTERVAL_MS
   });
+  const {
+    enqueueParsedCandidates,
+    queuedCandidatesSnapshot,
+    removeQueuedCandidate,
+    shouldSkipBackedOffPage,
+    stateWithQueueRefillCursor
+  } = createWatcherCandidateQueueApi({
+    getWatcherState,
+    updateWatcherState,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    getListUrlKey
+  });
 
   const {
     sanitizeReportUrl,
@@ -408,7 +422,12 @@
     recordAttemptFinish,
     writeDailyReports,
     flushWatcherLogs,
-    flushWatcherTrace
+    flushWatcherTrace,
+    enqueueParsedCandidates,
+    queuedCandidatesSnapshot,
+    removeQueuedCandidate,
+    shouldSkipBackedOffPage,
+    stateWithQueueRefillCursor
   });
 
   const { initAutoWatcher } = createWatcherEntryApi({

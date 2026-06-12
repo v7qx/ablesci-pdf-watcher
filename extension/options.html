@@ -530,7 +530,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>Trace 级别</strong>
-          <span>默认关闭。需要排查时再打开，避免长期占用本地存储。</span>
+          <span>默认关闭。需要排查时再打开，避免长期占用本地存储；性能 Trace 可单独开启。</span>
         </div>
         <div class="setting-control">
           <select id="watcherTraceLevel" aria-label="Trace 级别">
@@ -544,8 +544,24 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>性能记录</strong>
+          <span>记录值守阶段耗时；本地 JSONL 会通过 Helper 写入日报目录下的 performance 文件夹。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle-option" title="把 perf_* 性能事件写入插件 Trace">
+            <span class="toggle"><input id="watcherPerfTraceEnabled" type="checkbox"><span></span></span>
+            <span class="toggle-text">写入 Trace</span>
+          </label>
+          <label class="toggle-option" title="把 Native Helper 调用耗时写入本地 JSONL">
+            <span class="toggle"><input id="watcherPerfFileEnabled" type="checkbox"><span></span></span>
+            <span class="toggle-text">本地 JSONL</span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>本地记录维护</strong>
-          <span>仅清理本机保存的已处理记录、watcher 日志和 trace。</span>
+          <span>仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理 ScienceDirect 无权限期刊缓存。</span>
         </div>
         <div class="setting-control">
           <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>

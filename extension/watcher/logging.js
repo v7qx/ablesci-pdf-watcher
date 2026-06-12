@@ -33,6 +33,8 @@
     let watcherLogFlushPromise = Promise.resolve();
     let cachedTraceLevel = 'normal';
     let traceLevelLoadedAt = 0;
+    let cachedPerfTraceEnabled = false;
+    let perfOptionsLoadedAt = 0;
 
     function nextDisplaySchedule(state = {}, opts = null) {
       const unifiedAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
@@ -80,7 +82,7 @@
     }
 
     async function getTraceLevel() {
-      if (traceLevelLoadedAt > 0) return cachedTraceLevel;
+      if (traceLevelLoadedAt > 0 && Date.now() - traceLevelLoadedAt < 3000) return cachedTraceLevel;
       try {
         const stored = await chromeApi.storage.local.get('watcherTraceLevel');
         cachedTraceLevel = normalizeTraceLevel(stored.watcherTraceLevel);
@@ -89,11 +91,26 @@
       return cachedTraceLevel;
     }
 
+    async function isPerfTraceEnabled() {
+      if (perfOptionsLoadedAt > 0 && Date.now() - perfOptionsLoadedAt < 3000) return cachedPerfTraceEnabled;
+      try {
+        const opts = depsRef?.getOptions ? normalizeOptions(await depsRef.getOptions()) : {};
+        cachedPerfTraceEnabled = opts.watcherPerfTraceEnabled === true;
+        perfOptionsLoadedAt = Date.now();
+      } catch (_) {
+        cachedPerfTraceEnabled = false;
+      }
+      return cachedPerfTraceEnabled;
+    }
+
     async function appendWatcherTrace(step, details = {}) {
       try {
         const traceLevel = await getTraceLevel();
-        if (traceLevel === 'off') return;
-        if (traceLevel === 'compact') {
+        const isPerfStep = /^perf_/i.test(String(step || ''));
+        const perfTraceEnabled = isPerfStep ? await isPerfTraceEnabled() : false;
+        if (traceLevel === 'off' && !perfTraceEnabled) return;
+        const effectiveTraceLevel = traceLevel === 'off' && perfTraceEnabled ? 'normal' : traceLevel;
+        if (effectiveTraceLevel === 'compact') {
           const noisySteps = [
             'candidate_skip_list_filter',
             'candidate_skip_processed',
@@ -131,9 +148,9 @@
           trigger: normalizeText(details.trigger).slice(0, 80),
           sessionId: normalizeText(details.sessionId).slice(0, 80),
           tabId: details.tabId ?? '',
-          url: traceLevel === 'verbose' ? sanitizeReportUrl(url) : '',
+          url: effectiveTraceLevel === 'verbose' ? sanitizeReportUrl(url) : '',
           urlHostPath: depsRef?.urlHostPath ? depsRef.urlHostPath(url || '') : null,
-          details: sanitizeTraceValue(details, 0, traceLevel, {
+          details: sanitizeTraceValue(details, 0, effectiveTraceLevel, {
             normalizeText,
             sanitizeFullUrl: sanitizeReportUrl,
             urlHostPath: depsRef?.urlHostPath
