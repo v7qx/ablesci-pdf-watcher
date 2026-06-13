@@ -399,7 +399,10 @@
             action: 'write_text_file',
             dir: opts.watcherReportDir || '',
             filename,
-            content
+            content,
+            extra: {
+              perf_category: filename.endsWith('.csv') ? 'daily_report_csv' : 'daily_report_md'
+            }
           }, nativeReportTimeoutMs);
           return;
         } catch (err) {

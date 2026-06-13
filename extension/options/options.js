@@ -76,6 +76,7 @@ const TEXT_MAP = {
 
   "上传规则": "Upload Rules",
   "自动上传范围": "Auto Upload Range",
+  "超出范围时只下载和校验。最大值固定为 150 MB。": "Only download and verify when out of range. Maximum is fixed at 150 MB.",
   "超出范围时只下载和校验。最大值填 0 表示不限制。": "Only download and verify when out of range. 0 means unlimited.",
   "最小体积": "Min Size",
   "最小体积单位": "Min Size Unit",
@@ -112,6 +113,11 @@ const TEXT_MAP = {
   "异常 HTML 下载会保留记录，便于确认。": "Keep download history for failed HTML pages for debugging.",
   "求助链接当前窗口打开": "Open Links in Current Tab",
   "开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。": "Open helper list and recommended links in the current tab; Ctrl/Cmd/middle click still use browser default behavior.",
+  "ScienceDirect 打开模式": "ScienceDirect Tab Mode",
+  "可见模式最接近手动点击；半可见为后台静默 60 秒后切前台；静默模式不会主动切前台。": "Visible is closest to manual use; semi-visible waits in the background for 60 seconds before foregrounding; silent never foregrounds automatically.",
+  "立即可见": "Visible",
+  "后台后可见": "Semi-visible",
+  "一直后台": "Silent",
   "自动删除 HTML 错误页": "Auto Remove HTML Error Pages",
   "默认关闭。开启后，下载到 HTML/登录页/错误页时会尝试删除本地异常文件。": "Disabled by default. When enabled, attempts to delete local downloaded HTML/login/error pages.",
   "每日应助上限": "Daily Assist Limit",
@@ -470,13 +476,12 @@ async function load() {
     else if (id === 'watcherListUrls') node.value = normalizeWatcherListUrls(opts[id]).join('\n');
     else node.value = opts[id] ?? '';
   }
-
   if (activeLang === 'en') {
     translateTextNodes(document.body, TEXT_MAP);
     document.title = 'Ablesci PDF Watcher Settings';
     const descNode = el('watcherListUrlsDesc');
     if (descNode) {
-      descNode.innerHTML = 'One Ablesci list link per line. Add <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> for sequential reverse scanning.';
+      descNode.textContent = 'One Ablesci assist list URL per line. Add &page_min=1&page_max=5&order=desc for reverse sequential scanning.';
     }
   }
 
@@ -503,11 +508,14 @@ async function save(saveOptions = {}) {
   }
 
   opts.downloadMode = 'auto';
-  opts.scienceDirectTabMode = 'silent_then_visible';
-  opts.minAutoUploadMB = Number(opts.minAutoUploadMB);
+  opts.scienceDirectTabMode = ['visible', 'silent_then_visible', 'silent'].includes(opts.scienceDirectTabMode)
+    ? opts.scienceDirectTabMode
+    : DEFAULT_OPTIONS.scienceDirectTabMode;
+  const minVal = Number(opts.minAutoUploadMB);
+  opts.minAutoUploadMB = isNaN(minVal) || minVal < 0 ? DEFAULT_OPTIONS.minAutoUploadMB : minVal;
   opts.minAutoUploadUnit = normalizeSizeUnit(opts.minAutoUploadUnit);
-  opts.maxAutoUploadMB = Number(opts.maxAutoUploadMB);
-  opts.maxAutoUploadUnit = normalizeSizeUnit(opts.maxAutoUploadUnit);
+  opts.maxAutoUploadMB = 150;
+  opts.maxAutoUploadUnit = 'MB';
   opts.buttonLabel = normalizeButtonLabel(opts.buttonLabel);
   opts.buttonColor = normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor);
   opts.buttonTextColor = normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor);

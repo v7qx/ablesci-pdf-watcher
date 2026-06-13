@@ -10,6 +10,7 @@
   let loginPrompted = false;
   let challengePrompted = false;
   let skipBookChapter = true;
+  const pdfClickGuardMs = 30000;
 
   chrome.storage.local.get({ watcherSkipBookChapter: true }, function (res) {
     if (res && res.watcherSkipBookChapter !== undefined) {
@@ -43,9 +44,9 @@
     return /There was a problem providing the content you requested/i.test(text);
   }
 
-  function findNativePdfHref() {
+  function collectNativePdfLinks() {
     const currentPii = getScienceDirectPii();
-    const links = Array.from(document.querySelectorAll('a[href*="/pdfft"], a[href*="/pdf"]'))
+    return Array.from(document.querySelectorAll('a[href*="/pdfft"], a[href*="/pdf"]'))
       .map(a => {
         const href = common.decodeHtmlUrl(a.getAttribute('href') || a.href);
         const text = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
@@ -61,29 +62,31 @@
         return { a, href, sameArticle, looksLikeNativeViewPdf };
       })
       .filter(item => item.href && (!currentPii || item.sameArticle));
+  }
 
+  function findNativePdfLink() {
+    const links = collectNativePdfLinks();
     links.sort((left, right) => {
       if (left.looksLikeNativeViewPdf !== right.looksLikeNativeViewPdf) return left.looksLikeNativeViewPdf ? -1 : 1;
       return 0;
     });
+    return links[0] || null;
+  }
 
-    for (const item of links) {
-      const href = item.href;
-      if (!href) continue;
-      try {
-        return new URL(href, location.href).href;
-      } catch (_) {}
+  function findNativePdfHref() {
+    const item = findNativePdfLink();
+    if (!item?.href) return null;
+    try {
+      return new URL(item.href, location.href).href;
+    } catch (_) {
+      return null;
     }
-    return null;
   }
 
   function findViewPdfButton() {
-    const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'));
-    return candidates.find(el => {
-      if (!common.isVisible(el)) return false;
-      const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
-      return /\b(View PDF|Download PDF|PDF)\b/i.test(text);
-    }) || null;
+    const nativeLink = findNativePdfLink();
+    if (nativeLink?.a && common.isVisible(nativeLink.a)) return nativeLink.a;
+    return null;
   }
 
   function hasScienceDirectNoSubscriptionAccess() {
@@ -125,6 +128,34 @@
 
   function sendScienceDirectMessage(payload) {
     common.sendPublisherMessage('sciencedirect', payload);
+  }
+
+  function pdfClickGuardKey(pii) {
+    return 'ablesci_sd_pdf_click_guard:' + String(pii || 'unknown');
+  }
+
+  function readPdfClickGuard(pii) {
+    try {
+      return JSON.parse(sessionStorage.getItem(pdfClickGuardKey(pii)) || 'null') || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writePdfClickGuard(pii, data) {
+    try {
+      sessionStorage.setItem(pdfClickGuardKey(pii), JSON.stringify({
+        ...data,
+        at: Date.now()
+      }));
+    } catch (_) {}
+  }
+
+  function recentlyTriedPdfClick(pii, pdfUrl) {
+    const guard = readPdfClickGuard(pii);
+    if (!guard) return false;
+    if (Date.now() - Number(guard.at || 0) > pdfClickGuardMs) return false;
+    return !pdfUrl || !guard.pdfUrl || guard.pdfUrl === pdfUrl;
   }
 
   function stopObserver() {
@@ -172,6 +203,17 @@
     }
 
     if (isScienceDirectPdfLandingPage()) {
+      if (common.hasPublisherChallengePage()) {
+        if (!challengePrompted) {
+          challengePrompted = true;
+          sendScienceDirectMessage({
+            articleUrl: makeScienceDirectArticleUrl() || location.href,
+            publisherChallenge: true,
+            source: 'sciencedirect_pdf_challenge_page'
+          });
+        }
+        return;
+      }
       if (hasScienceDirectContentError()) {
         sendScienceDirectMessage({
           error: 'ScienceDirect 返回错误页：There was a problem providing the content you requested。(可能已触发高频风控封锁，请排查并暂停值守/暂停应助。)'
@@ -182,17 +224,6 @@
     }
 
     const articleUrl = makeScienceDirectArticleUrl() || location.href;
-    const nativePdfHref = findNativePdfHref();
-    if (nativePdfHref) {
-      viewPdfTriggered = true;
-      sendScienceDirectMessage({
-        articleUrl,
-        pdfUrl: nativePdfHref,
-        source: 'native_view_pdf_href'
-      });
-      stopObserver();
-      return;
-    }
     if (common.hasPublisherChallengePage()) {
       if (!challengePrompted) {
         challengePrompted = true;
@@ -202,6 +233,70 @@
           source: 'sciencedirect_challenge_page'
         });
       }
+      return;
+    }
+    if (viewPdfTriggered) return;
+    const button = findViewPdfButton();
+    if (button) {
+      viewPdfTriggered = true;
+      const buttonHref = button.getAttribute?.('href') || button.href || '';
+      const pdfUrl = common.normalizeUrl(buttonHref, location.href) || '';
+      if (recentlyTriedPdfClick(pii, pdfUrl)) {
+        sendScienceDirectMessage({
+          articleUrl,
+          pdfUrl,
+          publisherDiagnostic: true,
+          source: 'native_view_pdf_button_loop_guard',
+          diagnostics: { reason: 'recent_pdf_button_click_already_attempted' }
+        });
+        stopObserver();
+        return;
+      }
+      writePdfClickGuard(pii, { pdfUrl, source: 'native_view_pdf_button' });
+      sendScienceDirectMessage({
+        articleUrl,
+        clicked: true,
+        pdfUrl,
+        source: 'native_view_pdf_button'
+      });
+      setTimeout(() => {
+        const beforeUrl = location.href;
+        try {
+          if (button.tagName && String(button.tagName).toLowerCase() === 'a') {
+            button.setAttribute('target', '_self');
+          }
+        } catch (_) {}
+        try {
+          button.click();
+        } catch (_) {}
+        if (pdfUrl) {
+          setTimeout(() => {
+            if (location.href === beforeUrl) {
+              sendScienceDirectMessage({
+                articleUrl,
+                pdfUrl,
+                publisherDiagnostic: true,
+                source: 'native_view_pdf_button_location_fallback',
+                diagnostics: { reason: 'button_click_no_navigation' }
+              });
+              writePdfClickGuard(pii, { pdfUrl, source: 'native_view_pdf_button_location_fallback' });
+              location.assign(pdfUrl);
+            }
+          }, 1200);
+        }
+      }, 0);
+      stopObserver();
+      return;
+    }
+    const nativePdfHref = findNativePdfHref();
+    if (nativePdfHref) {
+      viewPdfTriggered = true;
+      sendScienceDirectMessage({
+        articleUrl,
+        pdfUrl: nativePdfHref,
+        source: 'native_view_pdf_href'
+      });
+      stopObserver();
       return;
     }
     if (hasScienceDirectNoSubscriptionAccess()) {
@@ -237,18 +332,6 @@
       return;
     }
 
-    if (viewPdfTriggered) return;
-    const button = findViewPdfButton();
-    if (button) {
-      viewPdfTriggered = true;
-      sendScienceDirectMessage({
-        articleUrl,
-        clicked: true,
-        source: 'native_view_pdf_button'
-      });
-      setTimeout(() => button.click(), 0);
-      stopObserver();
-    }
   }
 
   function waitForViewPdf(timeoutMs = 30000) {

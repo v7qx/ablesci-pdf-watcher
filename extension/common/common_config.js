@@ -13,7 +13,7 @@
     browserDownloadConfigured: false,
     minAutoUploadMB: 1,
     minAutoUploadUnit: 'MB',
-    maxAutoUploadMB: 99,
+    maxAutoUploadMB: 150,
     maxAutoUploadUnit: 'MB',
     debugDownloadOnly: false,
     autoRemoveHtmlDownloads: true,
@@ -156,14 +156,17 @@
       : value => (value === 'start' ? 'start' : 'end');
 
     const speedMode = ['adaptive', 'slow', 'normal', 'fast'].includes(raw.watcherSpeedMode) ? raw.watcherSpeedMode : 'adaptive';
-
     return {
       ...opts,
       nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),
       downloadMode: 'auto',
-      scienceDirectTabMode: 'silent_then_visible',
+      scienceDirectTabMode: ['visible', 'silent_then_visible', 'silent'].includes(opts.scienceDirectTabMode) ? opts.scienceDirectTabMode : DEFAULT_OPTIONS.scienceDirectTabMode,
+      minAutoUploadMB: isNaN(Number(opts.minAutoUploadMB)) || Number(opts.minAutoUploadMB) < 0
+        ? DEFAULT_OPTIONS.minAutoUploadMB
+        : Number(opts.minAutoUploadMB),
       minAutoUploadUnit: normalizeSizeUnit(opts.minAutoUploadUnit),
-      maxAutoUploadUnit: normalizeSizeUnit(opts.maxAutoUploadUnit),
+      maxAutoUploadMB: 150,
+      maxAutoUploadUnit: 'MB',
       diagnosticsEnabled: opts.diagnosticsEnabled === true,
       buttonLabel: normalizeButtonLabel(opts.buttonLabel),
       buttonColor: normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor),

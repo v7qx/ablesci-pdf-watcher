@@ -229,7 +229,10 @@
       try {
         const res = await depsRef.sendNativeMessage(opts.nativeHostName, {
           action: 'read_text_file',
-          path: opts.watcherBlacklistPath || ''
+          path: opts.watcherBlacklistPath || '',
+          extra: {
+            perf_category: opts.watcherBlacklistPath ? 'blacklist_custom' : 'blacklist_default'
+          }
         });
         if (res && res.ok && res.body) {
           const lines = res.body.split(/\r?\n/);
@@ -309,7 +312,9 @@
         getHandledCount,
         setHandledCount,
         pagePick = {},
-        fromQueue = false
+        fromQueue = false,
+        getLastHandledReason,
+        setLastHandledReason
       } = context;
       const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
       let handledAny = false;
@@ -437,6 +442,9 @@
         if (handled) {
           const nextHandledCount = getHandledCount() + 1;
           setHandledCount(nextHandledCount);
+          if (typeof setLastHandledReason === 'function') {
+            setLastHandledReason(handledResult?.reason || 'handled');
+          }
           handledAny = true;
           await appendWatcherTrace('candidate_handled', {
             reason: handledResult?.reason || 'handled',
@@ -456,7 +464,7 @@
           }
           if (nextHandledCount >= targetSessionSize || depsRef.hasActiveTask()) {
             await appendJournalBlockedSummary(journalBlockedSummary, trigger);
-            return { stop: true, result: { ok: true, reason: nextHandledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' }, handledAny };
+            return { stop: true, result: { ok: true, reason: nextHandledCount > 1 ? 'session_candidates_handled' : (handledResult?.reason || 'candidate_handled') }, handledAny };
           }
         }
       }
@@ -464,14 +472,16 @@
       return { stop: false, handledAny };
     }
 
-    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef) {
-      const queued = await queuedCandidatesSnapshot();
+    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, runListUrls = null) {
+      const queued = await queuedCandidatesSnapshot(undefined, runListUrls);
       if (queued.length <= 0) return { stop: false };
       await appendWatcherTrace('candidate_queue_consume_start', {
         reason: 'consume_existing_queue',
         trigger,
         queueSize: queued.length,
-        targetSessionSize
+        targetSessionSize,
+        configuredUrlCount: Array.isArray(runListUrls) ? runListUrls.length : '',
+        activeListUrls: Array.isArray(runListUrls) ? runListUrls : []
       });
       return await processCandidateBatch(queued, {
         opts,
@@ -480,6 +490,8 @@
         targetSessionSize,
         getHandledCount: () => handledCountRef.value,
         setHandledCount: value => { handledCountRef.value = value; },
+        getLastHandledReason: () => lastHandledReasonRef?.value || '',
+        setLastHandledReason: value => { if (lastHandledReasonRef) lastHandledReasonRef.value = value; },
         fromQueue: true
       });
     }
@@ -697,6 +709,7 @@
 
         let handledCount = 0;
         const handledCountRef = { value: 0 };
+        const lastHandledReasonRef = { value: '' };
         const sessionCap = sessionExecutionCap(opts, stateForTargets, false);
         const riskForSizing = riskSnapshot(stateForTargets, opts);
         let targetSessionSize = opts.watcherQuantSchedulerEnabled ? sessionSize(opts, stateForTargets) : Math.min(1, sessionCap);
@@ -739,23 +752,25 @@
         });
         if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero' });
 
+        const runListUrls = listUrlsForRun(opts);
+        const activeRunListUrls = runListUrls.length > 1 ? runListUrls.slice(0, 1) : runListUrls;
+        await appendWatcherTrace('run_source_order', {
+          reason: runListUrls.length > 1 ? 'random_single_list_url_selected' : 'single_list_url',
+          trigger,
+          listUrls: runListUrls,
+          activeListUrls: activeRunListUrls
+        });
         const blacklistedIds = await readBlacklistedIds(opts, trigger);
         await appendPerfCheckpoint('blacklist_loaded', { blacklistCount: blacklistedIds.length });
-        let queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef);
+        let queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, activeRunListUrls);
         handledCount = handledCountRef.value;
         await appendPerfCheckpoint('queue_consumed_before_refill', { handledCount, stop: queuedResult.stop === true });
         if (queuedResult.stop) return finish(queuedResult.result);
-        if (handledCount >= targetSessionSize) return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : 'candidate_handled' });
+        if (handledCount >= targetSessionSize) return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled') });
 
-        const runListUrls = listUrlsForRun(opts);
-        await appendWatcherTrace('run_source_order', {
-          reason: 'randomized_publisher_order',
-          trigger,
-          listUrls: runListUrls
-        });
-        for (const listUrl of runListUrls) {
+        for (const listUrl of activeRunListUrls) {
           let sequentialPageScanCount = 0;
-          const maxSequentialPageScans = 5;
+          const maxSequentialPageScans = runListUrls.length > 1 ? 1 : 5;
           while (sequentialPageScanCount < maxSequentialPageScans) {
           const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateWithQueueRefillCursor(listUrl, stateForTargets));
           let pickedListUrl = pagePick.pickedListUrl;
@@ -1107,11 +1122,11 @@
           }
         }
 
-        queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef);
+        queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, activeRunListUrls);
         handledCount = handledCountRef.value;
         await appendPerfCheckpoint('queue_consumed_after_refill', { handledCount, stop: queuedResult.stop === true });
         if (queuedResult.stop) return finish(queuedResult.result);
-        return finish({ ok: true, reason: handledCount ? 'session_candidates_handled' : 'no_candidate' });
+        return finish({ ok: true, reason: handledCount ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled')) : 'no_candidate' });
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
         await incrementDaily('failed', trigger);

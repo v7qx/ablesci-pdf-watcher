@@ -228,6 +228,9 @@
         name: 'ablesci-auto-watcher',
         async postMessage(msg) {
           if (!msg || !context) return;
+          if (Number.isInteger(context.detailTabId)) {
+            chromeApi.tabs.sendMessage(context.detailTabId, { type: 'ablesciAutoWatcherProgress', msg }).catch(() => {});
+          }
           if (msg.type === 'error') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             const paused = await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
@@ -446,7 +449,7 @@
       }
       if (sessionPort) {
         const result = await sessionPort.result;
-        if (!payload.downloadOnly) {
+        if (!payload.downloadOnly && !opts.debugDownloadOnly) {
           await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         }
         if (!result.ok) {

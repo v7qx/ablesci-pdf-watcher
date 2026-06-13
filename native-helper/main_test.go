@@ -69,12 +69,39 @@ func TestBuildCleanerArgsUsesToolboxContract(t *testing.T) {
 	want := []string{
 		"clean-access",
 		"--input", "paper.pdf",
+		"--patterns", "patterns.json",
 		"--replace",
 		"--backup-suffix", ".original.pdf",
 		"--summary-json", "summary.json",
-		"--patterns", "patterns.json",
 		"--engine", "qpdf",
 		"--timeout-seconds", "45",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %v want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q; all args=%v", i, args[i], want[i], args)
+		}
+	}
+}
+
+func TestBuildCleanerArgsOmitsDefaultToolboxEngine(t *testing.T) {
+	args := buildCleanerArgs(
+		filepath.Join("C:", "Tools", "zotero-pdf-toolbox.exe"),
+		"paper.pdf",
+		"summary.json",
+		map[string]string{"engine": "auto"},
+		false,
+		60,
+	)
+	want := []string{
+		"clean-access",
+		"--input", "paper.pdf",
+		"--replace",
+		"--no-backup",
+		"--summary-json", "summary.json",
+		"--timeout-seconds", "60",
 	}
 	if len(args) != len(want) {
 		t.Fatalf("args length mismatch: got %v want %v", args, want)
@@ -178,6 +205,22 @@ func TestHandleCopyPDFCreatesOriginalCopy(t *testing.T) {
 	}
 	if copiedInfo.Size() != info.Size() {
 		t.Fatalf("copy size mismatch: got %d want %d", copiedInfo.Size(), info.Size())
+	}
+}
+
+func TestCountPDFPages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pages.pdf")
+	body := `%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R >> endobj
+%%EOF`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+	if got := countPDFPages(path); got != 2 {
+		t.Fatalf("page count got %d want 2", got)
 	}
 }
 

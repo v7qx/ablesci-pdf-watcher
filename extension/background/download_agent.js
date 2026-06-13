@@ -271,6 +271,35 @@
           });
         }
 
+        function looksLikeChallengeUrl(url) {
+          return /(?:[?&]__cf_chl_|\/cdn-cgi\/challenge-platform\/|cf_chl_rt_tk|turnstile|captcha)/i.test(String(url || ''));
+        }
+
+        function traceCurrentTabBeforeTimeout(message) {
+          if (tabId === null) {
+            tracePublisherStep('publisher-no-download-timeout', { message });
+            return;
+          }
+          chromeApi.tabs.get(tabId).then(tab => {
+            tracePublisherStep('publisher-no-download-timeout', {
+              message,
+              currentUrl: traceUrl(tab?.url || ''),
+              tabTitle: String(tab?.title || '').slice(0, 160),
+              challengeUrl: looksLikeChallengeUrl(tab?.url || ''),
+              downloadArmed,
+              expectedHost,
+              sourceUrl: traceUrl(sourceUrlForMatching)
+            });
+          }).catch(() => {
+            tracePublisherStep('publisher-no-download-timeout', {
+              message,
+              downloadArmed,
+              expectedHost,
+              sourceUrl: traceUrl(sourceUrlForMatching)
+            });
+          });
+        }
+
         function cleanup(closeTab = true) {
           if (noDownloadTimer) clearTimeout(noDownloadTimer);
           if (poller) clearInterval(poller);
@@ -319,6 +348,7 @@
           if (noDownloadTimer) clearTimeout(noDownloadTimer);
           noDownloadTimeoutMessage = message || noDownloadTimeoutMessage;
           noDownloadTimer = setTimeout(() => {
+            traceCurrentTabBeforeTimeout(noDownloadTimeoutMessage);
             finishError(new Error(noDownloadTimeoutMessage));
           }, timeoutMs);
         }

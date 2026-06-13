@@ -136,9 +136,10 @@
       return base.slice(0, prefixLen) + '...' + base.slice(base.length - suffixLen) + ext;
     }
 
-    function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null, pii = '') {
+    function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null, pii = '', normalAction = '') {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
       const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
+
       post(port, 'done', `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
         html: `已仅下载并校验 PDF，未自动上传。<br>原因：${escapeHtml(reasonText)}<br>文件：${escapeHtml(stat?.filename || 'paper.pdf')}${cleanerHtml ? `<br>${cleanerHtml}` : ''}`,
         recomend: false,
@@ -147,16 +148,19 @@
         filename: stat?.filename,
         md5: stat?.md5,
         size: stat?.size,
+        pageCount: stat?.page_count,
+        normalAction,
         pii,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
     }
 
-    function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null, pii = '') {
+    function debugDownloadOnlyDone(port, stat, pdfCleanerResult = null, pii = '', normalAction = '') {
       const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
       const truncatedName = truncateFilename(name, 35);
       const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
       const message = `调试模式已开启，未自动上传。准备上传文件：${truncatedName}${cleanerText ? `；${cleanerText}` : ''}`;
+
       post(port, 'done', message, {
         html: escapeHtml(message),
         recomend: false,
@@ -166,6 +170,8 @@
         filename: stat?.filename,
         md5: stat?.md5,
         size: stat?.size,
+        pageCount: stat?.page_count,
+        normalAction,
         pii,
         ...doneExtraForCleaner(pdfCleanerResult)
       });
@@ -302,7 +308,10 @@
       try {
         stat = await sendNativeMessage(opts.nativeHostName, {
           action: 'stat_pdf',
-          path: item.filename
+          path: item.filename,
+          extra: {
+            cleaner_path: opts.pdfCleanerCliPath || ''
+          }
         }, nativeMessageLongTimeoutMs);
       } catch (err) {
         if (isNonPdfAccessPageError(err)) {
@@ -350,13 +359,18 @@
             pdfCleanerResult = pdfCleanerResultFromResponse(cleanRes, {
               originalPath: originalPdfPath
             });
+            const pageCountFromClean = Number(cleanRes.clean_page_count || 0);
             if (cleanRes.clean_status === 'cleaned') {
               post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
               post(port, 'progress', '正在重新校验去水印后的 PDF 并计算 MD5...');
               stat = await sendNativeMessage(opts.nativeHostName, {
                 action: 'stat_pdf',
-                path: cleanRes.path || stat.path || item.filename
+                path: cleanRes.path || stat.path || item.filename,
+                extra: {
+                  cleaner_path: opts.pdfCleanerCliPath || ''
+                }
               }, nativeMessageLongTimeoutMs);
+              if (pageCountFromClean > 0) stat.page_count = pageCountFromClean;
             } else if (cleanRes.clean_status === 'no_watermark') {
               post(port, 'progress', `${pdfCleanerSummaryText(pdfCleanerResult)}。`);
             } else {
@@ -390,6 +404,26 @@
       }
       const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.slice() : [];
       const size = Number(stat.size || 0);
+      const pageCount = Number(stat.page_count || 0);
+
+      const minAutoUploadBytes = sizeToBytes(opts.minAutoUploadMB, opts.minAutoUploadUnit, defaultOptions.minAutoUploadMB, defaultOptions.minAutoUploadUnit);
+      const maxAutoUploadBytes = sizeToBytes(opts.maxAutoUploadMB, opts.maxAutoUploadUnit, defaultOptions.maxAutoUploadMB, defaultOptions.maxAutoUploadUnit);
+
+      // 计算正常非调试、非仅下载模式下的上传决策，作为诊断与测试的参考展示
+      const normalRiskReasons = [];
+      if (Number.isFinite(pageCount) && pageCount > 0 && pageCount <= 1) {
+        normalRiskReasons.push(`PDF 只有 ${pageCount} 页，疑似封面页/错误页`);
+      }
+      if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
+        normalRiskReasons.push(`体积小于 ${formatConfiguredSize(opts.minAutoUploadMB || defaultOptions.minAutoUploadMB, opts.minAutoUploadUnit || defaultOptions.minAutoUploadUnit)}`);
+      }
+      if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
+        normalRiskReasons.push(`体积大于 ${formatConfiguredSize(opts.maxAutoUploadMB || defaultOptions.maxAutoUploadMB, opts.maxAutoUploadUnit || defaultOptions.maxAutoUploadUnit)}`);
+      }
+      const normalAction = normalRiskReasons.length > 0
+        ? `拦截并不上传（原因：${normalRiskReasons.join('；')}）`
+        : '将自动执行上传流程';
+
       if (opts.debugDownloadOnly) {
         await saveDiagnostic({
           ...diag,
@@ -405,28 +439,33 @@
           message: 'debug mode: download and validate only; upload-request and OSS upload skipped'
         });
         post(port, 'progress', `调试模式：准备上传文件 ${stat.filename}，${formatBytes(size)}，MD5=${stat.md5}；已跳过自动上传。`);
-        debugDownloadOnlyDone(port, stat, pdfCleanerResult, pii);
+        debugDownloadOnlyDone(port, stat, pdfCleanerResult, pii, normalAction);
         return;
       }
 
-      const minAutoUploadBytes = sizeToBytes(opts.minAutoUploadMB, opts.minAutoUploadUnit, defaultOptions.minAutoUploadMB, defaultOptions.minAutoUploadUnit);
-      const maxAutoUploadBytes = sizeToBytes(opts.maxAutoUploadMB, opts.maxAutoUploadUnit, defaultOptions.maxAutoUploadMB, defaultOptions.maxAutoUploadUnit);
+      if (Number.isFinite(pageCount) && pageCount > 0 && pageCount <= 1) {
+        downloadOnlyReasons.push(`PDF 只有 ${pageCount} 页，疑似封面页、错误页或异常下载，已改为仅下载。`);
+        await saveDiagnostic({ ...diag, stage: 'download-only-page-count', downloadItem: downloadMeta, fileSize: size, pageCount });
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii, normalAction);
+        return;
+      }
+
       if (size > 0 && minAutoUploadBytes > 0 && size < minAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件小于 ${formatConfiguredSize(opts.minAutoUploadMB || defaultOptions.minAutoUploadMB, opts.minAutoUploadUnit || defaultOptions.minAutoUploadUnit)}（当前 ${formatBytes(size)}），已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-small-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii, normalAction);
         return;
       }
       if (size > 0 && maxAutoUploadBytes > 0 && size > maxAutoUploadBytes) {
         downloadOnlyReasons.push(`PDF 文件大于 ${formatConfiguredSize(opts.maxAutoUploadMB || defaultOptions.maxAutoUploadMB, opts.maxAutoUploadUnit || defaultOptions.maxAutoUploadUnit)}（当前 ${formatBytes(size)}），超过自动上传范围，已改为仅下载。`);
         await saveDiagnostic({ ...diag, stage: 'download-only-large-file', downloadItem: downloadMeta, fileSize: size });
-        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii);
+        downloadOnlyDone(port, downloadOnlyReasons, stat, pdfCleanerResult, pii, normalAction);
         return;
       }
 
       if (payload.downloadOnly) {
         await saveDiagnostic({ ...diag, stage: 'download-only-risk', downloadItem: downloadMeta, fileSize: size, reasons: downloadOnlyReasons });
-        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat, pdfCleanerResult, pii);
+        downloadOnlyDone(port, downloadOnlyReasons.length ? downloadOnlyReasons : ['当前求助需要人工核对'], stat, pdfCleanerResult, pii, normalAction);
         return;
       }
 

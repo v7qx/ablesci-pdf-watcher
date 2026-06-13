@@ -42,6 +42,10 @@
       }
     }
 
+    function looksLikeChallengeUrl(url) {
+      return /(?:[?&]__cf_chl_|\/cdn-cgi\/challenge-platform\/|cf_chl_rt_tk|turnstile|captcha)/i.test(String(url || ''));
+    }
+
     function tracePublisherStep(pending, step, details = {}) {
       appendDiagnosticTrace?.(pending.payloadSummary || {}, {
         ...details,
@@ -70,6 +74,24 @@
       if (!pending) return;
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
+      if (changeInfo.url) {
+        tracePublisherStep(pending, 'publisher-tab-url-changed', {
+          publisher: pending.publisher || '',
+          articleUrl: pending.articleUrl || '',
+          pdfUrl: pending.lastNativePdfUrl || pending.pdfUrl || '',
+          currentUrl: shortUrl(url),
+          challengeUrl: looksLikeChallengeUrl(url)
+        });
+      }
+
+      if (looksLikeChallengeUrl(url)) {
+        tracePublisherStep(pending, 'publisher-tab-challenge-url-detected', {
+          publisher: pending.publisher || '',
+          articleUrl: pending.articleUrl || '',
+          pdfUrl: pending.lastNativePdfUrl || pending.pdfUrl || '',
+          currentUrl: shortUrl(url)
+        });
+      }
 
       if (changeInfo.status === 'complete') {
         const currentHost = hostnameOf(url);
@@ -239,9 +261,13 @@
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.clicked) {
-        pending.armDownloadCapture?.(pending.lastNativePdfUrl || pending.pdfUrl || pending.articleUrl || '');
-        post(pending.port, 'progress', '已在 ScienceDirect 页面触发原生 View PDF 按钮，继续监听浏览器下载。');
-        sendResponse({ ok: true, action: 'clicked_native_view_pdf' });
+        if (msg.pdfUrl) {
+          pending.lastNativePdfUrl = msg.pdfUrl;
+          if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(msg.pdfUrl);
+        }
+        pending.armDownloadCapture?.(msg.pdfUrl || pending.lastNativePdfUrl || pending.pdfUrl || pending.articleUrl || '');
+        post(pending.port, 'progress', '已尝试在 ScienceDirect 页面触发原生 View PDF 按钮，继续监听浏览器下载。');
+        sendResponse({ ok: true, action: 'clicked_native_view_pdf', pdfUrl: msg.pdfUrl || '' });
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.pdfUrl) {

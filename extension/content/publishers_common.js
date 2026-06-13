@@ -113,7 +113,7 @@
     const titleLooksLikeChallenge = /^(Just a moment|Attention Required|Security Check|Cloudflare)/i.test(title) ||
       /验证你是真人|请完成验证|安全检查/i.test(title);
     const bodyLooksLikeChallenge =
-      /verify you are human|complete the security check|checking your browser before accessing|enable javascript and cookies to continue|ray id|cf[- ]?challenge|cf[- ]?turnstile/i.test(shortText) ||
+      /verify you are human|are you a robot|confirm you are a human|captcha challenge|complete the security check|checking your browser before accessing|enable javascript and cookies to continue|ray id|cf[- ]?challenge|cf[- ]?turnstile/i.test(shortText) ||
       /验证你是真人|请完成验证|安全检查|正在检查您的浏览器/i.test(shortText);
     return hasChallengeDom || titleLooksLikeChallenge || bodyLooksLikeChallenge;
   }

@@ -125,6 +125,38 @@
       return Math.min(upper, Math.max(lower, Math.round(adjusted)));
     }
 
+    function configuredUrlKeys(listUrls = []) {
+      if (typeof getListUrlKey !== 'function') return new Set();
+      const keys = new Set();
+      for (const url of (Array.isArray(listUrls) ? listUrls : [])) {
+        const key = getListUrlKey(url);
+        if (key) keys.add(key);
+        const legacyKey = legacyConfiguredUrlKey(url);
+        if (legacyKey) keys.add(legacyKey);
+      }
+      return keys;
+    }
+
+    function legacyConfiguredUrlKey(url) {
+      try {
+        const u = new URL(url);
+        u.searchParams.delete('page');
+        u.searchParams.delete('order');
+        u.searchParams.delete('page_order');
+        u.searchParams.delete('page_min');
+        u.searchParams.delete('page_max');
+        return u.toString();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function candidateUrlKey(candidate = {}) {
+      if (candidate.urlKey) return String(candidate.urlKey);
+      if (candidate.listUrl && typeof getListUrlKey === 'function') return getListUrlKey(candidate.listUrl);
+      return '';
+    }
+
     async function enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, candidatesOverride = null) {
       const parsedCandidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
       const rawCandidates = Array.isArray(candidatesOverride) ? candidatesOverride : parsedCandidates;
@@ -194,7 +226,9 @@
             state.detectedMaxPages[pagePick.urlKey] = parsedMaxPage;
           }
         }
-        queue.items = queue.items.slice(0, MAX_ITEMS);
+        queue.items = queue.items
+          .sort((a, b) => Number(b?.lastSeenAt || b?.enqueuedAt || 0) - Number(a?.lastSeenAt || a?.enqueuedAt || 0))
+          .slice(0, MAX_ITEMS);
         queue.updatedAt = new Date().toISOString();
         result.queueSize = queue.items.length;
         state.assistCandidateQueue = queue;
@@ -234,10 +268,14 @@
       };
     }
 
-    async function queuedCandidatesSnapshot(limit = PROCESS_LIMIT) {
+    async function queuedCandidatesSnapshot(limit = PROCESS_LIMIT, listUrls = null) {
       const state = await getWatcherState();
       const queue = normalizeCandidateQueue(state.assistCandidateQueue);
-      return queue.items.slice(0, Math.max(1, limit));
+      const allowedKeys = configuredUrlKeys(listUrls);
+      const items = allowedKeys.size > 0
+        ? queue.items.filter(item => allowedKeys.has(candidateUrlKey(item)))
+        : queue.items;
+      return items.slice(0, Math.max(1, limit));
     }
 
     async function removeQueuedCandidate(candidate, reason) {

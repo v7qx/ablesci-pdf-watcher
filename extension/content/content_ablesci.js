@@ -568,7 +568,7 @@
     const label = normalizeText(raw);
     if (!label) return { type: '', label: '' };
     if (/补充材料|supporting information|supplement/i.test(label)) return { type: 'supplement', label };
-    if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(label)) return { type: 'book_chapter', label };
+    if (/书籍|图书|book|chapter/i.test(label)) return { type: 'book_chapter', label };
     if (/专利、报告等|专利|patent|report/i.test(label)) return { type: 'patent_report', label };
     return { type: '', label };
   }
@@ -792,19 +792,54 @@
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg?.type !== 'ablesciExtractDetailPayload') return;
-    try {
-      sendResponse({
-        ok: true,
-        payload: buildPayloadFromCurrentPage()
-      });
-    } catch (err) {
-      sendResponse({
-        ok: false,
-        error: err?.message || String(err)
-      });
+    if (msg?.type === 'ablesciExtractDetailPayload') {
+      try {
+        sendResponse({
+          ok: true,
+          payload: buildPayloadFromCurrentPage()
+        });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err)
+        });
+      }
+      return true;
     }
-    return true;
+    if (msg?.type === 'ablesciAutoWatcherProgress') {
+      const innerMsg = msg.msg;
+      if (!innerMsg) return;
+      const isEn = getActiveLanguage() === 'en';
+      if (innerMsg.type === 'progress') {
+        setStatus(translateBackgroundMessage(innerMsg.message), 'busy');
+      } else if (innerMsg.type === 'done') {
+        const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
+        const completionMsg = (!innerMsg.downloadOnly && !pageOptions.smartRecommendPush && !innerMsg.pdfCleanerResult)
+          ? { ...innerMsg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
+          : innerMsg;
+
+        completionMsg.message = translateBackgroundMessage(completionMsg.message);
+        if (completionMsg.html) {
+          completionMsg.html = translateBackgroundMessage(completionMsg.html);
+        }
+
+        if (completionMsg.blocked) {
+          const skipLabel = isEn ? 'Skipped' : '已跳过';
+          setStatus(skipLabel, 'blocked', {
+            title: completionMsg.message || (isEn ? 'Current task skipped' : '当前任务已跳过'),
+            logText: ''
+          });
+        } else {
+          setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
+        }
+        if (!innerMsg.downloadOnly) {
+          showSiteLikeCompletion(completionMsg);
+        }
+      } else if (innerMsg.type === 'error') {
+        const defaultError = isEn ? 'Upload Failed' : '上传失败';
+        setStatus(translateBackgroundMessage(innerMsg.message) || defaultError, 'err');
+      }
+    }
   });
 
   loadUiOptions().then(opts => {

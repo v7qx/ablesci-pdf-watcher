@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -66,6 +67,7 @@ type Response struct {
 	Path               string   `json:"path,omitempty"`
 	Filename           string   `json:"filename,omitempty"`
 	Size               int64    `json:"size,omitempty"`
+	PageCount          int      `json:"page_count,omitempty"`
 	MD5                string   `json:"md5,omitempty"`
 	IsPDF              bool     `json:"is_pdf,omitempty"`
 	Status             int      `json:"status,omitempty"`
@@ -78,6 +80,7 @@ type Response struct {
 	CleanRules         []string `json:"clean_rules,omitempty"`
 	CleanEngine        string   `json:"clean_engine,omitempty"`
 	CleanElapsedMs     int64    `json:"clean_elapsed_ms,omitempty"`
+	CleanPageCount     int      `json:"clean_page_count,omitempty"`
 	CleanBackupPath    string   `json:"clean_backup_path,omitempty"`
 	CleanBackupCreated bool     `json:"clean_backup_created,omitempty"`
 }
@@ -207,8 +210,31 @@ func handleStatPDF(req Request) error {
 			return err
 		}
 	}
+
+	cleanerPath := req.Extra["cleaner_path"]
+	if cleanerPath == "" {
+		if exePath, err := os.Executable(); err == nil {
+			dir := filepath.Dir(exePath)
+			if p, err := cleanCleanerExecutablePath(filepath.Join(dir, "zotero-pdf-toolbox.exe")); err == nil {
+				cleanerPath = p
+			} else if p, err := cleanCleanerExecutablePath(filepath.Join(dir, "zotero-access-cleaner.exe")); err == nil {
+				cleanerPath = p
+			}
+		}
+	} else {
+		cleanerPath, _ = cleanCleanerExecutablePath(cleanerPath)
+	}
+
+	pageCount := 0
+	if cleanerPath != "" {
+		pageCount = countPagesWithToolbox(cleanerPath, path)
+	}
+	if pageCount == 0 {
+		pageCount = countPDFPages(path)
+	}
+
 	return writeResponse(Response{
-		OK: true, Action: "stat_pdf", Path: path, Filename: info.Name(), Size: info.Size(), MD5: md5sum, IsPDF: true,
+		OK: true, Action: "stat_pdf", Path: path, Filename: info.Name(), Size: info.Size(), PageCount: pageCount, MD5: md5sum, IsPDF: true,
 	})
 }
 
@@ -806,6 +832,75 @@ func inspectPDF(path string) (os.FileInfo, string, error) {
 	return info, hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func countPDFPages(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return 0
+	}
+	re := regexp.MustCompile(`/Type\s*/Page\b`)
+	return len(re.FindAll(data, -1))
+}
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
+
+func countPagesWithToolbox(cleanerPath, pdfPath string) int {
+	tmpFile, err := os.CreateTemp("", "cleaner_summary_*.json")
+	if err != nil {
+		return 0
+	}
+	summaryPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(summaryPath)
+
+	var args []string
+	base := filepath.Base(cleanerPath)
+	if strings.EqualFold(base, "zotero-pdf-toolbox.exe") {
+		args = []string{
+			"clean-access",
+			"--input", pdfPath,
+			"--summary-json", summaryPath,
+			"--timeout-seconds", "10",
+		}
+	} else {
+		args = []string{
+			"-input", pdfPath,
+			"-summary-json", summaryPath,
+			"-timeout-seconds", "10",
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cleanerPath, args...)
+	cmd.Env = envWithCleanerToolDirs(cleanerPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
+	}
+
+	if err := cmd.Run(); err != nil {
+		return 0
+	}
+
+	summaryData, err := os.ReadFile(summaryPath)
+	if err != nil {
+		return 0
+	}
+
+	type Summary struct {
+		PageCount int `json:"page_count"`
+	}
+	var summary Summary
+	if err := json.Unmarshal(summaryData, &summary); err == nil {
+		return summary.PageCount
+	}
+	return 0
+}
+
 func addPDFExtension(src string) (string, error) {
 	ext := filepath.Ext(src)
 	base := strings.TrimSuffix(src, ext)
@@ -1064,6 +1159,7 @@ func handleCleanPDF(req Request) error {
 			EngineVersion string   `json:"engine_version"`
 			RulesVersion  string   `json:"rules_version"`
 			Matched       int      `json:"matched"`
+			PageCount     int      `json:"page_count"`
 			RemovedCalls  int      `json:"removed_calls"`
 			Rules         []string `json:"rules"`
 			ElapsedMs     int64    `json:"elapsed_ms"`
@@ -1093,6 +1189,7 @@ func handleCleanPDF(req Request) error {
 				CleanRules:         summary.Rules,
 				CleanEngine:        summary.Engine,
 				CleanElapsedMs:     summary.ElapsedMs,
+				CleanPageCount:     summary.PageCount,
 				CleanBackupPath:    summary.BackupPath,
 				CleanBackupCreated: summary.BackupCreated,
 				Error:              summary.Error,
@@ -1141,6 +1238,8 @@ func envWithCleanerToolDirs(cleanerPath string) []string {
 		filepath.Join(cleanerDir, "bin"),
 		filepath.Join(cleanerDir, "qpdf"),
 		filepath.Join(cleanerDir, "qpdf", "bin"),
+		filepath.Join(cleanerDir, "tools", "poppler", "poppler-24.08.0", "Library", "bin"),
+		filepath.Join(cleanerDir, "tools", "mupdf", "mupdf-1.24.0-windows"),
 	}
 	pathValue := strings.Join(extraDirs, string(os.PathListSeparator))
 	pathKey := "PATH"
@@ -1204,18 +1303,20 @@ func buildCleanerArgs(cleanerPath, inputPath, summaryPath string, extra map[stri
 		args := []string{
 			"clean-access",
 			"--input", inputPath,
-			"--replace",
 		}
+		if patternsPath != "" {
+			args = append(args, "--patterns", patternsPath)
+		}
+		args = append(args,
+			"--replace",
+		)
 		if preserveOriginal {
 			args = append(args, "--backup-suffix", ".original.pdf")
 		} else {
 			args = append(args, "--no-backup")
 		}
 		args = append(args, "--summary-json", summaryPath)
-		if patternsPath != "" {
-			args = append(args, "--patterns", patternsPath)
-		}
-		if engine != "" {
+		if engine != "" && !strings.EqualFold(engine, "auto") {
 			args = append(args, "--engine", engine)
 		}
 		args = append(args, "--timeout-seconds", timeoutArg)

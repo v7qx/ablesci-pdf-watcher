@@ -436,6 +436,8 @@
             if (msg.filename || msg.md5) {
               const displaySize = msg.size ? ` (${~~(msg.size / 1024)} KB)` : '';
               appendSimulateLog('done', `📄 文件名称: ${msg.filename || '-'}${displaySize}`);
+              const pageCountText = msg.pageCount !== undefined && msg.pageCount > 0 ? `${msg.pageCount} 页` : '无法识别或 0 页';
+              appendSimulateLog('done', `📄 文件页数: ${pageCountText}`);
               appendSimulateLog('done', `🔑 文件 MD5: ${msg.md5 || '-'}`);
             }
 
@@ -443,10 +445,16 @@
               appendSimulateLog('done', `🧬 文献 PII: ${msg.pii}`);
             }
 
+            if (msg.normalAction) {
+              appendSimulateLog('done', `📢 正常应助决策: ${msg.normalAction}`);
+            }
+
             if (msg.pdfCleanerResult) {
               const res = msg.pdfCleanerResult;
-              const clText = res.clean_status === 'cleaned' ? '去水印成功' : (res.clean_status === 'no_watermark' ? '无水印' : '去水印失败');
-              appendSimulateLog('done', `✨ 水印清洗: ${clText} (删除对象 ${res.removed_objects || 0} 个, 删除文字 ${res.removed_texts || 0} 处)`);
+              const status = res.status || res.clean_status;
+              const clText = status === 'cleaned' ? '去水印成功' : (status === 'no_watermark' ? '无水印' : '去水印失败');
+              const matched = res.matched !== undefined ? res.matched : (res.removed_objects || 0);
+              appendSimulateLog('done', `✨ 水印清洗: ${clText} (清除特征 ${matched} 处)`);
             }
 
             if (msg.extra?.html) {

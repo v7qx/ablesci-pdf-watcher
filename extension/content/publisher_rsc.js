@@ -63,6 +63,10 @@
     common.sendPublisherMessage('rsc', payload);
   }
 
+  function hasRscAccessDeniedPage() {
+    return !!document.querySelector('.paywall__body, .paywall__container, .paywall__title, a[href*="/buyarticlepdf/"], .btn-icon--trolley');
+  }
+
   function stopObserver() {
     if (observer) {
       observer.disconnect();
@@ -90,6 +94,17 @@
           source: 'rsc_challenge_page'
         });
       }
+      return;
+    }
+    if (hasRscAccessDeniedPage()) {
+      pdfTriggered = true;
+      sendRscMessage({
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'RSC 明确返回无正文订阅权限（Paywall）。',
+        source: 'rsc_paywall_page'
+      });
+      stopObserver();
       return;
     }
     const found = findRscArticlePdfLink();

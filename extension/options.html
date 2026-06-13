@@ -44,24 +44,19 @@
       <summary>上传规则</summary>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>自动上传范围</strong>
-          <span>超出范围时只下载和校验。最大值填 0 表示不限制。</span>
+          <strong>最小自动上传体积</strong>
+          <span>体积低于此值时仅下载和校验。最大值固定为 150 MB。</span>
         </div>
-        <div class="setting-control setting-control-wide">
-          <div class="range">
+        <div class="setting-control">
+          <div class="input-group">
             <input id="minAutoUploadMB" type="number" min="0" step="0.1" value="1" aria-label="最小体积">
             <select id="minAutoUploadUnit" aria-label="最小体积单位">
               <option value="KB">KB</option>
               <option value="MB">MB</option>
             </select>
-            <span>到</span>
-            <input id="maxAutoUploadMB" type="number" min="0" step="0.1" value="99" aria-label="最大体积">
-            <select id="maxAutoUploadUnit" aria-label="最大体积单位">
-              <option value="KB">KB</option>
-              <option value="MB">MB</option>
-            </select>
-            <span>0 为不限</span>
           </div>
+          <input id="maxAutoUploadMB" type="hidden" value="150">
+          <input id="maxAutoUploadUnit" type="hidden" value="MB">
         </div>
       </div>
       <div class="setting-row">
@@ -162,6 +157,19 @@
             <input id="openAssistLinksInCurrentTab" type="checkbox">
             <span></span>
           </label>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>ScienceDirect 打开模式</strong>
+          <span>可见模式最接近手动点击；半可见为后台静默 60 秒后切前台；静默模式不会主动切前台。</span>
+        </div>
+        <div class="setting-control">
+          <select id="scienceDirectTabMode">
+            <option value="visible">立即可见</option>
+            <option value="silent_then_visible">后台后可见</option>
+            <option value="silent">一直后台</option>
+          </select>
         </div>
       </div>
       <div class="setting-row">

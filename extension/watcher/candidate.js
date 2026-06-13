@@ -34,7 +34,7 @@
       const value = normalizeText(text);
       if (!value) return '';
       if (/补充材料|supporting information|supplement/i.test(value)) return 'supplement';
-      if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(value)) return 'book_chapter';
+      if (/书籍|图书|book|chapter/i.test(value)) return 'book_chapter';
       if (/专利、报告等|专利|patent|report/i.test(value)) return 'patent_report';
       return '';
     }
@@ -232,7 +232,7 @@
         const textValue = normalizeTextLocal(value);
         if (!textValue) return '';
         if (/补充材料|supporting information|supplement/i.test(textValue)) return 'supplement';
-        if (/书籍（章节）|书籍章节|book chapter|chapter/i.test(textValue)) return 'book_chapter';
+        if (/书籍|图书|book|chapter/i.test(textValue)) return 'book_chapter';
         if (/专利、报告等|专利|patent|report/i.test(textValue)) return 'patent_report';
         return '';
       }

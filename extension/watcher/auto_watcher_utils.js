@@ -128,10 +128,6 @@
     try {
       const u = new URL(url);
       u.searchParams.delete('page');
-      u.searchParams.delete('order');
-      u.searchParams.delete('page_order');
-      u.searchParams.delete('page_min');
-      u.searchParams.delete('page_max');
       return u.toString();
     } catch (_) {
       return url;
