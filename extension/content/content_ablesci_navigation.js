@@ -45,6 +45,13 @@
       .trim();
   }
 
+  function cleanJournalBadgeTitle(value) {
+    return String(value || '')
+      .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function isScienceDirectListPage() {
     try {
       const url = new URL(location.href);
@@ -117,7 +124,8 @@
     row.querySelectorAll('.ablesci-journal-no-access-badge').forEach(badge => {
       badge.classList.remove('ablesci-journal-no-access-badge');
       if (badge.dataset.ablesciOriginalTitle !== undefined) {
-        if (badge.dataset.ablesciOriginalTitle) badge.setAttribute('title', badge.dataset.ablesciOriginalTitle);
+        const originalTitle = cleanJournalBadgeTitle(badge.dataset.ablesciOriginalTitle);
+        if (originalTitle) badge.setAttribute('title', originalTitle);
         else badge.removeAttribute('title');
         delete badge.dataset.ablesciOriginalTitle;
       }
@@ -135,7 +143,7 @@
     const rows = Array.from(document.querySelectorAll('ul.assist-list > li, .assist-list li'));
     rows.forEach(row => {
       const badge = journalBadgeFromRow(row);
-      const key = normalizeJournalKey(badge?.getAttribute('title') || badge?.textContent || '');
+      const key = normalizeJournalKey(cleanJournalBadgeTitle(badge?.getAttribute('title') || badge?.textContent || ''));
       const entry = key ? journalAccessCache.get(key) : null;
       if (!badge || !entry) {
         clearJournalAccessMark(row);
@@ -145,9 +153,9 @@
       row.classList.toggle('ablesci-journal-no-access-hidden', hideNoAccessRows);
       badge.classList.add('ablesci-journal-no-access-badge');
       if (badge.dataset.ablesciOriginalTitle === undefined) {
-        badge.dataset.ablesciOriginalTitle = badge.getAttribute('title') || '';
+        badge.dataset.ablesciOriginalTitle = cleanJournalBadgeTitle(badge.getAttribute('title') || '');
       }
-      const originalTitle = badge.dataset.ablesciOriginalTitle || badge.getAttribute('title') || entry.shortName || '';
+      const originalTitle = cleanJournalBadgeTitle(badge.dataset.ablesciOriginalTitle || badge.getAttribute('title') || entry.shortName || '');
       badge.setAttribute('title', `${originalTitle} | ${JOURNAL_ACCESS_TTL_TOOLTIP}`);
     });
   }

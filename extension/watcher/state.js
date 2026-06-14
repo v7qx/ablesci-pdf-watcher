@@ -31,6 +31,7 @@
           ...base,
           processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
           daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
+          journalAccessStats: { ...(current.journalAccessStats || {}), ...(incoming.journalAccessStats || {}) },
           _version: currentVersion + 1
         };
         await chromeApi.storage.local.set({ [stateKey]: next });
@@ -46,6 +47,7 @@
         ...incoming,
         processed: { ...(current.processed || {}), ...(incoming.processed || {}) },
         daily: { ...(current.daily || {}), ...(incoming.daily || {}) },
+        journalAccessStats: { ...(current.journalAccessStats || {}), ...(incoming.journalAccessStats || {}) },
         _version: Number(current._version || 0) + 1
       };
       await chromeApi.storage.local.set({ [stateKey]: next });

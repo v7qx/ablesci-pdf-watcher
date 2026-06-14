@@ -48,6 +48,13 @@
         .trim();
     }
 
+    function cleanJournalAccessName(value) {
+      return normalizeText(value)
+        .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
     function journalRuleNames(entry) {
       if (typeof entry === 'string') return [entry];
       if (!entry || typeof entry !== 'object') return [];
@@ -94,7 +101,7 @@
     }
 
     function journalAccessEntryForCandidate(candidate, state = {}) {
-      const shortName = normalizeText(candidate?.journalShortName || '');
+      const shortName = cleanJournalAccessName(candidate?.journalShortName || '');
       const key = normalizeJournalKey(shortName);
       if (!key || !isScienceDirectCandidate(candidate)) return null;
       const entry = journalAccessStatsFromState(state)[key];
@@ -114,7 +121,7 @@
         detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
         listUrl: candidate?.listUrl || '',
         publisherName: candidate?.publisherName || payload?.publisherName || '',
-        journalShortName: candidate?.journalShortName || payload?.journalShortName || '',
+        journalShortName: cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || ''),
         journalName: payload?.journalName || '',
         doi: payload?.doi || candidate?.doi || '',
         ...extra
@@ -143,7 +150,7 @@
     }
 
     async function rememberJournalShortNameMapping(candidate, payload) {
-      const shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+      const shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
       const fullName = normalizeText(payload?.journalName || '');
       if (!shortName || !fullName) return;
       if (normalizeJournalKey(shortName) === normalizeJournalKey(fullName)) return;
@@ -366,10 +373,10 @@
         const assistTimeText = text(row.querySelector('span[title="求助时间"]'));
         const assistAgeSeconds = assistAgeSecondsFrom(assistTimeText);
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
-        const journalShortName = Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
+        const journalShortName = cleanJournalAccessName(Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
           .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
           .map(span => span.getAttribute('title') || text(span))
-          .find(Boolean) || '';
+          .find(Boolean) || '');
         const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
         const documentType = normalizeDocumentTypeLocal(typeText);
         const doi = doiFrom(rowText);
@@ -522,7 +529,7 @@
           reason: 'journal_blocked_rule',
           journalAccess: {
             key: accessBlocked.key,
-            shortName: accessBlocked.entry.shortName || candidate.journalShortName || '',
+            shortName: cleanJournalAccessName(accessBlocked.entry.shortName || candidate.journalShortName || ''),
             lastAt: accessBlocked.entry.lastAt || '',
             expiresAt: accessBlocked.entry.expiresAt || '',
             hitCount: Number(accessBlocked.entry.hitCount || 0) || 0,
@@ -549,7 +556,7 @@
         return false;
       }
       const state = await getWatcherState();
-      let shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+      let shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
       if (!shortName && payload?.journalName) {
         const fullKey = normalizeJournalKey(payload.journalName);
         const map = journalShortNameMapFromState(state);
@@ -557,7 +564,7 @@
           if (!entry || typeof entry !== 'object') return false;
           return journalRuleNames(entry).some(name => normalizeJournalKey(name) === fullKey);
         });
-        shortName = normalizeText(matched?.short || '');
+        shortName = cleanJournalAccessName(matched?.short || '');
       }
       const key = normalizeJournalKey(shortName);
       if (!key) {
@@ -592,7 +599,7 @@
 
     async function clearJournalAccessBlocked(candidate, payload = null) {
       if (!isScienceDirectCandidate(candidate, payload)) return false;
-      const shortName = normalizeText(candidate?.journalShortName || payload?.journalShortName || '');
+      const shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
       const key = normalizeJournalKey(shortName);
       if (!key) return false;
       const state = await getWatcherState();

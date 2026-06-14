@@ -238,6 +238,8 @@ const TEXT_MAP = {
   "记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。": "Stores journal short names with explicit no-subscription results for list-page markers and auto-watcher prefiltering.",
   "隐藏列表命中项": "Hide Matched Rows",
   "在求助列表页隐藏命中本地无权限缓存的 ScienceDirect 求助": "Hide ScienceDirect requests matched by the local no-access cache on list pages.",
+  "导出": "Export",
+  "导入": "Import",
   "清空": "Clear",
   "未加载": "Not Loaded",
   "暂无缓存。": "No cache entries.",
@@ -622,6 +624,8 @@ const {
   clearAutoWatcherLogs,
   clearAutoWatcherQueue,
   refreshJournalAccessCacheSummary,
+  exportJournalAccessCache,
+  importJournalAccessCache,
   clearJournalAccessCache,
   simulateAssist,
   handleDocumentCopy,
@@ -694,5 +698,7 @@ el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
 el('clearAutoWatcherQueue')?.addEventListener('click', clearAutoWatcherQueue);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
+el('exportJournalAccessCache')?.addEventListener('click', exportJournalAccessCache);
+el('importJournalAccessCache')?.addEventListener('click', importJournalAccessCache);
 el('clearJournalAccessCache')?.addEventListener('click', clearJournalAccessCache);
 el('btnDebugSimulate')?.addEventListener('click', simulateAssist);
