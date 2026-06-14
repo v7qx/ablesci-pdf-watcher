@@ -175,6 +175,15 @@
         ...attempt,
         finishedAt: new Date().toISOString(),
         resultReason: normalizeText(result?.reason || 'unknown').slice(0, 160),
+        scannedUrl: result?.scannedUrl || attempt.scannedUrl || '',
+        scannedPublisher: result?.scannedPublisher || attempt.scannedPublisher || '',
+        scannedPage: result?.scannedPage || attempt.scannedPage || '',
+        parsedListPages: Array.isArray(result?.parsedListPages)
+          ? result.parsedListPages.join(',')
+          : (attempt.parsedListPages || ''),
+        backoffSkippedPages: Array.isArray(result?.backoffSkippedPages)
+          ? result.backoffSkippedPages.join(',')
+          : (attempt.backoffSkippedPages || ''),
         nextAssistAfter: state.nextAssistRunAt || '',
         nextAlarmAfter: state.nextScheduledAt || '',
         chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
@@ -199,6 +208,9 @@
         listScanStarted: finished.listScanStarted,
         pickedListUrl: finished.pickedListUrl,
         pickedPage: finished.pickedPage,
+        scannedPage: finished.scannedPage,
+        parsedListPages: finished.parsedListPages,
+        backoffSkippedPages: finished.backoffSkippedPages,
         pageCurve: finished.pageCurve,
         nextAssistBefore: finished.nextAssistBefore,
         nextAssistAfter: finished.nextAssistAfter,

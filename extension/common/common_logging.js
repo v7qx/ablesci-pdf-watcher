@@ -36,7 +36,12 @@
       title: normalizeText(value.title || '').slice(0, 160),
       doi: normalizeText(value.doi || '').slice(0, 120),
       journal: normalizeText(value.journalName || value.journalShortName || '').slice(0, 160),
-      reason: normalizeText(value.reason || '').slice(0, 120)
+      reason: normalizeText(value.reason || '').slice(0, 120),
+      pickedPage: value.pickedPage ?? value.page ?? '',
+      pageOrder: normalizeText(value.pageOrder || '').slice(0, 40),
+      pageMax: value.pageMax ?? value.maxPage ?? '',
+      parsedCount: value.parsedCount ?? '',
+      queueableCount: value.queueableCount ?? ''
     };
   }
 

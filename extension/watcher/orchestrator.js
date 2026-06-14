@@ -578,6 +578,8 @@
       let scannedUrl = '';
       let scannedPublisher = '';
       let scannedPage = '';
+      const parsedListPages = [];
+      const backoffSkippedPages = [];
       const attempt = {
         startedAt: new Date().toISOString(),
         trigger,
@@ -606,6 +608,9 @@
         pageCurve: '',
         pageMin: '',
         pageMax: '',
+        parsedListPages: '',
+        backoffSkippedPages: '',
+        listScanBackoffSkipped: 0,
         frontHit: false,
         alpha: ''
       };
@@ -873,8 +878,13 @@
           }
           const handledBeforeSource = handledCount;
           let sequentialPageScanCount = 0;
+          let sequentialBackoffSkipCount = 0;
           const maxSequentialPageScans = runListUrls.length > 1 ? 1 : 5;
-          while (sequentialPageScanCount < maxSequentialPageScans) {
+          const maxSequentialBackoffSkips = runListUrls.length > 1 ? 5 : 25;
+          while (
+            sequentialPageScanCount < maxSequentialPageScans &&
+            sequentialBackoffSkipCount < maxSequentialBackoffSkips
+          ) {
           const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateWithQueueRefillCursor(listUrl, stateForTargets));
           let pickedListUrl = pagePick.pickedListUrl;
           const isSequentialPageScan = pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc';
@@ -889,8 +899,19 @@
               pickedPage: pagePick.pickedPage
             });
             if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+              const skippedPage = Number(pagePick.pickedPage);
+              backoffSkippedPages.push(skippedPage);
+              attempt.backoffSkippedPages = backoffSkippedPages.join(',');
+              attempt.listScanBackoffSkipped = backoffSkippedPages.length;
+              attempt.pickedListUrl = pickedListUrl;
+              attempt.pickedPage = pagePick.pickedPage;
+              attempt.pageCurve = pagePick.pageCurve;
+              attempt.pageMin = pagePick.pageMin;
+              attempt.pageMax = pagePick.pageMax;
+              attempt.pageOrder = pagePick.pageOrder;
+              attempt.listUrlKey = pagePick.urlKey;
               stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-              stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+              stateForTargets.lastVisitedPages[pagePick.urlKey] = skippedPage;
               stateForTargets.lastPickedListUrl = pickedListUrl;
               stateForTargets.lastPickedPage = pagePick.pickedPage || '';
               stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
@@ -906,9 +927,11 @@
                 publisher: pagePick.publisher,
                 pageOrder: pagePick.pageOrder,
                 urlKey: pagePick.urlKey,
-                pickedPage: Number(pagePick.pickedPage)
+                pickedPage: skippedPage,
+                backoffSkippedPages: backoffSkippedPages.slice(-10),
+                maxSequentialBackoffSkips
               });
-              sequentialPageScanCount += 1;
+              sequentialBackoffSkipCount += 1;
               continue;
             }
             break;
@@ -954,6 +977,10 @@
           scannedUrl = pickedListUrl;
           scannedPublisher = pagePick.publisher || '';
           scannedPage = pagePick.pickedPage || '';
+          if (Number.isFinite(Number(pagePick.pickedPage))) {
+            parsedListPages.push(Number(pagePick.pickedPage));
+            attempt.parsedListPages = parsedListPages.join(',');
+          }
           await appendWatcherTrace('perf_list_parse', {
             reason: 'list_parse_done',
             trigger,
@@ -1058,6 +1085,10 @@
               scannedUrl = pickedListUrl;
               scannedPublisher = pagePick.publisher || '';
               scannedPage = pagePick.pickedPage || '';
+              if (Number.isFinite(Number(pagePick.pickedPage))) {
+                parsedListPages.push(Number(pagePick.pickedPage));
+                attempt.parsedListPages = parsedListPages.join(',');
+              }
               await appendWatcherTrace('perf_list_parse', {
                 reason: 'list_reparse_after_rebase_done',
                 trigger,
@@ -1147,6 +1178,10 @@
               scannedUrl = pickedListUrl;
               scannedPublisher = pagePick.publisher || '';
               scannedPage = pagePick.pickedPage || '';
+              if (Number.isFinite(Number(pagePick.pickedPage))) {
+                parsedListPages.push(Number(pagePick.pickedPage));
+                attempt.parsedListPages = parsedListPages.join(',');
+              }
               await appendWatcherTrace('perf_list_parse', {
                 reason: 'tail_list_parse_done',
                 trigger,
@@ -1253,7 +1288,9 @@
                 urlKey: pagePick.urlKey,
                 pickedPage: pagePick.pickedPage,
                 nextScanIndex: sequentialPageScanCount + 1,
-                maxSequentialPageScans
+                maxSequentialPageScans,
+                parsedListPages: parsedListPages.slice(-10),
+                backoffSkippedPages: backoffSkippedPages.slice(-10)
               });
               continue;
             }
@@ -1287,12 +1324,16 @@
           }
         }
 
-        const reason = handledCount ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled')) : 'no_candidate';
+        const reason = handledCount
+          ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled'))
+          : (parsedListPages.length <= 0 && backoffSkippedPages.length > 0 ? 'list_pages_backoff_only' : 'no_candidate');
         const finalResult = { ok: true, reason };
-        if (reason === 'no_candidate') {
+        if (reason === 'no_candidate' || reason === 'list_pages_backoff_only') {
           finalResult.scannedUrl = scannedUrl;
           finalResult.scannedPublisher = scannedPublisher;
           finalResult.scannedPage = scannedPage;
+          finalResult.parsedListPages = parsedListPages.slice(-20);
+          finalResult.backoffSkippedPages = backoffSkippedPages.slice(-30);
         }
         return finish(finalResult);
       } catch (err) {
