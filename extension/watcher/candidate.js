@@ -213,6 +213,7 @@
         list_supplement: '已按设置跳过补充材料求助 (列表页)',
         list_book_chapter: '已按设置跳过书籍章节求助 (列表页)',
         list_patent_report: '已按设置跳过专利/报告类求助 (列表页)',
+        list_too_fresh_assist: '刚发布不足 1 分钟，先跳过以降低抢单失败概率',
         detail_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (详情页)',
         detail_blacklist_user: '求助人 ID 处于黑名单中，已跳过',
         journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
@@ -260,6 +261,24 @@
         const match = String(textValue || '').match(/10\.\d{4,9}\/[^\s"']+/i);
         if (!match) return '';
         return match[0].split('#')[0].split('?')[0].replace(/[)\].,;，。]+$/, '');
+      }
+      function assistAgeSecondsFrom(textValue) {
+        const value = normalizeTextLocal(textValue);
+        if (!value) return null;
+        if (/刚刚|刚才|片刻前/.test(value)) return 0;
+        const match = value.match(/(\d+(?:\.\d+)?)\s*(秒|分钟|小时|天|周|月|年)\s*前/);
+        if (!match) return null;
+        const amount = Number(match[1]);
+        if (!Number.isFinite(amount)) return null;
+        const unit = match[2];
+        if (unit === '秒') return Math.round(amount);
+        if (unit === '分钟') return Math.round(amount * 60);
+        if (unit === '小时') return Math.round(amount * 60 * 60);
+        if (unit === '天') return Math.round(amount * 24 * 60 * 60);
+        if (unit === '周') return Math.round(amount * 7 * 24 * 60 * 60);
+        if (unit === '月') return Math.round(amount * 30 * 24 * 60 * 60);
+        if (unit === '年') return Math.round(amount * 365 * 24 * 60 * 60);
+        return null;
       }
       const bodyText = text(document.body);
       const titleText = document.title || '';
@@ -344,6 +363,8 @@
         const assistId = row.querySelector('.assist-id-val')?.value || new URLSearchParams(detailUrl.split('?')[1] || '').get('id') || '';
         const classText = [detailAnchor?.className || '', row.className || ''].join(' ');
         const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
+        const assistTimeText = text(row.querySelector('span[title="求助时间"]'));
+        const assistAgeSeconds = assistAgeSecondsFrom(assistTimeText);
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
         const journalShortName = Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
           .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
@@ -368,6 +389,8 @@
           documentType,
           documentTypeText: normalizeTextLocal(typeText),
           statusText,
+          assistTimeText,
+          assistAgeSeconds,
           sticky: /stick-assist|置顶/.test(classText + ' ' + rowText),
           index
         };
@@ -384,7 +407,7 @@
         loginLike: /登录|请先登录|login/i.test(bodyText)
       };
 
-      return { cfChallenge: false, candidates: candidates.reverse(), listStats, debug };
+      return { cfChallenge: false, candidates, listStats, debug };
     }
 
     function minSeekingGateForList(parsed, listUrl, pagePublisher, opts = {}) {
@@ -476,6 +499,9 @@
       const textValue = [candidate.rowText, candidate.title, candidate.statusText].join(' ');
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
       if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
+      if (Number.isFinite(Number(candidate.assistAgeSeconds)) && Number(candidate.assistAgeSeconds) < 60) {
+        return { ok: false, reason: 'list_too_fresh_assist' };
+      }
       if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
       if (opts.watcherSkipCorrigendum && candidate.title && /^Corrigendum\s+to/i.test(String(candidate.title).trim())) {
         return { ok: false, reason: 'list_corrigendum' };

@@ -131,6 +131,7 @@ const TEXT_MAP = {
   "未复制": "Not Copied",
   "已清除 watcher 已处理记录。": "Watcher processed records cleared.",
   "已清除 watcher 日志和 trace。": "Watcher logs and traces cleared.",
+  "已清空 watcher 候选队列。": "Watcher candidate queue cleared.",
   "清除失败：": "Clear failed: ",
   "未知错误": "Unknown error",
   "暂无诊断信息。": "No diagnostic info available.",
@@ -229,6 +230,7 @@ const TEXT_MAP = {
   "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
   "仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理 ScienceDirect 无权限期刊缓存。": "Clears local processed records, watcher logs, and traces; does not clear the ScienceDirect no-access journal cache.",
   "清除已处理": "Clear Processed Cache",
+  "清空候选队列": "Clear Candidate Queue",
   "清除日志/Trace": "Clear Logs & Traces",
   "ScienceDirect 无权限期刊缓存": "ScienceDirect No-Access Journal Cache",
   "记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。": "Stores journal short names with explicit no-subscription results for list-page markers and auto-watcher prefiltering.",
@@ -616,6 +618,7 @@ const {
   testWatcherNotification,
   clearAutoWatcherState,
   clearAutoWatcherLogs,
+  clearAutoWatcherQueue,
   refreshJournalAccessCacheSummary,
   clearJournalAccessCache,
   simulateAssist,
@@ -687,6 +690,7 @@ el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
+el('clearAutoWatcherQueue')?.addEventListener('click', clearAutoWatcherQueue);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
 el('clearJournalAccessCache')?.addEventListener('click', clearJournalAccessCache);
 el('btnDebugSimulate')?.addEventListener('click', simulateAssist);

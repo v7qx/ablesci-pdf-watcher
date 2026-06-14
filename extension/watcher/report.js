@@ -441,6 +441,9 @@
       const chromeAlarm = await chromeApi.alarms.get(alarmName).catch(() => null);
       const chromeAlarmScheduledAt = chromeAlarm?.scheduledTime ? new Date(chromeAlarm.scheduledTime).toISOString() : (state.chromeAlarmScheduledAt || '');
       const lastAttempt = state.lastAttempt || {};
+      const latestPickedListUrl = lastAttempt.pickedListUrl || state.lastPickedListUrl || '';
+      const latestPickedPage = lastAttempt.pickedPage ?? state.lastPickedPage ?? '';
+      const latestPageMax = lastAttempt.pageMax ?? state.lastPickedPageMax ?? '';
       const logs = (Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
@@ -524,11 +527,11 @@
         lastAttemptCheckedDelta: lastAttempt.checkedDelta ?? '',
         lastAttemptDownloadedDelta: lastAttempt.downloadedDelta ?? '',
         lastAttemptListScanStarted: lastAttempt.listScanStarted === true ? 'true' : '',
-        lastAttemptPickedListUrl: lastAttempt.pickedListUrl || '',
-        pickedPage: lastAttempt.pickedPage ?? '',
+        lastAttemptPickedListUrl: latestPickedListUrl,
+        pickedPage: latestPickedPage,
         pageCurve: lastAttempt.pageCurve || '',
         pageMin: lastAttempt.pageMin ?? '',
-        pageMax: lastAttempt.pageMax ?? '',
+        pageMax: latestPageMax,
         pageFrontHit: lastAttempt.frontHit === true ? 'true' : '',
         pageAlpha: lastAttempt.alpha ?? '',
         randomSessionPicked: lastAttempt.randomSessionPicked ?? '',
@@ -567,7 +570,7 @@
           status: translateReason(lastAttempt.resultReason || '', isEn),
           reason: reportJson(lastAttempt || {}),
           trigger: lastAttempt.trigger || '',
-          url: lastAttempt.pickedListUrl || ''
+          url: latestPickedListUrl
         }),
         ...logs.map(log => reportRow('log', {
           time: formatBeijingDateTime(log.time),
@@ -639,13 +642,13 @@
       const isTraceCompact = opts.watcherTraceLevel === 'compact' || opts.watcherTraceLevel === 'off';
       const summaryLines = isTraceCompact ? (isEn ? [
         `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- Latest Selected List Link: ${lastAttempt.pickedListUrl ? `[Click here](${lastAttempt.pickedListUrl})` : 'None'}`,
+        `- Latest Selected List Link: ${latestPickedListUrl ? `[Click here](${latestPickedListUrl})` : 'None'}`,
         `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
         `- Risk Budget Used today / Limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- Target Assists Today: ${Number(state.todayTarget || 0)}`
       ] : [
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- 最近一次选中的列表页链接: ${lastAttempt.pickedListUrl ? `[点击跳转](${lastAttempt.pickedListUrl})` : '无'}`,
+        `- 最近一次选中的列表页链接: ${latestPickedListUrl ? `[点击跳转](${latestPickedListUrl})` : '无'}`,
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
         `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`
@@ -675,7 +678,7 @@
         `- Latest Checked Paper Delta: ${lastAttempt.checkedDelta ?? ''}`,
         `- Latest Downloaded Paper Delta: ${lastAttempt.downloadedDelta ?? ''}`,
         `- Latest List Scan Triggered: ${lastAttempt.listScanStarted === true ? 'Yes' : 'No'}`,
-        `- Latest Selected List Link: ${lastAttempt.pickedListUrl ? `[Link](${lastAttempt.pickedListUrl})` : ''}`,
+        `- Latest Selected List Link: ${latestPickedListUrl ? `[Link](${latestPickedListUrl})` : ''}`,
         `- Latest Random Eval Result: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, randomValue=${lastAttempt.randomValue ?? ''}`,
         `- Assist Trend Coefficient: ${Number(state.trendFactor || 1).toFixed(2)}`,
         `- Work Time Progress Ratio: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
@@ -718,7 +721,7 @@
         `- 最近一次检查文献增量: ${lastAttempt.checkedDelta ?? ''}`,
         `- 最近一次下载文献增量: ${lastAttempt.downloadedDelta ?? ''}`,
         `- 最近一次是否启动列表扫描: ${lastAttempt.listScanStarted === true ? '是' : '否'}`,
-        `- 最近一次选中的列表页链接: ${lastAttempt.pickedListUrl ? `[点击跳转](${lastAttempt.pickedListUrl})` : ''}`,
+        `- 最近一次选中的列表页链接: ${latestPickedListUrl ? `[点击跳转](${latestPickedListUrl})` : ''}`,
         `- 最近一次随机评估结果: 选中=${lastAttempt.randomSessionPicked ?? ''}, 最终=${lastAttempt.randomSessionFinalSize ?? ''}, 随机值=${lastAttempt.randomValue ?? ''}`,
         `- 应助趋势系数: ${Number(state.trendFactor || 1).toFixed(2)}`,
         `- 工作时间进度比率: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,

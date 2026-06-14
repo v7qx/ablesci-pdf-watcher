@@ -453,6 +453,10 @@
           await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         }
         if (!result.ok) {
+          const isSkipReason = /跳过|无.*权限|没有.*权限|订阅权限|访问权限|不支持|unsupported|accessDenied|paywall|no_access|no-access|subscribe/i.test(result.reason || '');
+          if (isSkipReason) {
+            return { handled: false, stopRun: false, removeQueue: true, reason: result.reason || 'skipped' };
+          }
           return { handled: true, stopRun: result.stopRun !== false, reason: result.reason || 'upload_failed', paused: result.paused === true };
         }
         return { handled: true, stopRun: false, reason: result.reason || 'done' };

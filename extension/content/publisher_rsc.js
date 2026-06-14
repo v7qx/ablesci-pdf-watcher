@@ -8,6 +8,13 @@
   let observer = null;
   let stopTimer = null;
   let challengePrompted = false;
+  let skipBookChapter = true;
+
+  chrome.storage.local.get({ watcherSkipBookChapter: true }, function (res) {
+    if (res && res.watcherSkipBookChapter !== undefined) {
+      skipBookChapter = !!res.watcherSkipBookChapter;
+    }
+  });
 
   function rscArticleLandingUrlFromPdfUrl(url) {
     try {
@@ -67,6 +74,17 @@
     return !!document.querySelector('.paywall__body, .paywall__container, .paywall__title, a[href*="/buyarticlepdf/"], .btn-icon--trolley');
   }
 
+  function isRscBookChapter() {
+    const host = location.hostname || '';
+    const path = location.pathname || '';
+    return /(^|\.)books\.rsc\.org$/i.test(host) || /\/books\//i.test(path) || /\/chapter\//i.test(path) || /\/chapter-abstract\//i.test(path);
+  }
+
+  function isRscBookOverview() {
+    const path = location.pathname || '';
+    return /\/books\//i.test(path) && !/\/chapter\//i.test(path) && !/\/chapter-abstract\//i.test(path);
+  }
+
   function stopObserver() {
     if (observer) {
       observer.disconnect();
@@ -82,6 +100,28 @@
     if (!common.isRsc() || pdfTriggered) return;
     if (!(await common.canControlCurrentPublisherPage())) {
       console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending RSC task');
+      stopObserver();
+      return;
+    }
+    if (isRscBookOverview()) {
+      pdfTriggered = true;
+      sendRscMessage({
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'RSC 书籍或章节暂不支持自动应助（跳转到了书籍总览页）。',
+        source: 'rsc_book_overview'
+      });
+      stopObserver();
+      return;
+    }
+    if (isRscBookChapter() && skipBookChapter) {
+      pdfTriggered = true;
+      sendRscMessage({
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'RSC 识别为书籍章节，已按设置自动跳过。',
+        source: 'rsc_book_chapter'
+      });
       stopObserver();
       return;
     }

@@ -123,6 +123,7 @@
                 recomend: false,
                 reload: false,
                 downloadOnly: true,
+                blocked: true,
                 skipped: true,
                 skipReason: 'publisher_unsupported',
                 ...cleanerExtra

@@ -21,13 +21,22 @@
       return String(candidate.assistId || candidate.detailUrl || '').trim();
     }
 
+    function isScienceDirectQueueCandidate(candidate = {}) {
+      const haystack = [
+        candidate.publisherName,
+        candidate.listUrl,
+        candidate.detailUrl
+      ].map(value => String(value || '')).join(' ');
+      return /sciencedirect|elsevier/i.test(haystack);
+    }
+
     function normalizeCandidateQueue(rawQueue = {}) {
       const now = Date.now();
       const queue = rawQueue && typeof rawQueue === 'object' && !Array.isArray(rawQueue) ? rawQueue : {};
       const seen = {};
       for (const [key, value] of Object.entries(queue.seen || {})) {
         const t = Number(value?.lastSeenAt || value?.consumedAt || 0);
-        if (key && Number.isFinite(t) && now - t <= SEEN_TTL_MS) {
+        if (key && Number.isFinite(t) && now - t <= SEEN_TTL_MS && isScienceDirectQueueCandidate(value)) {
           seen[key] = value;
         }
       }
@@ -81,6 +90,8 @@
         documentType: String(candidate.documentType || '').slice(0, 80),
         documentTypeText: String(candidate.documentTypeText || '').slice(0, 160),
         statusText: String(candidate.statusText || '').slice(0, 160),
+        assistTimeText: String(candidate.assistTimeText || '').slice(0, 80),
+        assistAgeSeconds: Number.isFinite(Number(candidate.assistAgeSeconds)) ? Number(candidate.assistAgeSeconds) : '',
         sticky: candidate.sticky === true,
         index: Number.isFinite(Number(candidate.index)) ? Number(candidate.index) : 0,
         page: Number.isFinite(Number(pagePick.pickedPage)) ? Number(pagePick.pickedPage) : '',
@@ -171,20 +182,26 @@
           const item = sanitizeQueueCandidate(candidate, pagePick, pickedListUrl);
           const key = queueCandidateKey(item);
           if (!key) continue;
+          const shouldRememberSeen = isScienceDirectQueueCandidate(item);
           if (existing.has(key)) {
             Object.assign(existing.get(key), item, { enqueuedAt: existing.get(key).enqueuedAt || item.enqueuedAt });
             result.refreshed += 1;
-          } else if (!queue.seen[key]) {
+          } else if (!shouldRememberSeen || !queue.seen[key]) {
             queue.items.push(item);
             existing.set(key, item);
             result.added += 1;
           }
-          queue.seen[key] = {
-            lastSeenAt: Date.now(),
-            page: item.page,
-            listUrl: item.listUrl,
-            journalShortName: item.journalShortName || ''
-          };
+          if (shouldRememberSeen) {
+            queue.seen[key] = {
+              lastSeenAt: Date.now(),
+              page: item.page,
+              listUrl: item.listUrl,
+              publisherName: item.publisherName || '',
+              journalShortName: item.journalShortName || ''
+            };
+          } else {
+            delete queue.seen[key];
+          }
         }
         if (backoffKey) {
           const previousSignature = queue.pageSignatures[backoffKey]?.signature || '';
@@ -253,7 +270,15 @@
       const queue = normalizeCandidateQueue(state.assistCandidateQueue);
       const cursor = queue.refillCursors[urlKey];
       const currentMax = numericOrEmpty(currentMaxPage) || numericOrEmpty(state?.detectedMaxPages?.[urlKey]) || numericOrEmpty(cursor?.maxPage);
-      const page = adjustedCursorPage(cursor, currentMax);
+      const dynamicTailDesc = cursor?.pageOrder === 'desc' && !hasExplicitPageRange(listUrl);
+      const cursorPage = Number(cursor?.page || 0);
+      const page = dynamicTailDesc
+        && currentMax
+        && Number.isFinite(cursorPage)
+        && cursorPage > 0
+        && Number(currentMax) - cursorPage >= 10
+        ? Number(currentMax) + 1
+        : adjustedCursorPage(cursor, currentMax);
       if (!urlKey || !Number.isFinite(Number(page)) || Number(page) <= 0) return state;
       return {
         ...state,
@@ -266,6 +291,15 @@
         },
         assistCandidateQueue: queue
       };
+    }
+
+    function hasExplicitPageRange(listUrl) {
+      try {
+        const u = new URL(listUrl);
+        return u.searchParams.has('page_min') || u.searchParams.has('page_max');
+      } catch (_) {
+        return false;
+      }
     }
 
     async function queuedCandidatesSnapshot(limit = PROCESS_LIMIT, listUrls = null) {
@@ -284,15 +318,20 @@
       await updateWatcherState(state => {
         const queue = normalizeCandidateQueue(state.assistCandidateQueue);
         queue.items = queue.items.filter(item => queueCandidateKey(item) !== key);
-        queue.seen[key] = {
-          ...(queue.seen[key] || {}),
-          consumedAt: Date.now(),
-          lastSeenAt: Date.now(),
-          status: reason || 'consumed',
-          page: candidate.page || queue.seen[key]?.page || '',
-          listUrl: candidate.listUrl || queue.seen[key]?.listUrl || '',
-          journalShortName: candidate.journalShortName || queue.seen[key]?.journalShortName || ''
-        };
+        if (isScienceDirectQueueCandidate(candidate)) {
+          queue.seen[key] = {
+            ...(queue.seen[key] || {}),
+            consumedAt: Date.now(),
+            lastSeenAt: Date.now(),
+            status: reason || 'consumed',
+            page: candidate.page || queue.seen[key]?.page || '',
+            listUrl: candidate.listUrl || queue.seen[key]?.listUrl || '',
+            publisherName: candidate.publisherName || queue.seen[key]?.publisherName || '',
+            journalShortName: candidate.journalShortName || queue.seen[key]?.journalShortName || ''
+          };
+        } else {
+          delete queue.seen[key];
+        }
         queue.updatedAt = new Date().toISOString();
         state.assistCandidateQueue = queue;
       });

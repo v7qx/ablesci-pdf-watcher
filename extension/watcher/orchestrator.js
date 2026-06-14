@@ -61,6 +61,53 @@
       stateWithQueueRefillCursor
     } = config;
 
+    function sourceKeyFromUrl(url = '') {
+      try {
+        const u = new URL(url);
+        const publisher = String(u.searchParams.get('publisher') || '').trim().toLowerCase();
+        if (publisher) return publisher;
+      } catch (_) {}
+      const text = String(url || '').toLowerCase();
+      if (/sciencedirect|elsevier/.test(text)) return 'elsevier';
+      if (/ieee/.test(text)) return 'ieee';
+      if (/\brsc\b|royal\s+society\s+of\s+chemistry/.test(text)) return 'rsc';
+      if (/wiley/.test(text)) return 'wiley';
+      if (/springer/.test(text)) return 'springer';
+      if (/sage/.test(text)) return 'sage';
+      if (/\bacs\b/.test(text)) return 'acs';
+      return text.slice(0, 80) || 'unknown';
+    }
+
+    function isHighFreqSourceKey(key = '') {
+      return /sciencedirect|elsevier/i.test(String(key || ''));
+    }
+
+    function sourceKeyFromCandidate(candidate = {}, pagePick = {}) {
+      return sourceKeyFromUrl(candidate.listUrl || pagePick.configuredUrl || pagePick.pickedListUrl || '');
+    }
+
+    function sourceDetailAttemptBudget(listUrl, sourceCount) {
+      if (sourceCount <= 1) return 5;
+      return isHighFreqSourceKey(sourceKeyFromUrl(listUrl)) ? 4 : 2;
+    }
+
+    function rotateRecentSource(urls = [], state = {}) {
+      const lastKey = String(state.lastHandledPublisherKey || '').toLowerCase();
+      if (!lastKey || urls.length <= 1) return urls;
+      const firstKey = sourceKeyFromUrl(urls[0]);
+      if (firstKey !== lastKey) return urls;
+      const replacementIndex = urls.findIndex((url, index) => {
+        if (index === 0) return false;
+        const key = sourceKeyFromUrl(url);
+        return key !== lastKey;
+      });
+      if (replacementIndex < 0) return urls;
+      const copy = urls.slice();
+      const [replacement] = copy.splice(replacementIndex, 1);
+      copy.unshift(replacement);
+      return copy;
+    }
+
     async function syncActualAssistCount(state, opts) {
       const now = Date.now();
       const lastSynced = state.lastAssistCountSyncedAt ? new Date(state.lastAssistCountSyncedAt).getTime() : 0;
@@ -288,6 +335,8 @@
           assistId: candidate.assistId || '',
           title: candidate.title || '',
           journalShortName: candidate.journalShortName || '',
+          assistTimeText: candidate.assistTimeText || '',
+          assistAgeSeconds: candidate.assistAgeSeconds ?? '',
           journalAccess: listAllowed.journalAccess || null,
           source: 'list_page_refill'
         });
@@ -313,11 +362,13 @@
         setHandledCount,
         pagePick = {},
         fromQueue = false,
+        maxDetailAttempts = 0,
         getLastHandledReason,
         setLastHandledReason
       } = context;
       const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
       let handledAny = false;
+      let detailAttempts = 0;
 
       for (const rawCandidate of candidates) {
         const stateForCandidate = await getWatcherState();
@@ -335,6 +386,8 @@
             assistId: candidate.assistId || '',
             title: candidate.title || '',
             journalShortName: candidate.journalShortName || '',
+            assistTimeText: candidate.assistTimeText || '',
+            assistAgeSeconds: candidate.assistAgeSeconds ?? '',
             journalAccess: listAllowed.journalAccess || null,
             source: fromQueue ? 'candidate_queue' : 'list_page'
           });
@@ -364,6 +417,17 @@
           continue;
         }
 
+        if (maxDetailAttempts > 0 && detailAttempts >= maxDetailAttempts) {
+          await appendWatcherTrace('candidate_source_attempt_budget_exhausted', {
+            reason: 'source_detail_attempt_budget',
+            trigger,
+            maxDetailAttempts,
+            sourceKey: sourceKeyFromCandidate(candidate, pagePick),
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          });
+          break;
+        }
+        detailAttempts += 1;
         await appendWatcherTrace('candidate_detail_start', {
           reason: 'candidate_passed_list_filter',
           trigger,
@@ -436,7 +500,7 @@
         });
         const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
         if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
-        if (handled || handledResult?.stopRun === true) {
+        if (handled || handledResult?.stopRun === true || handledResult?.removeQueue === true) {
           await removeQueuedCandidate(candidate, handledResult?.reason || 'handled');
         }
         if (handled) {
@@ -445,6 +509,12 @@
           if (typeof setLastHandledReason === 'function') {
             setLastHandledReason(handledResult?.reason || 'handled');
           }
+          const handledSourceKey = sourceKeyFromCandidate(candidate, pagePick);
+          await saveWatcherStateSafe({
+            ...(await getWatcherState()),
+            lastHandledPublisherKey: handledSourceKey,
+            lastHandledPublisherAt: new Date().toISOString()
+          }).catch(() => {});
           handledAny = true;
           await appendWatcherTrace('candidate_handled', {
             reason: handledResult?.reason || 'handled',
@@ -472,7 +542,7 @@
       return { stop: false, handledAny };
     }
 
-    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, runListUrls = null) {
+    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, runListUrls = null, maxDetailAttempts = 0) {
       const queued = await queuedCandidatesSnapshot(undefined, runListUrls);
       if (queued.length <= 0) return { stop: false };
       await appendWatcherTrace('candidate_queue_consume_start', {
@@ -492,6 +562,7 @@
         setHandledCount: value => { handledCountRef.value = value; },
         getLastHandledReason: () => lastHandledReasonRef?.value || '',
         setLastHandledReason: value => { if (lastHandledReasonRef) lastHandledReasonRef.value = value; },
+        maxDetailAttempts,
         fromQueue: true
       });
     }
@@ -504,6 +575,9 @@
       stateRef.autoWatcherRunning = true;
       let runResult = null;
       let currentRunOpts = null;
+      let scannedUrl = '';
+      let scannedPublisher = '';
+      let scannedPage = '';
       const attempt = {
         startedAt: new Date().toISOString(),
         trigger,
@@ -752,23 +826,52 @@
         });
         if (targetSessionSize <= 0) return finish({ ok: true, reason: 'session_size_zero' });
 
-        const runListUrls = listUrlsForRun(opts);
-        const activeRunListUrls = runListUrls.length > 1 ? runListUrls.slice(0, 1) : runListUrls;
+        const runListUrls = rotateRecentSource(listUrlsForRun(opts), stateForTargets);
+        const hasHighFreqSource = runListUrls.some(url => /sciencedirect|elsevier/i.test(url));
+        const hasLowFreqSource = runListUrls.some(url => !/sciencedirect|elsevier/i.test(url));
+        const firstSourceIsHighFreq = /sciencedirect|elsevier/i.test(runListUrls[0] || '');
+        let queuedResult = null;
         await appendWatcherTrace('run_source_order', {
-          reason: runListUrls.length > 1 ? 'random_single_list_url_selected' : 'single_list_url',
+          reason: runListUrls.length > 1
+            ? (hasHighFreqSource && hasLowFreqSource
+                ? (firstSourceIsHighFreq ? 'weighted_high_first' : 'weighted_low_first')
+                : 'random_source_order')
+            : 'single_list_url',
           trigger,
-          listUrls: runListUrls,
-          activeListUrls: activeRunListUrls
+          listUrls: runListUrls
         });
         const blacklistedIds = await readBlacklistedIds(opts, trigger);
         await appendPerfCheckpoint('blacklist_loaded', { blacklistCount: blacklistedIds.length });
-        let queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, activeRunListUrls);
-        handledCount = handledCountRef.value;
-        await appendPerfCheckpoint('queue_consumed_before_refill', { handledCount, stop: queuedResult.stop === true });
-        if (queuedResult.stop) return finish(queuedResult.result);
+
+        for (const listUrl of runListUrls) {
+          const isHighFreq = /sciencedirect|elsevier/i.test(listUrl);
+          if (isHighFreq && handledCount >= targetSessionSize) continue;
+          const handledBeforeSource = handledCount;
+          queuedResult = await consumeQueuedCandidates(
+            trigger,
+            opts,
+            blacklistedIds,
+            targetSessionSize,
+            handledCountRef,
+            lastHandledReasonRef,
+            [listUrl],
+            sourceDetailAttemptBudget(listUrl, runListUrls.length)
+          );
+          handledCount = handledCountRef.value;
+          if (queuedResult.stop) return finish(queuedResult.result);
+          if (runListUrls.length > 1 && handledCount > handledBeforeSource) {
+            return finish({ ok: true, reason: lastHandledReasonRef.value || 'candidate_handled' });
+          }
+        }
+        await appendPerfCheckpoint('queue_consumed_before_refill', { handledCount });
         if (handledCount >= targetSessionSize) return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled') });
 
-        for (const listUrl of activeRunListUrls) {
+        for (const listUrl of runListUrls) {
+          const isHighFreq = /sciencedirect|elsevier/i.test(listUrl);
+          if (isHighFreq && handledCount >= targetSessionSize) {
+            continue;
+          }
+          const handledBeforeSource = handledCount;
           let sequentialPageScanCount = 0;
           const maxSequentialPageScans = runListUrls.length > 1 ? 1 : 5;
           while (sequentialPageScanCount < maxSequentialPageScans) {
@@ -788,6 +891,23 @@
             if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
               stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
               stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
+              stateForTargets.lastPickedListUrl = pickedListUrl;
+              stateForTargets.lastPickedPage = pagePick.pickedPage || '';
+              stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
+              stateForTargets.lastPickedPublisher = pagePick.publisher || '';
+              stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
+              stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
+              await saveWatcherStateSafe(stateForTargets);
+              await appendWatcherTrace('list_scan_page_progress_saved', {
+                reason: 'sequential_page_backoff_skipped',
+                trigger,
+                listUrl: pickedListUrl,
+                configuredUrl: listUrl,
+                publisher: pagePick.publisher,
+                pageOrder: pagePick.pageOrder,
+                urlKey: pagePick.urlKey,
+                pickedPage: Number(pagePick.pickedPage)
+              });
               sequentialPageScanCount += 1;
               continue;
             }
@@ -822,10 +942,18 @@
             targetSessionSize
           });
           stateForTargets.lastPickedListUrl = pickedListUrl;
+          stateForTargets.lastPickedPage = pagePick.pickedPage || '';
+          stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
+          stateForTargets.lastPickedPublisher = pagePick.publisher || '';
+          stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
+          stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
           await saveWatcherStateSafe(stateForTargets);
           await incrementDaily('checked', trigger);
           const parseStartedAt = Date.now();
           let parsed = await parseListUrl(pickedListUrl);
+          scannedUrl = pickedListUrl;
+          scannedPublisher = pagePick.publisher || '';
+          scannedPage = pagePick.pickedPage || '';
           await appendWatcherTrace('perf_list_parse', {
             reason: 'list_parse_done',
             trigger,
@@ -880,6 +1008,10 @@
           }
 
           let detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
+          if (Number.isFinite(detectedMaxPage) && detectedMaxPage > 0) {
+            stateForTargets.lastPickedPageMax = detectedMaxPage;
+            await saveWatcherStateSafe(stateForTargets);
+          }
           if (
             isSequentialPageScan &&
             pagePick.urlKey &&
@@ -914,10 +1046,18 @@
               attempt.pickedPage = pagePick.pickedPage;
               attempt.pageMax = pagePick.pageMax;
               stateForTargets.lastPickedListUrl = pickedListUrl;
+              stateForTargets.lastPickedPage = pagePick.pickedPage || '';
+              stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
+              stateForTargets.lastPickedPublisher = pagePick.publisher || '';
+              stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
+              stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
               await saveWatcherStateSafe(stateForTargets);
               await incrementDaily('checked', trigger);
               const reparseStartedAt = Date.now();
               parsed = await parseListUrl(pickedListUrl);
+              scannedUrl = pickedListUrl;
+              scannedPublisher = pagePick.publisher || '';
+              scannedPage = pagePick.pickedPage || '';
               await appendWatcherTrace('perf_list_parse', {
                 reason: 'list_reparse_after_rebase_done',
                 trigger,
@@ -995,10 +1135,18 @@
                 detectedMaxPage
               });
               stateForTargets.lastPickedListUrl = pickedListUrl;
+              stateForTargets.lastPickedPage = pagePick.pickedPage || '';
+              stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
+              stateForTargets.lastPickedPublisher = pagePick.publisher || '';
+              stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
+              stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
               await saveWatcherStateSafe(stateForTargets);
               await incrementDaily('checked', trigger);
               const tailParseStartedAt = Date.now();
               parsed = await parseListUrl(pickedListUrl);
+              scannedUrl = pickedListUrl;
+              scannedPublisher = pagePick.publisher || '';
+              scannedPage = pagePick.pickedPage || '';
               await appendWatcherTrace('perf_list_parse', {
                 reason: 'tail_list_parse_done',
                 trigger,
@@ -1120,13 +1268,33 @@
           });
           break;
           }
+
+          queuedResult = await consumeQueuedCandidates(
+            trigger,
+            opts,
+            blacklistedIds,
+            targetSessionSize,
+            handledCountRef,
+            lastHandledReasonRef,
+            [listUrl],
+            sourceDetailAttemptBudget(listUrl, runListUrls.length)
+          );
+          handledCount = handledCountRef.value;
+          await appendPerfCheckpoint('queue_consumed_after_refill_source', { listUrl, handledCount, stop: queuedResult.stop === true });
+          if (queuedResult.stop) return finish(queuedResult.result);
+          if (runListUrls.length > 1 && handledCount > handledBeforeSource) {
+            return finish({ ok: true, reason: lastHandledReasonRef.value || 'candidate_handled' });
+          }
         }
 
-        queuedResult = await consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, activeRunListUrls);
-        handledCount = handledCountRef.value;
-        await appendPerfCheckpoint('queue_consumed_after_refill', { handledCount, stop: queuedResult.stop === true });
-        if (queuedResult.stop) return finish(queuedResult.result);
-        return finish({ ok: true, reason: handledCount ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled')) : 'no_candidate' });
+        const reason = handledCount ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled')) : 'no_candidate';
+        const finalResult = { ok: true, reason };
+        if (reason === 'no_candidate') {
+          finalResult.scannedUrl = scannedUrl;
+          finalResult.scannedPublisher = scannedPublisher;
+          finalResult.scannedPage = scannedPage;
+        }
+        return finish(finalResult);
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
         await incrementDaily('failed', trigger);

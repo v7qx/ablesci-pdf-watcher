@@ -57,7 +57,7 @@
   }
 
   function isRscUrl(url) {
-    return /:\/\/pubs\.rsc\.org\//i.test(String(url || ''));
+    return /:\/\/(?:pubs|books)\.rsc\.org\//i.test(String(url || ''));
   }
 
   function isAipUrl(url) {

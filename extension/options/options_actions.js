@@ -184,6 +184,13 @@
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
           currentSession: state.currentSession || null,
+          candidateQueueSize: Array.isArray(state.assistCandidateQueue?.items) ? state.assistCandidateQueue.items.length : 0,
+          lastPickedListUrl: state.lastPickedListUrl || '',
+          lastPickedPage: state.lastPickedPage || '',
+          lastPickedPageMax: state.lastPickedPageMax || '',
+          lastPickedPublisher: state.lastPickedPublisher || '',
+          lastHandledPublisherKey: state.lastHandledPublisherKey || '',
+          lastHandledPublisherAt: state.lastHandledPublisherAt || '',
           journalAccessStatsCount: journalAccessEntries.length,
           journalAccessStatsPreview: journalAccessEntries.slice(0, 5).map(entry => ({
             shortName: entry.shortName || '',
@@ -227,10 +234,22 @@
       const button = el('runAutoWatcherNow');
       if (button?.disabled) return;
       if (button) button.disabled = true;
+      const scannedContainer = el('watcherScannedLinkContainer');
+      if (scannedContainer) scannedContainer.style.display = 'none';
       showPill('watcherRunStatus', '检查中');
       try {
         const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
         showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
+        if (res.ok && res.reason === 'no_candidate' && res.scannedUrl) {
+          const scannedLink = el('watcherScannedLink');
+          if (scannedLink && scannedContainer) {
+            scannedLink.href = res.scannedUrl;
+            let pubText = String(res.scannedPublisher || '未知').toUpperCase();
+            let pageText = res.scannedPage ? `第 ${res.scannedPage} 页` : '';
+            scannedLink.textContent = `${pubText} ${pageText}`.trim() || '排查链接';
+            scannedContainer.style.display = 'inline';
+          }
+        }
       } finally {
         if (button) button.disabled = false;
       }
@@ -267,6 +286,14 @@
       const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherLogs' });
       const msg = res.ok
         ? '已清除 watcher 日志和 trace。'
+        : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
+      showText('status', msg, !res.ok);
+    }
+
+    async function clearAutoWatcherQueue() {
+      const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherQueue' });
+      const msg = res.ok
+        ? '已清空 watcher 候选队列。'
         : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
       showText('status', msg, !res.ok);
     }
@@ -532,6 +559,7 @@
       testWatcherNotification,
       clearAutoWatcherState,
       clearAutoWatcherLogs,
+      clearAutoWatcherQueue,
       refreshJournalAccessCacheSummary,
       clearJournalAccessCache,
       simulateAssist,

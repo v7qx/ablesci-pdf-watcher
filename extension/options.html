@@ -573,6 +573,7 @@
         </div>
         <div class="setting-control">
           <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
+          <button id="clearAutoWatcherQueue" class="secondary" type="button">清空候选队列</button>
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
         </div>
       </div>
@@ -605,6 +606,7 @@
         </div>
         <div class="watcher-status-panel">
           <span id="watcherRunStatus" class="pill">未检查</span>
+          <span id="watcherScannedLinkContainer" style="display: none; margin-left: 8px; font-size: 13px; color: #666; vertical-align: middle;">(已扫: <a id="watcherScannedLink" href="" target="_blank" style="color: #ff5722; text-decoration: underline;"></a>)</span>
         </div>
       </div>
     </section>

@@ -48,6 +48,7 @@
 
   function rejectUnsupportedSpringerPage() {
     if (common.currentPublisher() !== 'springer') return false;
+    if (common.hasPublisherChallengePage()) return false;
     const type = springerContentType();
     if (!type || type === 'article') return false;
     pdfTriggered = true;

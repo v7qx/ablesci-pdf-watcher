@@ -153,6 +153,20 @@
             .then(() => sendResponse({ ok: true }));
           return true;
         }
+        if (msg?.type === 'ablesciClearAutoWatcherQueue') {
+          chromeApi.storage.local.get(autoWatcherStateKey)
+            .then(stored => {
+              const state = stored[autoWatcherStateKey] && typeof stored[autoWatcherStateKey] === 'object'
+                ? stored[autoWatcherStateKey]
+                : {};
+              delete state.assistCandidateQueue;
+              state.candidateQueueClearedAt = new Date().toISOString();
+              state._version = Number(state._version || 0) + 1;
+              return chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
+            })
+            .then(() => sendResponse({ ok: true }));
+          return true;
+        }
         return false;
       });
 

@@ -19,8 +19,7 @@
       frontMin: 3,
       frontMax: 50,
       alpha: 1.2
-    },
-    rsc: { min: 1, max: 5 }
+    }
   };
 
   function formatBeijingDateTime(value, dateOnly = false) {
@@ -150,12 +149,14 @@
       const customMax = u.searchParams.get('page_max');
       const hasExplicitPageMin = customMin !== null;
       const hasExplicitPageMax = customMax !== null;
-      const configuredPage = parseInt(u.searchParams.get('page') || '', 10);
-      const hasConfiguredPage = Number.isInteger(configuredPage) && configuredPage > 0;
+      const parsedConfiguredPage = parseInt(u.searchParams.get('page') || '', 10);
+      const hasConfiguredPage = Number.isInteger(parsedConfiguredPage) && parsedConfiguredPage > 0;
+      const configuredPage = hasConfiguredPage ? parsedConfiguredPage : 0;
       const customOrder = u.searchParams.get('order') || u.searchParams.get('page_order');
+      const hasRange = !!ASSIST_RANDOM_PAGE_RANGES[publisher];
       const pageOrder = customOrder === 'desc' || customOrder === 'asc'
         ? customOrder
-        : (hasConfiguredPage && !hasExplicitPageMin && !hasExplicitPageMax ? 'desc' : 'random');
+        : (hasRange ? (hasConfiguredPage && !hasExplicitPageMin && !hasExplicitPageMax ? 'desc' : 'random') : 'asc');
       const hasSequentialOrder = pageOrder === 'desc' || pageOrder === 'asc';
 
       let min = 1;
@@ -173,11 +174,10 @@
           min = clampInt(range.min ?? 1, 1, 9999);
           max = clampInt(hasConfiguredPage && hasSequentialOrder ? configuredPage : (range.max ?? min), min, 9999);
           curve = range.curve || 'uniform';
-        } else if (!hasSequentialOrder) {
-          return null;
         } else {
           min = 1;
           max = 1;
+          curve = 'uniform';
         }
       }
 
@@ -260,10 +260,10 @@
       const detectedMaxPage = Number(state?.detectedMaxPages?.[urlKey] || 0);
       if (
         Number.isFinite(detectedMaxPage) &&
-        detectedMaxPage > Number(pageMeta.range.max || 0) &&
+        detectedMaxPage > 0 &&
         pageMeta.hasExplicitPageMax !== true
       ) {
-        pageMeta.range.max = detectedMaxPage;
+        pageMeta.range.max = Math.max(Number(pageMeta.range.min || 1), detectedMaxPage);
       }
       if (u.searchParams.get('page_min') === 'half') {
         pageMeta.range.min = Math.max(1, Math.floor(pageMeta.range.max / 2));
@@ -281,9 +281,15 @@
         const lastPage = lastVisitedPages[urlKey];
         const min = pageMeta.range.min;
         const max = pageMeta.range.max;
+        const staleDynamicTailCursor = pageMeta.pageOrder === 'desc'
+          && pageMeta.hasExplicitPageMin !== true
+          && pageMeta.hasExplicitPageMax !== true
+          && Number.isFinite(Number(lastPage))
+          && Number(lastPage) > 0
+          && max - Number(lastPage) >= 10;
 
         if (pageMeta.pageOrder === 'desc') {
-          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
+          if (staleDynamicTailCursor || lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
             pickedPage = max;
           } else {
             pickedPage = Number(lastPage) - 1;
@@ -336,11 +342,25 @@
 
   function listUrlsForRun(opts) {
     const urls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls.slice() : [];
-    for (let i = urls.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [urls[i], urls[j]] = [urls[j], urls[i]];
+    function shuffle(items) {
+      const copy = items.slice();
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
     }
-    return urls;
+    if (urls.length <= 1) return urls;
+
+    const highFreq = urls.filter(url => /sciencedirect|elsevier/i.test(url));
+    const lowFreq = urls.filter(url => !/sciencedirect|elsevier/i.test(url));
+    if (!highFreq.length || !lowFreq.length) return shuffle(urls);
+
+    const preferHighFreq = Math.random() < 0.70;
+    if (preferHighFreq) {
+      return [...shuffle(highFreq), ...shuffle(lowFreq)];
+    }
+    return [...shuffle(lowFreq), ...shuffle(highFreq)];
   }
 
   globalThis.AblesciAutoWatcherUtils = {
