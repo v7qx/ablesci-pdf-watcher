@@ -226,7 +226,7 @@
           }))
         },
         latestWatcherLog: logs[0] || null,
-        latestTraceLogs: traceLogs.slice(0, 30),
+        latestTraceLogs: traceLogs.slice(0, 80),
         latestDiagnostic: diagnostic ? {
           time: diagnostic.time || '',
           stage: diagnostic.stage || '',

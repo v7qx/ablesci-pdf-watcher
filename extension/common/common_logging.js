@@ -40,8 +40,17 @@
       pickedPage: value.pickedPage ?? value.page ?? '',
       pageOrder: normalizeText(value.pageOrder || '').slice(0, 40),
       pageMax: value.pageMax ?? value.maxPage ?? '',
+      candidateCount: value.candidateCount ?? '',
       parsedCount: value.parsedCount ?? '',
-      queueableCount: value.queueableCount ?? ''
+      queueableCount: value.queueableCount ?? '',
+      rowCount: value.rowCount ?? '',
+      detailLinkCount: value.detailLinkCount ?? '',
+      assistIdCount: value.assistIdCount ?? '',
+      bodyLength: value.bodyLength ?? '',
+      emptyListLike: value.emptyListLike ?? '',
+      cfChallenge: value.cfChallenge ?? '',
+      loginLike: value.loginLike ?? '',
+      elapsedMs: value.elapsedMs ?? ''
     };
   }
 

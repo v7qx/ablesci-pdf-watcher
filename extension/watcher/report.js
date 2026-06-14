@@ -45,6 +45,7 @@
       'candidate_detail_start': '详情页评估开始',
       'candidate_skip_list_filter': '列表页过滤跳过',
       'candidate_skip_processed': '已处理过滤跳过',
+      'candidate_queue_seen_skipped': '队列已见过跳过',
       'run_session_size': '会话大小计算',
       'session_size_calculated': '会话大小已计算',
       'session_start': '会话开始',
@@ -91,6 +92,7 @@
       'candidate_detail_start': 'Detail Evaluation Start',
       'candidate_skip_list_filter': 'List Page Filter Skipped',
       'candidate_skip_processed': 'Processed Filter Skipped',
+      'candidate_queue_seen_skipped': 'Queue Seen Skipped',
       'run_session_size': 'Session Size Calculation',
       'session_size_calculated': 'Session Size Calculated',
       'session_start': 'Session Start',
@@ -547,6 +549,25 @@
         const row = { record_type: type, ...baseReportFields, ...values };
         return csvHeader.map(key => row[key] ?? '');
       }
+      const traceSkipSteps = new Set([
+        'candidate_skip_list_filter',
+        'candidate_skip_processed',
+        'candidate_skip_detail_filter',
+        'candidate_queue_seen_skipped'
+      ]);
+      function traceDetailUrlValue(details = {}, trace = {}) {
+        const value = details.detailUrl || details.url || details.listUrl || trace.url || '';
+        if (typeof value === 'string') return value;
+        if (value && typeof value === 'object') {
+          const host = value.host || '';
+          const path = value.path || '';
+          if (host || path) return `${host}${path}`;
+        }
+        return '';
+      }
+      function traceAssistIdValue(details = {}) {
+        return String(details.assistId || '');
+      }
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -596,6 +617,27 @@
           pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || '',
           pdfCleanerCleanedPath: log.pdfCleanerResult?.preservedCleanedPath || ''
         })),
+        ...traces
+          .filter(trace => traceSkipSteps.has(String(trace.step || '')) && trace.details)
+          .map(trace => {
+            const details = trace.details || {};
+            return reportRow('trace_skip', {
+              time: formatBeijingDateTime(trace.time),
+              sessionId: trace.sessionId || details.sessionId || '',
+              trigger: trace.trigger || details.trigger || '',
+              assistId: traceAssistIdValue(details),
+              doi: details.doi || '',
+              journalShortName: details.journalShortName || details.journal || '',
+              journalName: details.journalName || '',
+              detailUrl: traceDetailUrlValue(details, trace),
+              status: translateStep(trace.step || '', isEn),
+              reason: translateReason(trace.reason || details.reason || '', isEn),
+              step: trace.step || '',
+              tabId: trace.tabId || details.tabId || '',
+              url: traceDetailUrlValue(details, trace),
+              details: reportJson(details)
+            });
+          }),
         ...journalAccessStats.map(entry => reportRow('journal_access_cache', {
           time: entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
           assistId: entry.lastAssistId || '',

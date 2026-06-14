@@ -78,6 +78,40 @@
     async function parseListUrl(url) {
       const tab = await openHiddenTab(url, 'parse_list');
       try {
+        async function waitForListDom(timeoutMs) {
+          const readyResult = await chromeApi.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: waitForAssistListDom,
+            args: [timeoutMs]
+          });
+          return readyResult?.[0]?.result || {};
+        }
+        async function parseCurrentList() {
+          const result = await chromeApi.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: parseAssistListPage
+          });
+          return result?.[0]?.result || { cfChallenge: false, candidates: [] };
+        }
+        function appendListParseTrace(parsed, reason) {
+          return appendWatcherTrace('list_parse_result', {
+            reason,
+            url,
+            tabId: tab.id,
+            cfChallenge: parsed.cfChallenge === true,
+            candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+            totalSeeking: parsed.listStats?.totalSeeking ?? '',
+            publisherCount: Object.keys(parsed.listStats?.publisherCounts || {}).length,
+            rowCount: parsed.debug?.rowCount ?? '',
+            detailLinkCount: parsed.debug?.detailLinkCount ?? '',
+            assistIdCount: parsed.debug?.assistIdCount ?? '',
+            publisherItemCount: parsed.debug?.publisherItemCount ?? '',
+            flyFilterCount: parsed.debug?.flyFilterCount ?? '',
+            loginLike: parsed.debug?.loginLike === true,
+            bodyLength: parsed.debug?.bodyLength ?? '',
+            pageTitle: parsed.debug?.title || ''
+          });
+        }
         const readyResult = await chromeApi.scripting.executeScript({
           target: { tabId: tab.id },
           func: waitForAssistListDom,
@@ -94,32 +128,39 @@
           title: readiness.title || '',
           rowCount: readiness.rowCount ?? '',
           detailLinkCount: readiness.detailLinkCount ?? '',
+          assistIdCount: readiness.assistIdCount ?? '',
           publisherItemCount: readiness.publisherItemCount ?? '',
           flyFilterCount: readiness.flyFilterCount ?? '',
           cfChallenge: readiness.cfChallenge === true,
+          emptyListLike: readiness.emptyListLike === true,
           loginLike: readiness.loginLike === true,
           bodyLength: readiness.bodyLength ?? ''
         });
-        const result = await chromeApi.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: parseAssistListPage
-        });
-        const parsed = result?.[0]?.result || { cfChallenge: false, candidates: [] };
-        await appendWatcherTrace('list_parse_result', {
-          reason: 'parse_list',
-          url,
-          tabId: tab.id,
-          cfChallenge: parsed.cfChallenge === true,
-          candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-          totalSeeking: parsed.listStats?.totalSeeking ?? '',
-          publisherCount: Object.keys(parsed.listStats?.publisherCounts || {}).length,
-          rowCount: parsed.debug?.rowCount ?? '',
-          detailLinkCount: parsed.debug?.detailLinkCount ?? '',
-          publisherItemCount: parsed.debug?.publisherItemCount ?? '',
-          flyFilterCount: parsed.debug?.flyFilterCount ?? '',
-          loginLike: parsed.debug?.loginLike === true,
-          pageTitle: parsed.debug?.title || ''
-        });
+        let parsed = await parseCurrentList();
+        await appendListParseTrace(parsed, 'parse_list');
+        if (
+          !parsed.cfChallenge &&
+          !parsed.isErrorPage &&
+          Array.isArray(parsed.candidates) &&
+          parsed.candidates.length <= 0 &&
+          readiness.emptyListLike !== true
+        ) {
+          const retryReadiness = await waitForListDom(3500);
+          await appendWatcherTrace('list_parse_empty_retry', {
+            reason: 'zero_candidates_retry',
+            url,
+            tabId: tab.id,
+            ready: retryReadiness.ready === true,
+            elapsedMs: retryReadiness.elapsedMs ?? '',
+            rowCount: retryReadiness.rowCount ?? '',
+            detailLinkCount: retryReadiness.detailLinkCount ?? '',
+            assistIdCount: retryReadiness.assistIdCount ?? '',
+            bodyLength: retryReadiness.bodyLength ?? '',
+            emptyListLike: retryReadiness.emptyListLike === true
+          });
+          parsed = await parseCurrentList();
+          await appendListParseTrace(parsed, 'parse_list_retry');
+        }
         return parsed;
       } finally {
         await closeTabQuietly(tab.id, 'list_parse_finished');

@@ -170,7 +170,15 @@
       const backoffKey = pageBackoffKey(pagePick);
       const snapshotSignature = pageSignature(parsedCandidates);
       const parsedMaxPage = numericOrEmpty(parsed?.listStats?.maxPage);
-      const result = { added: 0, refreshed: 0, parsedCount: parsedCandidates.length, queueableCount: rawCandidates.length, queueSize: 0 };
+      const result = {
+        added: 0,
+        refreshed: 0,
+        seenSkipped: 0,
+        seenSkippedExamples: [],
+        parsedCount: parsedCandidates.length,
+        queueableCount: rawCandidates.length,
+        queueSize: 0
+      };
       await updateWatcherState(state => {
         const queue = normalizeCandidateQueue(state.assistCandidateQueue);
         const existing = new Map(queue.items.map(item => [queueCandidateKey(item), item]));
@@ -186,6 +194,22 @@
             queue.items.push(item);
             existing.set(key, item);
             result.added += 1;
+          } else {
+            result.seenSkipped += 1;
+            if (result.seenSkippedExamples.length < 20) {
+              result.seenSkippedExamples.push({
+                assistId: item.assistId,
+                detailUrl: item.detailUrl,
+                listUrl: item.listUrl,
+                title: item.title,
+                doi: item.doi,
+                journalShortName: item.journalShortName,
+                publisherName: item.publisherName,
+                page: item.page,
+                pageOrder: item.pageOrder,
+                reason: 'seen_before'
+              });
+            }
           }
           if (shouldRememberSeen) {
             queue.seen[key] = {
@@ -255,8 +279,21 @@
         queueableCount: result.queueableCount,
         added: result.added,
         refreshed: result.refreshed,
+        seenSkipped: result.seenSkipped,
         queueSize: result.queueSize
       });
+      if (result.seenSkippedExamples.length > 0) {
+        for (const item of result.seenSkippedExamples) {
+          await appendWatcherTrace('candidate_queue_seen_skipped', {
+            ...item,
+            reason: 'seen_before',
+            trigger,
+            pickedPage: pagePick.pickedPage,
+            pageMax: pagePick.pageMax || '',
+            listUrl: item.listUrl || pickedListUrl
+          });
+        }
+      }
       return result;
     }
 

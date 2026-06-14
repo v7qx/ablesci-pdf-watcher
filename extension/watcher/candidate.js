@@ -236,6 +236,11 @@
       function normalizeTextLocal(value) {
         return String(value || '').replace(/\s+/g, ' ').trim();
       }
+      function cleanJournalAccessNameLocal(value) {
+        return normalizeTextLocal(value)
+          .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+          .trim();
+      }
       function normalizeDocumentTypeLocal(value) {
         const textValue = normalizeTextLocal(value);
         if (!textValue) return '';
@@ -373,7 +378,7 @@
         const assistTimeText = text(row.querySelector('span[title="求助时间"]'));
         const assistAgeSeconds = assistAgeSecondsFrom(assistTimeText);
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
-        const journalShortName = cleanJournalAccessName(Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
+        const journalShortName = cleanJournalAccessNameLocal(Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
           .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
           .map(span => span.getAttribute('title') || text(span))
           .find(Boolean) || '');
@@ -408,6 +413,7 @@
         title: document.title || '',
         rowCount: rows.length,
         detailLinkCount: document.querySelectorAll('a[href*="/assist/detail"]').length,
+        assistIdCount: document.querySelectorAll('.assist-id-val').length,
         publisherItemCount: document.querySelectorAll('.waiting-publisher-item').length,
         flyFilterCount: document.querySelectorAll('.fly-filter a').length,
         bodyLength: bodyText.length,
@@ -450,29 +456,35 @@
         const titleText = document.title || '';
         const detailLinkCount = document.querySelectorAll('a[href*="/assist/detail"]').length;
         const rowCount = document.querySelectorAll('ul.assist-list > li, .assist-list li').length;
+        const assistIdCount = document.querySelectorAll('.assist-id-val').length;
         const publisherItemCount = document.querySelectorAll('.waiting-publisher-item').length;
         const flyFilterCount = document.querySelectorAll('.fly-filter a').length;
         const cfChallenge = /Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText);
         const isErrorPage =
           /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(titleText + ' ' + bodyText) ||
           /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(titleText + ' ' + bodyText);
+        const emptyListLike = /暂无数据|暂无求助|没有相关求助|未找到相关求助|没有数据/i.test(bodyText);
         return {
           ready,
           readyState: document.readyState || '',
           title: titleText,
           detailLinkCount,
           rowCount,
+          assistIdCount,
           publisherItemCount,
           flyFilterCount,
           cfChallenge,
           isErrorPage,
+          emptyListLike,
           loginLike: /登录|请先登录|login/i.test(bodyText),
           bodyLength: bodyText.length
         };
       }
       function isReady() {
         const snap = snapshot(false);
-        return snap.cfChallenge || snap.isErrorPage || snap.detailLinkCount > 0 || snap.rowCount > 0;
+        return snap.cfChallenge || snap.isErrorPage || snap.emptyListLike ||
+          snap.assistIdCount > 0 ||
+          (snap.rowCount > 0 && snap.detailLinkCount > 0);
       }
       if (isReady()) return Promise.resolve(snapshot(true));
       return new Promise(resolve => {
