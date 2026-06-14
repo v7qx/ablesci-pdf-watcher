@@ -829,12 +829,21 @@
 
       const doiNotFoundLogs = logs.filter(log => {
         const r = String(log.reason || '');
-        return r.includes('DOI 解析失败') || r.includes('DOI 不存在') || r.includes('doi_not_found') || r.includes('doi_resolution_failed') || r.includes('doi_missing') || r.includes('缺少 DOI 信息') || r.includes('DOI Not Found') || r.includes('DOI missing');
+        const lower = r.toLowerCase();
+        return lower.includes('doi_not_found') ||
+          lower.includes('doi_resolution_failed') ||
+          lower.includes('doi not found') ||
+          lower.includes('doi resolution failed') ||
+          lower.includes('invalid doi') ||
+          r.includes('DOI 解析失败') ||
+          r.includes('DOI 不存在') ||
+          r.includes('DOI未找到') ||
+          r.includes('DOI 未找到');
       });
       const doiNotFoundLines = [];
       if (doiNotFoundLogs.length > 0) {
         doiNotFoundLines.push(
-          isEn ? '## DOI Not Found Record' : '## DOI 未找到或解析失败记录',
+          isEn ? '## DOI Not Found Record' : '## DOI Not Found / 解析失败记录',
           '',
           isEn
             ? '| Time | DOI | Journal | Reason | Detail |'

@@ -27,18 +27,6 @@
   }
 
   function findRscArticlePdfLink() {
-    const metaSelectors = [
-      'meta[name="citation_pdf_url"]',
-      'meta[property="citation_pdf_url"]'
-    ];
-    for (const sel of metaSelectors) {
-      const value = document.querySelector(sel)?.getAttribute('content') || '';
-      if (/\/content\/articlepdf\//i.test(value)) {
-        const href = common.normalizeUrl(value, location.href);
-        if (href) return { href, source: 'citation_pdf_url' };
-      }
-    }
-
     const links = Array.from(document.querySelectorAll('a[href*="/content/articlepdf/"], a[type="application/pdf"], a[href*="articlepdf"]'))
       .map(a => {
         const href = common.normalizeUrl(common.decodeHtmlUrl(a.getAttribute('href') || a.href), location.href);
@@ -49,8 +37,11 @@
           a.getAttribute('type') || '',
           a.getAttribute('target') || ''
         ].join(' ');
-        const articlePdf = /\/content\/articlepdf\//i.test(href || '') ||
-          /Download this article|PDF format|PDF/i.test(`${text} ${marker}`);
+        const isPurchaseLink = /\/content\/buyarticlepdf\//i.test(href || '');
+        const articlePdf = !isPurchaseLink && (
+          /\/content\/articlepdf\//i.test(href || '') ||
+          /Download this article|PDF format|PDF/i.test(`${text} ${marker}`)
+        );
         const supplementary = /supplement|supporting information|esm|si\b|permissions|copyright|reprint/i.test(`${href || ''} ${text} ${marker}`);
         return { a, href, text, articlePdf, supplementary };
       })
@@ -63,7 +54,20 @@
     });
 
     const found = links[0];
-    return found ? { link: found.a, href: found.href, source: 'article_pdf_link' } : null;
+    if (found) return { link: found.a, href: found.href, source: 'article_pdf_link' };
+
+    const metaSelectors = [
+      'meta[name="citation_pdf_url"]',
+      'meta[property="citation_pdf_url"]'
+    ];
+    for (const sel of metaSelectors) {
+      const value = document.querySelector(sel)?.getAttribute('content') || '';
+      if (/\/content\/articlepdf\//i.test(value)) {
+        const href = common.normalizeUrl(value, location.href);
+        if (href) return { href, source: 'citation_pdf_url' };
+      }
+    }
+    return null;
   }
 
   function sendRscMessage(payload) {
@@ -136,7 +140,19 @@
       }
       return;
     }
-    if (hasRscAccessDeniedPage()) {
+    const accessDenied = hasRscAccessDeniedPage();
+    const found = findRscArticlePdfLink();
+    if (found && !(accessDenied && found.source === 'citation_pdf_url')) {
+      pdfTriggered = true;
+      sendRscMessage({
+        articleUrl: rscArticleLandingUrlFromPdfUrl(found.href),
+        pdfUrl: found.href,
+        source: found.source
+      });
+      stopObserver();
+      return;
+    }
+    if (accessDenied) {
       pdfTriggered = true;
       sendRscMessage({
         articleUrl: location.href,
@@ -147,15 +163,6 @@
       stopObserver();
       return;
     }
-    const found = findRscArticlePdfLink();
-    if (!found) return;
-    pdfTriggered = true;
-    sendRscMessage({
-      articleUrl: rscArticleLandingUrlFromPdfUrl(found.href),
-      pdfUrl: found.href,
-      source: found.source
-    });
-    stopObserver();
   }
 
   function waitForPdf(timeoutMs = 30000) {
