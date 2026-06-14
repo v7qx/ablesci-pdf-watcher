@@ -293,7 +293,7 @@
     async function clearAutoWatcherQueue() {
       const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherQueue' });
       const msg = res.ok
-        ? '已清空 watcher 候选队列。'
+        ? '已清空 watcher 候选队列和列表页游标。'
         : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
       showText('status', msg, !res.ok);
     }

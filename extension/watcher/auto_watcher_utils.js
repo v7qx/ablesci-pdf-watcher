@@ -281,15 +281,9 @@
         const lastPage = lastVisitedPages[urlKey];
         const min = pageMeta.range.min;
         const max = pageMeta.range.max;
-        const staleDynamicTailCursor = pageMeta.pageOrder === 'desc'
-          && pageMeta.hasExplicitPageMin !== true
-          && pageMeta.hasExplicitPageMax !== true
-          && Number.isFinite(Number(lastPage))
-          && Number(lastPage) > 0
-          && max - Number(lastPage) >= 10;
 
         if (pageMeta.pageOrder === 'desc') {
-          if (staleDynamicTailCursor || lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
+          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
             pickedPage = max;
           } else {
             pickedPage = Number(lastPage) - 1;

@@ -160,6 +160,14 @@
                 ? stored[autoWatcherStateKey]
                 : {};
               delete state.assistCandidateQueue;
+              delete state.lastVisitedPages;
+              delete state.detectedMaxPages;
+              delete state.lastPickedListUrl;
+              delete state.lastPickedPage;
+              delete state.lastPickedPageMax;
+              delete state.lastPickedPublisher;
+              delete state.lastPickedPageOrder;
+              delete state.lastPickedUrlKey;
               state.candidateQueueClearedAt = new Date().toISOString();
               state._version = Number(state._version || 0) + 1;
               return chromeApi.storage.local.set({ [autoWatcherStateKey]: state });

@@ -1114,11 +1114,6 @@
             }
           }
 
-          const shouldRescanDetectedTail = pagePick.pageOrder === 'desc'
-            && trigger !== 'manual'
-            && pagePick.hasExplicitPageMax !== true
-            && Number.isFinite(detectedMaxPage)
-            && detectedMaxPage > Number(pagePick.pageMax || 0);
           if (
             trigger === 'manual' &&
             pagePick.pageOrder === 'desc' &&
@@ -1139,64 +1134,6 @@
               urlKey: pagePick.urlKey,
               detectedMaxPage
             });
-          }
-          if (shouldRescanDetectedTail) {
-            let tailListUrl = '';
-            try {
-              const tailUrl = new URL(pickedListUrl);
-              tailUrl.searchParams.set('page', String(detectedMaxPage));
-              tailListUrl = tailUrl.toString();
-            } catch (_) {}
-            if (tailListUrl) {
-              pickedListUrl = tailListUrl;
-              pagePick.pickedListUrl = pickedListUrl;
-              pagePick.pickedPage = detectedMaxPage;
-              pagePick.pageMax = detectedMaxPage;
-              attempt.pickedListUrl = pickedListUrl;
-              attempt.pickedPage = detectedMaxPage;
-              attempt.pageMax = detectedMaxPage;
-              await appendWatcherTrace('list_scan_detected_tail_page', {
-                reason: 'order_desc_detected_max_page',
-                trigger,
-                configuredUrl: listUrl,
-                previousListUrl: stateForTargets.lastPickedListUrl,
-                listUrl: pickedListUrl,
-                publisher: pagePick.publisher,
-                urlKey: pagePick.urlKey,
-                detectedMaxPage
-              });
-              stateForTargets.lastPickedListUrl = pickedListUrl;
-              stateForTargets.lastPickedPage = pagePick.pickedPage || '';
-              stateForTargets.lastPickedPageMax = pagePick.pageMax || '';
-              stateForTargets.lastPickedPublisher = pagePick.publisher || '';
-              stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
-              stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
-              await saveWatcherStateSafe(stateForTargets);
-              await incrementDaily('checked', trigger);
-              const tailParseStartedAt = Date.now();
-              parsed = await parseListUrl(pickedListUrl);
-              scannedUrl = pickedListUrl;
-              scannedPublisher = pagePick.publisher || '';
-              scannedPage = pagePick.pickedPage || '';
-              if (Number.isFinite(Number(pagePick.pickedPage))) {
-                parsedListPages.push(Number(pagePick.pickedPage));
-                attempt.parsedListPages = parsedListPages.join(',');
-              }
-              await appendWatcherTrace('perf_list_parse', {
-                reason: 'tail_list_parse_done',
-                trigger,
-                durationMs: Date.now() - tailParseStartedAt,
-                pickedPage: pagePick.pickedPage,
-                urlKey: pagePick.urlKey,
-                parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
-                maxPage: parsed?.listStats?.maxPage || ''
-              });
-              if (parsed.cfChallenge) {
-                await recordCfChallenge(opts, pickedListUrl, trigger);
-                return finish({ ok: false, reason: 'cf_challenge' });
-              }
-              await initCurrentPageData(pickedListUrl, pagePick, parsed);
-            }
           }
 
           const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);

@@ -123,12 +123,8 @@
     function adjustedCursorPage(cursor, currentMaxPage = '') {
       const page = Number(cursor?.page);
       if (!Number.isFinite(page) || page <= 0) return '';
-      const cursorMax = Number(cursor?.maxPage || cursor?.pageMax || 0);
-      const currentMax = Number(currentMaxPage || cursorMax || 0);
-      let adjusted = page;
-      if (Number.isFinite(cursorMax) && cursorMax > 0 && Number.isFinite(currentMax) && currentMax > 0) {
-        adjusted = page + (currentMax - cursorMax);
-      }
+      const currentMax = Number(currentMaxPage || cursor?.maxPage || cursor?.pageMax || 0);
+      const adjusted = page;
       const min = Number(cursor?.pageMin || 1);
       const max = Number(currentMax || cursor?.pageMax || adjusted);
       const lower = Number.isFinite(min) && min > 0 ? min : 1;
@@ -270,15 +266,7 @@
       const queue = normalizeCandidateQueue(state.assistCandidateQueue);
       const cursor = queue.refillCursors[urlKey];
       const currentMax = numericOrEmpty(currentMaxPage) || numericOrEmpty(state?.detectedMaxPages?.[urlKey]) || numericOrEmpty(cursor?.maxPage);
-      const dynamicTailDesc = cursor?.pageOrder === 'desc' && !hasExplicitPageRange(listUrl);
-      const cursorPage = Number(cursor?.page || 0);
-      const page = dynamicTailDesc
-        && currentMax
-        && Number.isFinite(cursorPage)
-        && cursorPage > 0
-        && Number(currentMax) - cursorPage >= 10
-        ? Number(currentMax) + 1
-        : adjustedCursorPage(cursor, currentMax);
+      const page = adjustedCursorPage(cursor, currentMax);
       if (!urlKey || !Number.isFinite(Number(page)) || Number(page) <= 0) return state;
       return {
         ...state,
