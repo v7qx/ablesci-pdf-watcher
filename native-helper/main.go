@@ -268,11 +268,13 @@ func handleDeleteFile(req Request) error {
 
 func handleCopyPDF(req Request) error {
 	// 调试日志：确认是否被拉起复制文件
-	copyLog := fmt.Sprintf("CopyPDF Called: Path=%s Suffix=%s MoveToDir=%s Filename=%s\n", req.Path, req.Extra["suffix"], req.MoveToDir, req.Filename)
-	f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		_, _ = f.WriteString(copyLog)
-		f.Close()
+	if isCleanerDebugEnabled(req) {
+		copyLog := fmt.Sprintf("CopyPDF Called: Path=%s Suffix=%s MoveToDir=%s Filename=%s\n", req.Path, req.Extra["suffix"], req.MoveToDir, req.Filename)
+		f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if f != nil {
+			_, _ = f.WriteString(copyLog)
+			f.Close()
+		}
 	}
 
 	path, err := cleanExistingPath(req.Path)
@@ -1175,37 +1177,41 @@ func handleCleanPDF(req Request) error {
 	summaryLog := ""
 	if readErr == nil {
 		summaryLog = string(summaryData)
-		_ = os.WriteFile(filepath.Join(os.TempDir(), "ablesci_cleaner_summary.json"), summaryData, 0644)
+		if isCleanerDebugEnabled(req) || runErr != nil {
+			_ = os.WriteFile(filepath.Join(os.TempDir(), "ablesci_cleaner_summary.json"), summaryData, 0644)
+		}
 	} else {
 		summaryLog = fmt.Sprintf("(Error reading summary file: %v)", readErr)
 	}
 
 	// 将详尽的调试日志追加写入临时文件，便于极其细致地排查
-	debugLog := fmt.Sprintf("\n--- [NEW TEST] %s ---\n"+
-		"Request Payload:\n%s\n\n"+
-		"Executable:\n%s\n\n"+
-		"Args:\n%v\n\n"+
-		"Files BEFORE clean:\n%s\n\n"+
-		"Process Run Error:\n%v\n\n"+
-		"Process Stdout:\n%s\n\n"+
-		"Process Stderr:\n%s\n\n"+
-		"Files AFTER clean:\n%s\n\n"+
-		"Summary Content:\n%s\n",
-		time.Now().Format("2006-01-02 15:04:05"),
-		string(reqJSON),
-		cleanerPath,
-		args,
-		filesBefore,
-		runErr,
-		stdout.String(),
-		stderr.String(),
-		filesAfter,
-		summaryLog,
-	)
-	f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		_, _ = f.WriteString(debugLog)
-		f.Close()
+	if isCleanerDebugEnabled(req) || runErr != nil || readErr != nil {
+		debugLog := fmt.Sprintf("\n--- [NEW TEST] %s ---\n"+
+			"Request Payload:\n%s\n\n"+
+			"Executable:\n%s\n\n"+
+			"Args:\n%v\n\n"+
+			"Files BEFORE clean:\n%s\n\n"+
+			"Process Run Error:\n%v\n\n"+
+			"Process Stdout:\n%s\n\n"+
+			"Process Stderr:\n%s\n\n"+
+			"Files AFTER clean:\n%s\n\n"+
+			"Summary Content:\n%s\n",
+			time.Now().Format("2006-01-02 15:04:05"),
+			string(reqJSON),
+			cleanerPath,
+			args,
+			filesBefore,
+			runErr,
+			stdout.String(),
+			stderr.String(),
+			filesAfter,
+			summaryLog,
+		)
+		f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if f != nil {
+			_, _ = f.WriteString(debugLog)
+			f.Close()
+		}
 	}
 
 	if readErr == nil {
@@ -1432,4 +1438,14 @@ func listPrefixFiles(pdfPath string) string {
 		return "  (No matching prefix files)"
 	}
 	return strings.Join(matched, "\n")
+}
+
+func isCleanerDebugEnabled(req Request) bool {
+	if req.Extra != nil && req.Extra["debug"] == "true" {
+		return true
+	}
+	if os.Getenv("ABLESCI_DEBUG") == "true" {
+		return true
+	}
+	return false
 }
