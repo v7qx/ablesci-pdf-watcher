@@ -4,7 +4,7 @@
   const common = window.AblesciPublisherCommon;
   if (!common) return;
 
-  const supported = new Set(['springer', 'oxford', 'wiley', 'acs', 'ieee']);
+  const supported = new Set(['springer', 'oxford', 'wiley', 'acs', 'ieee', 'sage']);
   let pdfTriggered = false;
   let observer = null;
   let stopTimer = null;
@@ -118,6 +118,41 @@
       if (!result.selected) {
         return true;
       }
+    }
+    return false;
+  }
+
+  function hasSageErrorPage() {
+    if (common.currentPublisher() !== 'sage') return false;
+    const title = String(document.title || '').trim();
+    if (title === 'Error | Sage' || title === 'Error | Sage Journals' || /^Error\b/i.test(title)) {
+      return true;
+    }
+    const pbContext = document.querySelector('meta[name="pbContext"]')?.getAttribute('content') || '';
+    if (pbContext.includes('page:404') || pbContext.includes('pageGroup:Error') || pbContext.includes('page:string:404')) {
+      return true;
+    }
+    return false;
+  }
+
+  function hasSageAccessDeniedPage() {
+    if (common.currentPublisher() !== 'sage') return false;
+    if (hasSageErrorPage()) return true;
+
+    // 1. 精准匹配 SAGE 专属无权限按钮/容器选择器
+    const hasPaywallDom = !!document.querySelector(
+      'a[href="#core-collateral-purchase-access"], [data-id="article-nav-menubar-purchaseAccess"], .denial-block, section.denial-block'
+    );
+    if (hasPaywallDom) return true;
+
+    // 2. 备用页面文本匹配 + PDF 下载按钮缺失校验
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    const hasPurchaseOptions = /Get full access to this article|Purchase Instant Access|Buy PDF|Subscribe to this journal/i.test(text);
+    const hasAccessRestricted = /You do not have access to this content|Access Options|View all access and purchase options/i.test(text);
+
+    const result = findPdfLink();
+    if (!result.selected && (hasPurchaseOptions || hasAccessRestricted)) {
+      return true;
     }
     return false;
   }
@@ -273,6 +308,17 @@
         accessDenied: true,
         error: 'Springer 页面明确显示无正文访问权限，已停止本次下载。',
         source: 'springer_access_denied_page'
+      });
+      stopObserver();
+      return;
+    }
+    if (publisher === 'sage' && hasSageAccessDeniedPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('sage', {
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'SAGE 页面无访问权限或处于错误/404页面，已停止下载。',
+        source: 'sage_access_denied_page'
       });
       stopObserver();
       return;

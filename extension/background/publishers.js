@@ -105,6 +105,16 @@
     return /:\/\/academic\.oup\.com\//i.test(String(url || ''));
   }
 
+  function isSageUrl(url) {
+    return /:\/\/(?:journals\.)?sagepub\.com\//i.test(String(url || ''));
+  }
+
+  function sageArticleUrlFromPdfUrl(url) {
+    const s = String(url || '');
+    const match = s.match(/^https?:\/\/journals\.sagepub\.com\/doi\/(?:pdf|epub)\/(10\.[^?#]+)(?:[?#].*)?$/i);
+    return match ? `https://journals.sagepub.com/doi/full/${match[1]}` : '';
+  }
+
   function publisherForUrl(url) {
     if (isScienceDirectUrl(url)) return 'sciencedirect';
     if (isNatureUrl(url)) return 'nature';
@@ -117,6 +127,7 @@
     if (isOxfordUrl(url)) return 'oxford';
     if (isIopUrl(url)) return 'iop';
     if (isCnpeUrl(url)) return 'cnpe';
+    if (isSageUrl(url)) return 'sage';
     return '';
   }
 
@@ -222,7 +233,7 @@
 
   function publisherArticleUrlFromPdfUrl(url) {
     if (isDoiUrl(url)) return url;
-    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || cnpeArticleUrlFromPdfUrl(url) || springerArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || wileyArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || acsArticleUrlFromPdfUrl(url) || ieeeArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || '';
+    return scienceDirectArticleUrlFromPdfUrl(url) || natureArticleUrlFromPdfUrl(url) || cnpeArticleUrlFromPdfUrl(url) || springerArticleUrlFromPdfUrl(url) || rscArticleUrlFromPdfUrl(url) || wileyArticleUrlFromPdfUrl(url) || aipArticleUrlFromPdfUrl(url) || acsArticleUrlFromPdfUrl(url) || ieeeArticleUrlFromPdfUrl(url) || iopArticleUrlFromPdfUrl(url) || sageArticleUrlFromPdfUrl(url) || '';
   }
 
   function looksLikePdfDownloadUrl(url) {
@@ -342,6 +353,7 @@
       if (/(^|\.)nature\.com$/i.test(finalHost)) return { ok: true };
       if (/(^|\.)iopscience\.iop\.org$/i.test(finalHost) || /(^|\.)iop\.org$/i.test(finalHost)) return { ok: true };
       if (/(^|\.)cnpereading\.com$/i.test(finalHost)) return { ok: true };
+      if (/(^|\.)sagepub\.com$/i.test(finalHost)) return { ok: true };
     }
 
     return { ok: false, reason: `host_mismatch (expected: "${expected}", finalHost: "${finalHost}", sourceHost: "${sourceHost}")` };
@@ -362,6 +374,7 @@
     if (publisher === 'oxford') return isOxfordUrl(url);
     if (publisher === 'iop') return isIopUrl(url);
     if (publisher === 'cnpe') return isCnpeUrl(url);
+    if (publisher === 'sage') return isSageUrl(url);
     return false;
   }
 
@@ -382,6 +395,8 @@
     isAcsUrl,
     isIeeeUrl,
     isOxfordUrl,
+    isSageUrl,
+    sageArticleUrlFromPdfUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,
     isDoiUrl,

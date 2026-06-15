@@ -22,7 +22,7 @@
       window.AblesciCnpePublisher?.start();
       return;
     }
-    if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isIeee() || common.isOxford()) {
+    if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isIeee() || common.isOxford() || common.isSage()) {
       window.AblesciDirectPdfPublisher?.start();
       return;
     }

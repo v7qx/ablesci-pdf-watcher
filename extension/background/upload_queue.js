@@ -93,7 +93,7 @@
         } catch (err) {
           const errorMsg = formatTaskError(err);
           const isAssistClosed = /求助状态出错|只有求助中才可以上传/.test(errorMsg);
-          let failureReason = isAssistClosed ? 'assist_closed' : classifyJournalAccessFailureReason(err);
+          let failureReason = isAssistClosed ? 'assist_closed' : (err?.failureReason || classifyJournalAccessFailureReason(err));
           if (failureReason === 'download_not_triggered_timeout' && isDoiUrl(payload?.pdfUrl) && isLikelyRscPayload(payload)) {
             failureReason = 'doi_resolution_failed';
           }

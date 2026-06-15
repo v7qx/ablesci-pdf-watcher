@@ -45,7 +45,8 @@
     "https://ieeexplore.ieee.org/*",
     "https://*.nature.com/*",
     "https://*.cnpereading.com/*",
-    "https://*.iop.org/*"
+    "https://*.iop.org/*",
+    "https://journals.sagepub.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -91,7 +92,8 @@
         "https://ieeexplore.ieee.org/*",
         "https://*.nature.com/*",
         "https://*.cnpereading.com/*",
-        "https://*.iop.org/*"
+        "https://*.iop.org/*",
+        "https://journals.sagepub.com/*"
       ],
       "js": [
         "content/publishers_common.js",

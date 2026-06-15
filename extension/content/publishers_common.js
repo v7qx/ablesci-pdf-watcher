@@ -41,6 +41,10 @@
     return host === 'academic.oup.com';
   }
 
+  function isSage() {
+    return host === 'journals.sagepub.com' || host.endsWith('.journals.sagepub.com');
+  }
+
   function isIop() {
     return /(^|\.)iop\.org$/i.test(host);
   }
@@ -61,6 +65,7 @@
     if (isOxford()) return 'oxford';
     if (isIop()) return 'iop';
     if (isCnpe()) return 'cnpe';
+    if (isSage()) return 'sage';
     return '';
   }
 
@@ -142,6 +147,7 @@
     isOxford,
     isIop,
     isCnpe,
+    isSage,
     currentPublisher,
     canControlCurrentPublisherPage,
     decodeHtmlUrl,

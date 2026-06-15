@@ -257,7 +257,9 @@
           source: msg.source || '',
           error: reason
         });
-        pending.finishError(new Error(reason));
+        const err = new Error(reason);
+        err.failureReason = msg.accessDenied ? 'no_access' : 'publisher_unsupported';
+        pending.finishError(err);
         sendResponse({ ok: true, action: msg.accessDenied ? 'publisher_access_denied' : 'publisher_unsupported' });
         return false;
       }
@@ -393,7 +395,7 @@
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }
-      if (['springer', 'wiley', 'acs', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
+      if (['springer', 'wiley', 'acs', 'oxford', 'sage'].includes(msg.publisher) && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
         if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });
