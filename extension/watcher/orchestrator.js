@@ -91,7 +91,6 @@
     const CANDIDATE_AUDIT_LIMIT = 20000;
     const CANDIDATE_AUDIT_INDEX_LIMIT = 50000;
     const CANDIDATE_AUDIT_RECENT_EVENTS_LIMIT = 8;
-    const MIDPOINT_RESCAN_WINDOW = 10;
     const RUNNING_LOCK_STALE_MS = 20 * 60 * 1000;
 
     function safeAuditText(value, limit = 500) {
@@ -330,7 +329,7 @@
       const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
       const page = scan.page ? `第 ${scan.page} 页` : '';
       const range = scan.range ? `范围 ${scan.range}` : '';
-      const mode = scan.mode === 'midpoint_rescan' ? '半程重扫' : '后台拉取';
+      const mode = '后台拉取';
       return [mode, publisher, page, range].filter(Boolean).join(' ');
     }
 
@@ -641,209 +640,9 @@
       return queueable;
     }
 
-    function shouldRunMidpointRescan(pagePick, stateForTargets, detectedMaxPage) {
-      const maxPage = Number(detectedMaxPage || pagePick.pageMax || 0);
-      const pickedPage = Number(pagePick.pickedPage);
-      if (pagePick.pageOrder !== 'desc') return false;
-      if (!pagePick.urlKey) return false;
-      if (!Number.isFinite(maxPage) || maxPage <= 1) return false;
-      if (!Number.isFinite(pickedPage) || pickedPage <= 0) return false;
-      if (pickedPage > Math.floor(maxPage / 2)) return false;
-      const done = stateForTargets.midpointRescans?.[pagePick.urlKey];
-      return Number(done?.maxPage || 0) !== maxPage;
-    }
 
-    async function runMidpointRescanIfDue({
-      listUrl,
-      pagePick,
-      detectedMaxPage,
-      stateForTargets,
-      opts,
-      trigger,
-      blacklistedIds
-    }) {
-      const maxPage = Number(detectedMaxPage || pagePick.pageMax || 0);
-      if (!shouldRunMidpointRescan(pagePick, stateForTargets, maxPage)) {
-        return { ran: false };
-      }
 
-      const originalLastVisited = stateForTargets.lastVisitedPages?.[pagePick.urlKey];
-      const endPage = Math.max(1, maxPage - MIDPOINT_RESCAN_WINDOW + 1);
-      let scannedPages = 0;
-      let added = 0;
-      let refreshed = 0;
-      let seenSkipped = 0;
-      let parsedCount = 0;
-      let abortedReason = '';
 
-      await appendWatcherTrace('midpoint_rescan_start', {
-        reason: 'desc_cursor_reached_half',
-        trigger,
-        configuredUrl: listUrl,
-        urlKey: pagePick.urlKey,
-        currentPage: pagePick.pickedPage,
-        maxPage,
-        window: MIDPOINT_RESCAN_WINDOW,
-        startPage: maxPage,
-        endPage
-      });
-      await saveCurrentListScan(stateForTargets, {
-        mode: 'midpoint_rescan',
-        trigger,
-        configuredUrl: listUrl,
-        urlKey: pagePick.urlKey,
-        publisher: pagePick.publisher || '',
-        page: maxPage,
-        pageOrder: 'desc',
-        pageMin: endPage,
-        pageMax: maxPage,
-        range: `${maxPage}-${endPage}`,
-        window: MIDPOINT_RESCAN_WINDOW
-      });
-
-      for (let page = maxPage; page >= endPage; page -= 1) {
-        const rescanListUrl = listUrlWithAuditPage(listUrl, page);
-        const rescanPick = {
-          ...pagePick,
-          pickedListUrl: rescanListUrl,
-          pickedPage: page,
-          pageMax: maxPage,
-          pageOrder: 'desc',
-          skipCursorUpdate: true
-        };
-        await saveCurrentListScan(stateForTargets, {
-          mode: 'midpoint_rescan',
-          trigger,
-          configuredUrl: listUrl,
-          pickedListUrl: rescanListUrl,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher || '',
-          page,
-          pageOrder: 'desc',
-          pageMin: endPage,
-          pageMax: maxPage,
-          range: `${maxPage}-${endPage}`,
-          window: MIDPOINT_RESCAN_WINDOW
-        });
-        if (await shouldSkipBackedOffPage(rescanPick)) {
-          await appendWatcherTrace('midpoint_rescan_page_backoff', {
-            reason: 'page_backoff_active',
-            trigger,
-            listUrl: rescanListUrl,
-            urlKey: pagePick.urlKey,
-            pickedPage: page,
-            maxPage
-          });
-          continue;
-        }
-
-        await incrementDaily('checked', trigger);
-        const parseStartedAt = Date.now();
-        const parsed = await parseListUrl(rescanListUrl);
-        await appendWatcherTrace('perf_midpoint_rescan_parse', {
-          reason: 'midpoint_rescan_parse_done',
-          trigger,
-          durationMs: Date.now() - parseStartedAt,
-          pickedPage: page,
-          urlKey: pagePick.urlKey,
-          parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
-          maxPage: parsed?.listStats?.maxPage || maxPage
-        });
-
-        if (parsed?.isErrorPage) {
-          abortedReason = 'site_error';
-          await appendWatcherTrace('midpoint_rescan_aborted', {
-            reason: abortedReason,
-            trigger,
-            listUrl: rescanListUrl,
-            pickedPage: page,
-            errorTitle: parsed.errorTitle || ''
-          });
-          break;
-        }
-        if (parsed?.cfChallenge) {
-          abortedReason = 'cf_challenge';
-          await appendWatcherTrace('midpoint_rescan_aborted', {
-            reason: abortedReason,
-            trigger,
-            listUrl: rescanListUrl,
-            pickedPage: page
-          });
-          break;
-        }
-
-        normalizeParsedListCandidateContext(parsed, rescanPick, rescanListUrl);
-        await auditParsedListCandidates(parsed, rescanPick, rescanListUrl, trigger, 'midpoint_rescan_seen');
-        const sourceGate = minSeekingGateForList(parsed, rescanListUrl, rescanPick.publisher, opts);
-        if (!sourceGate.ok) {
-          await appendWatcherTrace('midpoint_rescan_source_gate_skip', {
-            reason: sourceGate.reason,
-            trigger,
-            listUrl: rescanListUrl,
-            publisher: sourceGate.publisher,
-            count: sourceGate.count,
-            threshold: sourceGate.threshold
-          });
-          scannedPages += 1;
-          parsedCount += Array.isArray(parsed.candidates) ? parsed.candidates.length : 0;
-          continue;
-        }
-
-        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, sessionSize(opts));
-        const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, rescanPick, blacklistedIds);
-        const enqueueResult = await enqueueParsedCandidates(parsed, rescanPick, rescanListUrl, trigger, queueableCandidates);
-        await auditEnqueueResult(enqueueResult, rescanPick, rescanListUrl, trigger, 'midpoint_rescan_queue');
-        scannedPages += 1;
-        parsedCount += Array.isArray(parsed.candidates) ? parsed.candidates.length : 0;
-        added += enqueueResult.added || 0;
-        refreshed += enqueueResult.refreshed || 0;
-        seenSkipped += enqueueResult.seenSkipped || 0;
-      }
-
-      stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-      if (originalLastVisited === undefined) {
-        delete stateForTargets.lastVisitedPages[pagePick.urlKey];
-      } else {
-        stateForTargets.lastVisitedPages[pagePick.urlKey] = originalLastVisited;
-      }
-      stateForTargets.midpointRescans = stateForTargets.midpointRescans || {};
-      stateForTargets.midpointRescans[pagePick.urlKey] = {
-        maxPage,
-        window: MIDPOINT_RESCAN_WINDOW,
-        startPage: maxPage,
-        endPage,
-        scannedPages,
-        parsedCount,
-        added,
-        refreshed,
-        seenSkipped,
-        abortedReason,
-        completedAt: new Date().toISOString()
-      };
-      await saveWatcherStateSafe(stateForTargets);
-
-      await appendWatcherTrace(added > 0 ? 'midpoint_rescan_done' : 'midpoint_rescan_no_new_ids', {
-        reason: added > 0 ? 'midpoint_rescan_added_candidates' : 'midpoint_rescan_no_new_ids',
-        trigger,
-        configuredUrl: listUrl,
-        urlKey: pagePick.urlKey,
-        maxPage,
-        startPage: maxPage,
-        endPage,
-        scannedPages,
-        parsedCount,
-        added,
-        refreshed,
-        seenSkipped,
-        abortedReason
-      });
-
-      const latestState = await getWatcherState();
-      stateForTargets.assistCandidateQueue = latestState.assistCandidateQueue;
-      stateForTargets.detectedMaxPages = latestState.detectedMaxPages || stateForTargets.detectedMaxPages;
-      stateForTargets.midpointRescans = latestState.midpointRescans || stateForTargets.midpointRescans;
-      return { ran: true, added, scannedPages };
-    }
 
     async function processCandidateBatch(candidates, context) {
       const {
@@ -1852,17 +1651,7 @@
               pageOrder: pagePick.pageOrder,
               urlKey: pagePick.urlKey,
               pickedPage: Number(pagePick.pickedPage),
-              currentPage: parsed?.listStats?.currentPage || '',
-              maxPage: parsed?.listStats?.maxPage || ''
-            });
-            await runMidpointRescanIfDue({
-              listUrl,
-              pagePick,
-              detectedMaxPage,
-              stateForTargets,
-              opts,
-              trigger,
-              blacklistedIds
+              currentPage: parsed?.listStats?.currentPage || ''
             });
           }
           await appendWatcherTrace('list_scan_candidates', {
