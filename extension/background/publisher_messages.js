@@ -104,8 +104,15 @@
         });
       }
 
+      const currentHost = hostnameOf(url);
+      if (currentHost === 'chooser.crossref.org') {
+        const err = new Error('DOI 对应多个解析结果（Crossref 多链接），当前出版商页面类型不支持自动处理');
+        err.failureReason = 'publisher_unsupported';
+        pending.finishError?.(err);
+        return;
+      }
+
       if (changeInfo.status === 'complete') {
-        const currentHost = hostnameOf(url);
         if (isDoiHost(currentHost)) {
           pending.finishError?.(new Error('DOI未找到或解析失败（DOI Not Found）'));
           return;
