@@ -267,6 +267,14 @@ func handleDeleteFile(req Request) error {
 }
 
 func handleCopyPDF(req Request) error {
+	// 调试日志：确认是否被拉起复制文件
+	copyLog := fmt.Sprintf("CopyPDF Called: Path=%s Suffix=%s MoveToDir=%s Filename=%s\n", req.Path, req.Extra["suffix"], req.MoveToDir, req.Filename)
+	f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if f != nil {
+		_, _ = f.WriteString(copyLog)
+		f.Close()
+	}
+
 	path, err := cleanExistingPath(req.Path)
 	if err != nil {
 		return err
@@ -861,10 +869,13 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 		args = []string{
 			"clean-access",
 			"--input", pdfPath,
+			"--dry-run",
 			"--summary-json", summaryPath,
 			"--timeout-seconds", "10",
 		}
 	} else {
+		// Legacy zotero-access-cleaner.exe:
+		// Default is dry-run (apply=false) if we don't pass "-apply"
 		args = []string{
 			"-input", pdfPath,
 			"-summary-json", summaryPath,
@@ -872,7 +883,7 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, cleanerPath, args...)
@@ -882,9 +893,7 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
 	}
 
-	if err := cmd.Run(); err != nil {
-		return 0
-	}
+	_ = cmd.Run()
 
 	summaryData, err := os.ReadFile(summaryPath)
 	if err != nil {
@@ -1104,7 +1113,13 @@ func handleCleanPDF(req Request) error {
 		if err != nil {
 			return err
 		}
-		cleanerPath = filepath.Join(filepath.Dir(exePath), "zotero-access-cleaner.exe")
+		dir := filepath.Dir(exePath)
+		toolboxPath := filepath.Join(dir, "zotero-pdf-toolbox.exe")
+		if fileExists(toolboxPath) {
+			cleanerPath = toolboxPath
+		} else {
+			cleanerPath = filepath.Join(dir, "zotero-access-cleaner.exe")
+		}
 	}
 	cleanerPath, err = cleanCleanerExecutablePath(cleanerPath)
 	if err != nil {
@@ -1129,6 +1144,10 @@ func handleCleanPDF(req Request) error {
 	}
 	args := buildCleanerArgs(cleanerPath, path, summaryPath, req.Extra, preserveOriginal, timeoutSeconds)
 
+	// 临时调试日志：收集运行前的文件状态与请求载荷
+	reqJSON, _ := json.MarshalIndent(req, "", "  ")
+	filesBefore := listPrefixFiles(path)
+
 	// 4. Set process timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds+5)*time.Second)
 	defer cancel()
@@ -1141,13 +1160,54 @@ func handleCleanPDF(req Request) error {
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
 	}
 
+	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
 
+	// 收集运行后的文件状态
+	filesAfter := listPrefixFiles(path)
+
 	// 6. Check summary JSON
 	summaryData, readErr := os.ReadFile(summaryPath)
+	summaryLog := ""
+	if readErr == nil {
+		summaryLog = string(summaryData)
+		_ = os.WriteFile(filepath.Join(os.TempDir(), "ablesci_cleaner_summary.json"), summaryData, 0644)
+	} else {
+		summaryLog = fmt.Sprintf("(Error reading summary file: %v)", readErr)
+	}
+
+	// 将详尽的调试日志追加写入临时文件，便于极其细致地排查
+	debugLog := fmt.Sprintf("\n--- [NEW TEST] %s ---\n"+
+		"Request Payload:\n%s\n\n"+
+		"Executable:\n%s\n\n"+
+		"Args:\n%v\n\n"+
+		"Files BEFORE clean:\n%s\n\n"+
+		"Process Run Error:\n%v\n\n"+
+		"Process Stdout:\n%s\n\n"+
+		"Process Stderr:\n%s\n\n"+
+		"Files AFTER clean:\n%s\n\n"+
+		"Summary Content:\n%s\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		string(reqJSON),
+		cleanerPath,
+		args,
+		filesBefore,
+		runErr,
+		stdout.String(),
+		stderr.String(),
+		filesAfter,
+		summaryLog,
+	)
+	f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if f != nil {
+		_, _ = f.WriteString(debugLog)
+		f.Close()
+	}
+
 	if readErr == nil {
 		// Parse summary
 		type Summary struct {
@@ -1342,4 +1402,34 @@ func buildCleanerArgs(cleanerPath, inputPath, summaryPath string, extra map[stri
 	}
 	args = append(args, "-timeout-seconds", timeoutArg)
 	return args
+}
+
+func listPrefixFiles(pdfPath string) string {
+	dir := filepath.Dir(pdfPath)
+	ext := filepath.Ext(pdfPath)
+	base := filepath.Base(pdfPath)
+	baseName := strings.TrimSuffix(base, ext)
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Sprintf("  (Error reading dir: %v)", err)
+	}
+
+	var matched []string
+	for _, f := range files {
+		if !f.IsDir() && strings.HasPrefix(strings.ToLower(f.Name()), strings.ToLower(baseName)) {
+			info, err := f.Info()
+			size := int64(-1)
+			modTime := "unknown"
+			if err == nil {
+				size = info.Size()
+				modTime = info.ModTime().Format("15:04:05")
+			}
+			matched = append(matched, fmt.Sprintf("  - %s (Size: %d bytes, ModTime: %s)", f.Name(), size, modTime))
+		}
+	}
+	if len(matched) == 0 {
+		return "  (No matching prefix files)"
+	}
+	return strings.Join(matched, "\n")
 }

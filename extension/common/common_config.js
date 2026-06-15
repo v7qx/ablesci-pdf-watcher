@@ -223,7 +223,7 @@
       pdfCleanerEngine: ['auto', 'pdfcpu', 'qpdf'].includes(opts.pdfCleanerEngine) ? opts.pdfCleanerEngine : 'auto',
       pdfCleanerTimeoutSeconds: clampNumber(opts.pdfCleanerTimeoutSeconds, 60, 5, 300),
       pdfCleanerOnError: ['upload_original', 'stop_upload'].includes(opts.pdfCleanerOnError) ? opts.pdfCleanerOnError : 'upload_original',
-      pdfCleanerPreserveOriginal: opts.pdfCleanerPreserveOriginal === true,
+      pdfCleanerPreserveOriginal: false,
       watcherSkipCorrigendum: opts.watcherSkipCorrigendum !== false,
       watcherEnableBlacklist: opts.watcherEnableBlacklist === true,
       watcherBlacklistPath: String(opts.watcherBlacklistPath !== undefined ? opts.watcherBlacklistPath : DEFAULT_OPTIONS.watcherBlacklistPath).trim()

@@ -331,13 +331,13 @@ const TEXT_MAP = {
   "启用 PDF 去水印": "Enable PDF Watermark Cleaner",
   "在下载 PDF 完成后、上传到科研通之前，自动调用本地去水印工具清理水印。": "Automatically clean watermarks using the local CLI tool after PDF download and before upload.",
   "去水印工具路径": "Watermark Cleaner Path",
-  "zotero-access-cleaner.exe 的绝对路径。": "Absolute path to zotero-access-cleaner.exe.",
-  "例如：D:\\path\\to\\zotero-access-cleaner.exe": "e.g., D:\\path\\to\\zotero-access-cleaner.exe",
+  "zotero-pdf-toolbox.exe 的绝对路径；旧 zotero-access-cleaner.exe 仍兼容。": "Absolute path to zotero-pdf-toolbox.exe; legacy zotero-access-cleaner.exe remains compatible.",
+  "例如：D:\\path\\to\\zotero-pdf-toolbox.exe": "e.g., D:\\path\\to\\zotero-pdf-toolbox.exe",
   "规则库文件路径": "Patterns File Path",
   "patterns.json 的绝对路径。留空则尝试自动从工具路径推导。": "Absolute path to patterns.json. Leave empty to auto-derive from the tool path.",
   "例如：D:\\path\\to\\patterns.json": "e.g., D:\\path\\to\\patterns.json",
   "处理引擎": "Processing Engine",
-  "默认自适应模式。": "Default is adaptive mode.",
+  "默认自适应模式；会先快速探测文本，适合大文件。": "Default adaptive mode; probes text first and is suitable for large PDFs.",
   "自适应 (Auto)": "Adaptive (Auto)",
   "pdfcpu 引擎 (严格校验)": "pdfcpu Engine (Strict)",
   "qpdf 引擎 (高容错性)": "qpdf Engine (High Tolerance)",
@@ -347,8 +347,6 @@ const TEXT_MAP = {
   "如果去水印失败或超时，是继续上传原 PDF 还是终止上传。": "Choose whether to proceed with uploading the original PDF or stop upload if cleaning fails/times out.",
   "上传原始 PDF": "Upload Original PDF",
   "终止上传并报错": "Abort Upload and Report Error",
-  "去水印调试模式": "Watermark Debug Mode",
-  "保留去水印前的原始 PDF 文件（清洗成功时在同一目录下生成 filename.original.pdf）。": "Preserve original PDF file as filename.original.pdf when cleaned successfully.",
   "去水印超时时间必须在 5 到 300 秒之间。": "Watermark cleaner timeout must be between 5 and 300 seconds."
 };
 

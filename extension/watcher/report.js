@@ -621,6 +621,16 @@
       function traceAssistIdValue(details = {}) {
         return String(details.assistId || '');
       }
+      function simplifyDecisionDetail(row) {
+        const reason = String(row?.reason || '');
+        const detail = String(row?.detail || '');
+        if (/本轮命中本地期刊规则|Local journal rule matches grouped/i.test(reason)) {
+          const match = detail.match(/命中本地期刊规则\s*(\d+)\s*条/i) || detail.match(/(\d+)/);
+          if (match) return isEn ? `Matched local journal rules: ${match[1]} items` : `命中本地期刊规则 ${match[1]} 条`;
+          return isEn ? 'Matched local journal rules' : '命中本地期刊规则';
+        }
+        return detail;
+      }
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -705,9 +715,28 @@
         }))
       ];
       const csv = makeCsv(csvRows);
+      function candidateDetailUrl(entry = {}) {
+        if (entry.detailUrl) return entry.detailUrl;
+        const assistId = String(entry.assistId || '').trim();
+        return assistId ? `https://www.ablesci.com/assist/detail?id=${encodeURIComponent(assistId)}` : '';
+      }
+      function candidateListUrl(entry = {}) {
+        const existing = entry.listUrl || entry.lastListUrl || '';
+        if (existing) return existing;
+        const urlKey = String(entry.urlKey || '').trim();
+        const page = Number(entry.page || entry.lastPage || 0);
+        if (!urlKey || !Number.isFinite(page) || page <= 0) return '';
+        try {
+          const u = new URL(urlKey);
+          u.searchParams.set('page', String(Math.round(page)));
+          return u.toString();
+        } catch (_) {
+          return '';
+        }
+      }
       const candidateAuditCsvHeader = isEn
-        ? ['Time', 'Trigger', 'Page', 'Order', 'Index', 'Publisher', 'Phase', 'Status', 'Reason', 'Assist ID', 'Journal', 'DOI', 'Assist Time', 'Title', 'List URL', 'Detail URL', 'Details']
-        : ['时间', '触发方式', '页码', '页序', '列表位置', '出版社', '阶段', '结果', '原因', '求助ID', '期刊', 'DOI', '求助时间', '标题', '列表页链接', '详情页链接', '细节'];
+        ? ['Time', 'Trigger', 'Page', 'Order', 'Index', 'Publisher', 'Phase', 'Status', 'Reason', 'Assist ID', 'Journal', 'DOI', 'Assist Time', 'List URL', 'Detail URL', 'Details']
+        : ['时间', '触发方式', '页码', '页序', '列表位置', '出版社', '阶段', '结果', '原因', '求助ID', '期刊', 'DOI', '求助时间', '列表页链接', '详情页链接', '细节'];
       const candidateAuditCsvRows = [
         candidateAuditCsvHeader,
         ...candidateAudit
@@ -727,9 +756,8 @@
             entry.journalShortName || entry.journalName || '',
             entry.doi || '',
             entry.assistTimeText || '',
-            entry.title || '',
-            entry.listUrl || '',
-            entry.detailUrl || '',
+            candidateListUrl(entry),
+            candidateDetailUrl(entry),
             reportJson({
               assistAgeSeconds: entry.assistAgeSeconds ?? '',
               source: entry.source || '',
@@ -750,8 +778,8 @@
         }).join(' | ');
       }
       const candidateStateCsvHeader = isEn
-        ? ['First Seen', 'Last Update', 'Event Count', 'Assist ID', 'Journal', 'Publisher', 'Latest Phase', 'Latest Status', 'Latest Reason', 'First Page', 'Last Page', 'Pages', 'DOI', 'Assist Time', 'Title', 'Last List URL', 'Detail URL', 'Recent Events']
-        : ['首次看到', '最后更新', '事件数', '求助ID', '期刊', '出版社', '最新阶段', '最新结果', '最新原因', '首次页', '最后页', '出现页', 'DOI', '求助时间', '标题', '最后列表页链接', '详情页链接', '最近状态变化'];
+        ? ['First Seen', 'Last Update', 'Event Count', 'Assist ID', 'Journal', 'Publisher', 'Latest Phase', 'Latest Status', 'Latest Reason', 'First Page', 'Last Page', 'Pages', 'DOI', 'Assist Time', 'Last List URL', 'Detail URL', 'Recent Events']
+        : ['首次看到', '最后更新', '事件数', '求助ID', '期刊', '出版社', '最新阶段', '最新结果', '最新原因', '首次页', '最后页', '出现页', 'DOI', '求助时间', '最后列表页链接', '详情页链接', '最近状态变化'];
       const candidateStateCsvRows = [
         candidateStateCsvHeader,
         ...candidateAuditIndex
@@ -772,9 +800,8 @@
             Array.isArray(entry.pages) ? entry.pages.join('|') : '',
             entry.doi || '',
             entry.assistTimeText || '',
-            entry.title || '',
-            entry.lastListUrl || '',
-            entry.detailUrl || '',
+            candidateListUrl(entry),
+            candidateDetailUrl(entry),
             candidateRecentEventsText(entry)
           ])
       ];
@@ -1044,14 +1071,14 @@
           row.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (row.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : row.trigger),
           row.step,
           row.reason,
-          row.detail,
+          simplifyDecisionDetail(row),
           formatBeijingDateOnly(row.time)
         ])),
         '',
         '## Recent Events',
         '',
-        isEn ? '| Time | Trigger | Status | Reason | PDF Cleaner | Journal | DOI | Detail | Date |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | PDF 去水印 | 期刊 (Journal) | DOI | 详情 (Detail) | 日期 |',
-        '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+        isEn ? '| Time | Trigger | Status | Reason | Journal | DOI | Detail | Date |' : '| 时间 | 触发方式 | 状态 (Status) | 原因 (Reason) | 期刊 (Journal) | DOI | 详情 (Detail) | 日期 |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- |',
         ...logs.filter(log => log.status === 'success')
           .slice()
           .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
@@ -1063,7 +1090,6 @@
             log.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (log.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : log.trigger),
             translateStep(log.status || '', isEn),
             shortEventReason(log.reason || '', isEn),
-            cleanerStatusText(log.pdfCleanerResult),
             log.journalName || '',
             log.doi || '',
             detailVal,

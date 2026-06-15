@@ -42,6 +42,17 @@
       }
     }
 
+    function isSamePdfUrl(urlA, urlB) {
+      if (!urlA || !urlB) return urlA === urlB;
+      try {
+        const uA = new URL(String(urlA).trim());
+        const uB = new URL(String(urlB).trim());
+        return (uA.origin + uA.pathname).toLowerCase() === (uB.origin + uB.pathname).toLowerCase();
+      } catch (_) {
+        return String(urlA).trim().toLowerCase() === String(urlB).trim().toLowerCase();
+      }
+    }
+
     function looksLikeChallengeUrl(url) {
       return /(?:[?&]__cf_chl_|\/cdn-cgi\/challenge-platform\/|cf_chl_rt_tk|turnstile|captcha)/i.test(String(url || ''));
     }
@@ -272,7 +283,7 @@
       }
       if (msg.publisher === 'sciencedirect' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same native pdf url already handled' });
           return false;
         }
@@ -286,7 +297,7 @@
       }
       if (msg.publisher === 'nature' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same native pdf url already handled' });
           return false;
         }
@@ -312,7 +323,7 @@
       }
       if (msg.publisher === 'cnpe' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same cnpe pdf url already handled' });
           return false;
         }
@@ -338,7 +349,7 @@
       }
       if (msg.publisher === 'rsc' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same rsc pdf url already handled' });
           return false;
         }
@@ -354,7 +365,7 @@
       }
       if (msg.publisher === 'ieee' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same ieee pdf url already handled' });
           return false;
         }
@@ -384,7 +395,7 @@
       }
       if (['springer', 'wiley', 'acs', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });
           return false;
         }
@@ -408,7 +419,7 @@
       }
       if (msg.publisher === 'aip' && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same aip pdf url already handled' });
           return false;
         }
@@ -430,7 +441,7 @@
         return true;
       }
       if (msg.publisher === 'iop' && msg.pdfUrl) {
-        if (pending.lastNativePdfUrl === msg.pdfUrl) {
+        if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same iop pdf url already handled' });
           return false;
         }

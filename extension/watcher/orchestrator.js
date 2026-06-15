@@ -89,7 +89,7 @@
     const CANDIDATE_AUDIT_KEY = 'autoWatcherCandidateAudit';
     const CANDIDATE_AUDIT_INDEX_KEY = 'autoWatcherCandidateAuditIndex';
     const CANDIDATE_AUDIT_LIMIT = 20000;
-    const CANDIDATE_AUDIT_INDEX_LIMIT = 50000;
+    const CANDIDATE_AUDIT_INDEX_LIMIT = 10000;
     const CANDIDATE_AUDIT_RECENT_EVENTS_LIMIT = 8;
     const RUNNING_LOCK_STALE_MS = 20 * 60 * 1000;
 
@@ -97,17 +97,40 @@
       return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
     }
 
+    function listUrlKeyFromUrl(url = '') {
+      try {
+        const u = new URL(url);
+        u.searchParams.delete('page');
+        return u.toString();
+      } catch (_) {
+        return '';
+      }
+    }
+
     function auditNumberOrEmpty(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : '';
     }
 
+    function compactCandidateAuditDetails(details = {}) {
+      if (!details || typeof details !== 'object' || Array.isArray(details)) return {};
+      const compact = {};
+      if (details.requestedPage !== undefined) compact.requestedPage = auditNumberOrEmpty(details.requestedPage);
+      if (details.maxDetailAttempts !== undefined) compact.maxDetailAttempts = auditNumberOrEmpty(details.maxDetailAttempts);
+      if (details.stopRun === true) compact.stopRun = true;
+      if (details.removeQueue === true) compact.removeQueue = true;
+      if (details.journalAccess && typeof details.journalAccess === 'object') {
+        compact.journalAccess = {
+          shortName: safeAuditText(details.journalAccess.shortName || details.journalAccess.journalShortName || '', 120),
+          reason: safeAuditText(details.journalAccess.reason || '', 80)
+        };
+      }
+      return compact;
+    }
+
     function buildCandidateAuditEntry(phase, candidate = {}, extra = {}) {
       const assistId = safeAuditText(candidate.assistId || extra.assistId || '', 80);
-      const detailUrl = safeAuditText(
-        candidate.detailUrl || extra.detailUrl || (assistId ? `https://www.ablesci.com/assist/detail?id=${assistId}` : ''),
-        500
-      );
+      const listUrl = safeAuditText(candidate.listUrl || extra.listUrl || extra.pickedListUrl || '', 500);
       return {
         time: extra.time || new Date().toISOString(),
         phase: safeAuditText(phase, 80),
@@ -115,23 +138,20 @@
         reason: safeAuditText(extra.reason || '', 240),
         trigger: safeAuditText(extra.trigger || '', 80),
         assistId,
-        title: safeAuditText(candidate.title || extra.title || '', 240),
         doi: safeAuditText(candidate.doi || extra.doi || '', 160),
         journalShortName: safeAuditText(candidate.journalShortName || extra.journalShortName || '', 160),
         journalName: safeAuditText(candidate.journalName || extra.journalName || '', 240),
         publisherName: safeAuditText(candidate.publisherName || extra.publisherName || extra.publisher || '', 160),
-        detailUrl,
-        listUrl: safeAuditText(candidate.listUrl || extra.listUrl || extra.pickedListUrl || '', 500),
         page: auditNumberOrEmpty(extra.page ?? extra.pickedPage ?? candidate.page),
         pageOrder: safeAuditText(extra.pageOrder || candidate.pageOrder || '', 20),
         pageMax: auditNumberOrEmpty(extra.pageMax ?? candidate.pageMax),
-        urlKey: safeAuditText(extra.urlKey || candidate.urlKey || '', 240),
+        urlKey: safeAuditText(extra.urlKey || candidate.urlKey || listUrlKeyFromUrl(listUrl), 240),
         listIndex: auditNumberOrEmpty(extra.listIndex ?? candidate.index),
         assistTimeText: safeAuditText(candidate.assistTimeText || extra.assistTimeText || '', 80),
         assistAgeSeconds: auditNumberOrEmpty(candidate.assistAgeSeconds ?? extra.assistAgeSeconds),
         source: safeAuditText(extra.source || '', 80),
         tabId: safeAuditText(extra.tabId || '', 40),
-        details: extra.details && typeof extra.details === 'object' ? extra.details : {}
+        details: compactCandidateAuditDetails(extra.details)
       };
     }
 
@@ -141,13 +161,16 @@
       try {
         const storage = (typeof chrome !== 'undefined' ? chrome : browser).storage.local;
         const stored = await storage.get([CANDIDATE_AUDIT_KEY, CANDIDATE_AUDIT_INDEX_KEY]);
-        const current = Array.isArray(stored[CANDIDATE_AUDIT_KEY]) ? stored[CANDIDATE_AUDIT_KEY] : [];
+        const normalizedBatch = batch.map(normalizeCandidateAuditEntryForStorage);
+        const current = Array.isArray(stored[CANDIDATE_AUDIT_KEY])
+          ? stored[CANDIDATE_AUDIT_KEY].map(normalizeCandidateAuditEntryForStorage)
+          : [];
         const currentIndex = stored[CANDIDATE_AUDIT_INDEX_KEY] && typeof stored[CANDIDATE_AUDIT_INDEX_KEY] === 'object' && !Array.isArray(stored[CANDIDATE_AUDIT_INDEX_KEY])
-          ? stored[CANDIDATE_AUDIT_INDEX_KEY]
+          ? normalizeCandidateAuditIndexForStorage(stored[CANDIDATE_AUDIT_INDEX_KEY])
           : {};
         await storage.set({
-          [CANDIDATE_AUDIT_KEY]: batch.concat(current).slice(0, CANDIDATE_AUDIT_LIMIT),
-          [CANDIDATE_AUDIT_INDEX_KEY]: updateCandidateAuditIndex(currentIndex, batch)
+          [CANDIDATE_AUDIT_KEY]: normalizedBatch.concat(current).slice(0, CANDIDATE_AUDIT_LIMIT),
+          [CANDIDATE_AUDIT_INDEX_KEY]: updateCandidateAuditIndex(currentIndex, normalizedBatch)
         });
       } catch (err) {
         console.warn('[candidateAudit] failed', err);
@@ -200,14 +223,11 @@
           latestPhase: entry.phase || prev.latestPhase || '',
           latestStatus: entry.status || prev.latestStatus || '',
           latestReason: entry.reason || prev.latestReason || '',
-          title: safeAuditText(entry.title || prev.title || '', 240),
           journalShortName: safeAuditText(entry.journalShortName || prev.journalShortName || '', 160),
           publisherName: safeAuditText(entry.publisherName || prev.publisherName || '', 160),
           doi: safeAuditText(entry.doi || prev.doi || '', 160),
           assistTimeText: safeAuditText(entry.assistTimeText || prev.assistTimeText || '', 80),
-          detailUrl: safeAuditText(entry.detailUrl || prev.detailUrl || '', 500),
-          firstListUrl: safeAuditText(prev.firstListUrl || entry.listUrl || '', 500),
-          lastListUrl: safeAuditText(entry.listUrl || prev.lastListUrl || '', 500),
+          urlKey: safeAuditText(entry.urlKey || prev.urlKey || listUrlKeyFromUrl(entry.listUrl || prev.lastListUrl || prev.firstListUrl || ''), 240),
           firstPage: prev.firstPage || entry.page || '',
           lastPage: entry.page || prev.lastPage || '',
           lastListIndex: entry.listIndex ?? prev.lastListIndex ?? '',
@@ -219,6 +239,32 @@
       if (entries.length <= CANDIDATE_AUDIT_INDEX_LIMIT) return next;
       entries.sort((a, b) => new Date(b[1]?.lastAt || 0).getTime() - new Date(a[1]?.lastAt || 0).getTime());
       return Object.fromEntries(entries.slice(0, CANDIDATE_AUDIT_INDEX_LIMIT));
+    }
+
+    function normalizeCandidateAuditEntryForStorage(record) {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+      const next = { ...record };
+      delete next.title;
+      const urlKey = next.urlKey || listUrlKeyFromUrl(next.listUrl || next.lastListUrl || next.firstListUrl || '');
+      if (urlKey) next.urlKey = safeAuditText(urlKey, 240);
+      delete next.detailUrl;
+      delete next.listUrl;
+      delete next.firstListUrl;
+      delete next.lastListUrl;
+      next.details = compactCandidateAuditDetails(next.details);
+      return next;
+    }
+
+    function normalizeCandidateAuditIndexForStorage(index) {
+      if (!index || typeof index !== 'object' || Array.isArray(index)) return {};
+      let changed = false;
+      const next = {};
+      for (const [key, value] of Object.entries(index)) {
+        const normalized = normalizeCandidateAuditEntryForStorage(value);
+        if (normalized !== value) changed = true;
+        next[key] = normalized;
+      }
+      return changed ? next : index;
     }
 
     function listUrlWithAuditPage(listUrl, page) {
@@ -431,7 +477,6 @@
         if (!storedPageData || storedPageData.url !== pickedListUrl) {
           const initialCandidates = (parsed.candidates || []).slice().reverse().map(c => ({
             assistId: String(c.assistId || ''),
-            title: c.title || '',
             doi: c.doi || '',
             detailUrl: c.detailUrl || '',
             status: 'pending',
@@ -452,6 +497,7 @@
           if (Array.isArray(pageData.candidates)) {
             const oldMap = new Map();
             for (const cand of pageData.candidates) {
+              delete cand.title;
               oldMap.set(String(cand.assistId), cand);
             }
 
@@ -469,7 +515,6 @@
               } else {
                 orderedCandidates.push({
                   assistId: cid,
-                  title: c.title || '',
                   doi: c.doi || '',
                   detailUrl: c.detailUrl || '',
                   status: 'pending',
@@ -605,7 +650,6 @@
           trigger,
           detailUrl: candidate.detailUrl,
           assistId: candidate.assistId || '',
-          title: candidate.title || '',
           journalShortName: candidate.journalShortName || '',
           assistTimeText: candidate.assistTimeText || '',
           assistAgeSeconds: candidate.assistAgeSeconds ?? '',
@@ -676,7 +720,6 @@
             trigger,
             detailUrl: candidate.detailUrl,
             assistId: candidate.assistId || '',
-            title: candidate.title || '',
             journalShortName: candidate.journalShortName || '',
             assistTimeText: candidate.assistTimeText || '',
             assistAgeSeconds: candidate.assistAgeSeconds ?? '',
@@ -763,7 +806,6 @@
           trigger,
           detailUrl: candidate.detailUrl,
           assistId: candidate.assistId || '',
-          title: candidate.title || '',
           source: fromQueue ? 'candidate_queue' : 'list_page'
         });
         await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_start', candidate, {

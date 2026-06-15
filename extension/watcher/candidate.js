@@ -13,7 +13,7 @@
       highRiskFailThreshold,
       doiFailureSkipThreshold
     } = config;
-    const JOURNAL_ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+    const JOURNAL_ACCESS_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
     function candidatePublisherName(candidate) {
       return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');

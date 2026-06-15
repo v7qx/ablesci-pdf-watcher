@@ -246,10 +246,10 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>去水印工具路径</strong>
-          <span>zotero-access-cleaner.exe 的绝对路径。</span>
+          <span>zotero-pdf-toolbox.exe 的绝对路径；旧 zotero-access-cleaner.exe 仍兼容。</span>
         </div>
         <div class="setting-control setting-control-wide">
-          <input id="pdfCleanerCliPath" type="text" placeholder="例如：D:\path\to\zotero-access-cleaner.exe">
+          <input id="pdfCleanerCliPath" type="text" placeholder="例如：D:\path\to\zotero-pdf-toolbox.exe">
         </div>
       </div>
       <div class="setting-row">
@@ -264,7 +264,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>处理引擎</strong>
-          <span>默认自适应模式。</span>
+          <span>默认自适应模式；会先快速探测文本，适合大文件。</span>
         </div>
         <div class="setting-control">
           <select id="pdfCleanerEngine">
@@ -293,18 +293,6 @@
             <option value="upload_original">上传原始 PDF</option>
             <option value="stop_upload">终止上传并报错</option>
           </select>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>去水印调试模式</strong>
-          <span>保留去水印前的原始 PDF 文件（清洗成功时在同一目录下生成 filename.original.pdf）。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="保留去水印前原始文件">
-            <input id="pdfCleanerPreserveOriginal" type="checkbox">
-            <span></span>
-          </label>
         </div>
       </div>
     </details>

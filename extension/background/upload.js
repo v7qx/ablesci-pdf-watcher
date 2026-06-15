@@ -72,6 +72,7 @@
         rules: Array.isArray(cleanRes?.clean_rules) ? cleanRes.clean_rules.slice(0, 20) : [],
         engine: String(cleanRes?.clean_engine || ''),
         elapsedMs: Number(cleanRes?.clean_elapsed_ms || 0),
+        pageCount: Number(cleanRes?.clean_page_count || 0),
         errorCode: String(cleanRes?.clean_error_code || ''),
         error: String(cleanRes?.error || overrides.error || ''),
         outputPath: String(cleanRes?.path || ''),
@@ -88,13 +89,14 @@
       if (!result || !result.enabled) return '';
       const engine = result.engine ? `，引擎 ${result.engine}` : '';
       const elapsed = result.elapsedMs ? `，耗时 ${result.elapsedMs}ms` : '';
+      const pages = result.pageCount ? `，${result.pageCount} 页` : '';
       const preserved = result.preservedOriginalPath ? '；已保留 *.original.pdf' : '';
       const preservedCleaned = result.preservedCleanedPath ? '；已保留 *.cleaned.pdf' : '';
       if (result.status === 'cleaned') {
-        return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${preserved}${preservedCleaned}`;
+        return `去水印：已去除 ${Number(result.matched || 0)} 处${engine}${elapsed}${pages}${preserved}${preservedCleaned}`;
       }
       if (result.status === 'no_watermark') {
-        return `去水印：未检测到匹配水印${engine}${elapsed}${preserved}`;
+        return `去水印：未检测到匹配水印${engine}${elapsed}${pages}${preserved}`;
       }
       if (result.status === 'skipped') {
         return `去水印：已跳过${result.error ? `（${result.error}）` : ''}${preserved}`;
@@ -340,7 +342,7 @@
       let pdfCleanerResult = null;
       if (opts.pdfCleanerEnabled) {
         const originalPdfPath = stat.path || item.filename || '';
-        const shouldPreserveCleanerOriginal = opts.pdfCleanerPreserveOriginal === true || opts.debugDownloadOnly === true;
+        const shouldPreserveCleanerOriginal = opts.debugDownloadOnly === true;
         post(port, 'progress', '正在对 PDF 进行去水印处理...');
         try {
           const cleanRes = await sendNativeMessage(opts.nativeHostName, {

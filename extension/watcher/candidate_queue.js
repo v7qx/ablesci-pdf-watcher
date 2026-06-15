@@ -37,7 +37,8 @@
       for (const [key, value] of Object.entries(queue.seen || {})) {
         const t = Number(value?.lastSeenAt || value?.consumedAt || 0);
         if (key && Number.isFinite(t) && now - t <= SEEN_TTL_MS && isScienceDirectQueueCandidate(value)) {
-          seen[key] = value;
+          seen[key] = { ...value };
+          delete seen[key].title;
         }
       }
 
@@ -47,7 +48,11 @@
         const key = queueCandidateKey(item);
         const t = Number(item?.lastSeenAt || item?.enqueuedAt || 0);
         if (!key || !Number.isFinite(t) || now - t > QUEUE_TTL_MS) continue;
-        if (!unique.has(key)) unique.set(key, item);
+        if (!unique.has(key)) {
+          const normalizedItem = { ...item };
+          delete normalizedItem.title;
+          unique.set(key, normalizedItem);
+        }
       }
 
       const refillBackoff = {};
@@ -78,7 +83,6 @@
         assistId: String(candidate.assistId || '').slice(0, 80),
         detailUrl: String(candidate.detailUrl || '').slice(0, 500),
         listUrl: String(candidate.listUrl || listUrl || '').slice(0, 500),
-        title: String(candidate.title || '').slice(0, 240),
         rowText: String(candidate.rowText || '').slice(0, 1200),
         doi: String(candidate.doi || '').slice(0, 160),
         hasDoi: candidate.hasDoi === true,
@@ -190,14 +194,15 @@
           if (!key) continue;
           const shouldRememberSeen = isScienceDirectQueueCandidate(item);
           if (existing.has(key)) {
-            Object.assign(existing.get(key), item, { enqueuedAt: existing.get(key).enqueuedAt || item.enqueuedAt });
+            const existingItem = existing.get(key);
+            Object.assign(existingItem, item, { enqueuedAt: existingItem.enqueuedAt || item.enqueuedAt });
+            delete existingItem.title;
             result.refreshed += 1;
             if (result.refreshedExamples.length < 20) {
               result.refreshedExamples.push({
                 assistId: item.assistId,
                 detailUrl: item.detailUrl,
                 listUrl: item.listUrl,
-                title: item.title,
                 doi: item.doi,
                 journalShortName: item.journalShortName,
                 publisherName: item.publisherName,
@@ -218,7 +223,6 @@
                 assistId: item.assistId,
                 detailUrl: item.detailUrl,
                 listUrl: item.listUrl,
-                title: item.title,
                 doi: item.doi,
                 journalShortName: item.journalShortName,
                 publisherName: item.publisherName,
@@ -237,7 +241,6 @@
                 assistId: item.assistId,
                 detailUrl: item.detailUrl,
                 listUrl: item.listUrl,
-                title: item.title,
                 doi: item.doi,
                 journalShortName: item.journalShortName,
                 publisherName: item.publisherName,
