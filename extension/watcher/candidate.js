@@ -221,6 +221,7 @@
         list_book_chapter: '已按设置跳过书籍章节求助 (列表页)',
         list_patent_report: '已按设置跳过专利/报告类求助 (列表页)',
         list_too_fresh_assist: '刚发布不足 1 分钟，先跳过以降低抢单失败概率',
+        list_blacklist_user: '求助人 ID 处于黑名单中，列表页直接跳过',
         detail_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (详情页)',
         detail_blacklist_user: '求助人 ID 处于黑名单中，已跳过',
         journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
@@ -240,6 +241,28 @@
         return normalizeTextLocal(value)
           .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
           .trim();
+      }
+      function isJournalBadgeSpan(span) {
+        if (!span) return false;
+        if (span.closest?.('.paper-publisher')) return false;
+        if (span.classList?.contains('title-hint')) return false;
+        if (span.querySelector?.('i')) return false;
+        const title = cleanJournalAccessNameLocal(span.getAttribute('data-ablesci-original-title') || span.getAttribute('title') || '');
+        const label = cleanJournalAccessNameLocal(text(span));
+        const value = title || label;
+        if (!value) return false;
+        if (/求助|违规|举报|高分|置顶|悬赏|文献类型|Book|Chapter|Supplement/i.test(value)) return false;
+        return true;
+      }
+      function extractJournalShortNameFromAnchor(anchor) {
+        const spans = Array.from(anchor?.querySelectorAll('span[title]') || []);
+        for (const span of spans) {
+          if (!isJournalBadgeSpan(span)) continue;
+          const value = span.getAttribute('data-ablesci-original-title') || span.getAttribute('title') || text(span);
+          const clean = cleanJournalAccessNameLocal(value);
+          if (clean) return clean;
+        }
+        return '';
       }
       function normalizeDocumentTypeLocal(value) {
         const textValue = normalizeTextLocal(value);
@@ -377,11 +400,13 @@
         const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
         const assistTimeText = text(row.querySelector('span[title="求助时间"]'));
         const assistAgeSeconds = assistAgeSecondsFrom(assistTimeText);
+        const requesterHref = row.querySelector('a.assist-list-nickname[href*="/user/home"]')?.getAttribute('href') || '';
+        let requesterId = '';
+        try {
+          requesterId = new URL(requesterHref, location.href).searchParams.get('id') || '';
+        } catch (_) {}
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
-        const journalShortName = cleanJournalAccessNameLocal(Array.from(detailAnchor?.querySelectorAll('span[title]') || [])
-          .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
-          .map(span => span.getAttribute('title') || text(span))
-          .find(Boolean) || '');
+        const journalShortName = extractJournalShortNameFromAnchor(detailAnchor);
         const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
         const documentType = normalizeDocumentTypeLocal(typeText);
         const doi = doiFrom(rowText);
@@ -403,6 +428,7 @@
           statusText,
           assistTimeText,
           assistAgeSeconds,
+          requesterId,
           sticky: /stick-assist|置顶/.test(classText + ' ' + rowText),
           index
         };
@@ -514,9 +540,20 @@
       });
     }
 
-    function isListCandidateAllowed(candidate, opts, state = {}) {
+    function isListCandidateAllowed(candidate, opts, state = {}, blacklistedIds = []) {
       const textValue = [candidate.rowText, candidate.title, candidate.statusText].join(' ');
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
+      if (opts.watcherSkipReported && candidate.reported) return { ok: false, reason: 'reported' };
+      if (opts.watcherSkipRejected && candidate.rejected) return { ok: false, reason: 'rejected' };
+      if (opts.watcherEnableBlacklist && candidate.requesterId) {
+        if (Array.isArray(blacklistedIds) && blacklistedIds.length > 0 && blacklistedIds.includes(candidate.requesterId)) {
+          return { ok: false, reason: 'list_blacklist_user' };
+        }
+        if ((!Array.isArray(blacklistedIds) || blacklistedIds.length <= 0) && opts.watcherBlacklistUserIds) {
+          const blacklist = String(opts.watcherBlacklistUserIds || '').split(/[^a-zA-Z0-9]+/).map(s => s.trim()).filter(Boolean);
+          if (blacklist.includes(candidate.requesterId)) return { ok: false, reason: 'list_blacklist_user' };
+        }
+      }
       if (candidate.sticky) return { ok: false, reason: 'sticky_assist' };
       if (Number.isFinite(Number(candidate.assistAgeSeconds)) && Number(candidate.assistAgeSeconds) < 60) {
         return { ok: false, reason: 'list_too_fresh_assist' };

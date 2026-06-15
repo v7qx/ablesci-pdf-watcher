@@ -16,6 +16,7 @@
       candidateSource,
       rememberJournalShortNameMapping,
       parseAssistListPage,
+      fetchListUrl,
       waitForAssistListDom,
       saveWatcherState,
       describeWatcherReason,
@@ -76,6 +77,42 @@
     }
 
     async function parseListUrl(url) {
+      if (typeof fetchListUrl === 'function') {
+        const fetched = await fetchListUrl(url);
+        const fetchedCount = Array.isArray(fetched?.candidates) ? fetched.candidates.length : 0;
+        const shouldFallbackToTab =
+          fetched?.fetchFailed === true ||
+          fetched?.debug?.loginLike === true ||
+          (!fetched?.cfChallenge && !fetched?.isErrorPage && fetchedCount <= 0);
+        if (!shouldFallbackToTab) {
+          await appendWatcherTrace('list_parse_result', {
+            reason: 'background_fetch_accepted',
+            url,
+            cfChallenge: fetched.cfChallenge === true,
+            candidateCount: fetchedCount,
+            totalSeeking: fetched.listStats?.totalSeeking ?? '',
+            publisherCount: Object.keys(fetched.listStats?.publisherCounts || {}).length,
+            rowCount: fetched.debug?.rowCount ?? '',
+            detailLinkCount: fetched.debug?.detailLinkCount ?? '',
+            assistIdCount: fetched.debug?.assistIdCount ?? '',
+            publisherItemCount: fetched.debug?.publisherItemCount ?? '',
+            flyFilterCount: fetched.debug?.flyFilterCount ?? '',
+            loginLike: fetched.debug?.loginLike === true,
+            bodyLength: fetched.debug?.bodyLength ?? '',
+            pageTitle: fetched.debug?.title || ''
+          });
+          return fetched;
+        }
+        await appendWatcherTrace('list_fetch_fallback_to_tab', {
+          reason: fetched?.fetchFailed ? 'fetch_failed' : (fetched?.debug?.loginLike ? 'login_like' : 'zero_candidates'),
+          url,
+          candidateCount: fetchedCount,
+          cfChallenge: fetched?.cfChallenge === true,
+          isErrorPage: fetched?.isErrorPage === true,
+          loginLike: fetched?.debug?.loginLike === true,
+          error: fetched?.error || ''
+        });
+      }
       const tab = await openHiddenTab(url, 'parse_list');
       try {
         async function waitForListDom(timeoutMs) {

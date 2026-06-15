@@ -65,6 +65,7 @@
   const { createWatcherReportApi } = globalThis.AblesciWatcherReportModule;
   const { createWatcherCandidateApi } = globalThis.AblesciWatcherCandidateModule;
   const { createWatcherCandidateQueueApi } = globalThis.AblesciWatcherCandidateQueueModule;
+  const { createWatcherListFetcherApi } = globalThis.AblesciWatcherListFetcherModule;
   const { createWatcherRunnerApi } = globalThis.AblesciWatcherRunnerModule;
   const { createWatcherTargetApi } = globalThis.AblesciWatcherTargetModule;
   const { createWatcherMarketApi } = globalThis.AblesciWatcherMarketModule;
@@ -250,6 +251,11 @@
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     getListUrlKey
   });
+  const {
+    fetchListUrl
+  } = createWatcherListFetcherApi({
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details)
+  });
 
   const {
     sanitizeReportUrl,
@@ -354,6 +360,7 @@
     candidateSource,
     rememberJournalShortNameMapping,
     parseAssistListPage,
+    fetchListUrl,
     minSeekingGateForList,
     waitForAssistListDom,
     saveWatcherState,

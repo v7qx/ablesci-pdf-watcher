@@ -50,6 +50,25 @@
       return '失败：' + text;
     }
 
+    function formatCurrentListScan(scan = {}) {
+      if (!scan || typeof scan !== 'object') return '';
+      const mode = scan.mode === 'midpoint_rescan' ? '半程重扫' : '后台拉取';
+      const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
+      const page = scan.page ? `第 ${scan.page} 页` : '';
+      const range = scan.range ? `范围 ${scan.range}` : '';
+      const index = scan.scanLimit ? `${scan.scanIndex || 1}/${scan.scanLimit}` : '';
+      return [mode, publisher, page, range, index].filter(Boolean).join(' ');
+    }
+
+    async function readCurrentListScanText() {
+      try {
+        const stored = await chromeApi.storage.local.get(autoWatcherStateKey);
+        return formatCurrentListScan(stored[autoWatcherStateKey]?.currentListScan || {});
+      } catch (_) {
+        return '';
+      }
+    }
+
     function cleanJournalAccessName(value) {
       return String(value || '')
         .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
@@ -255,6 +274,10 @@
       const scannedContainer = el('watcherScannedLinkContainer');
       if (scannedContainer) scannedContainer.style.display = 'none';
       showPill('watcherRunStatus', '检查中');
+      const progressTimer = setInterval(async () => {
+        const text = await readCurrentListScanText();
+        if (text) showPill('watcherRunStatus', `检查中：${text}`);
+      }, 800);
       try {
         const res = await sendRuntimeMessage({ type: 'ablesciRunAutoWatcherNow' });
         showPill('watcherRunStatus', res.ok ? (res.reason || '已完成') : formatActionFailure(res.reason), !res.ok);
@@ -269,6 +292,7 @@
           }
         }
       } finally {
+        clearInterval(progressTimer);
         if (button) button.disabled = false;
       }
     }
@@ -303,7 +327,7 @@
     async function clearAutoWatcherLogs() {
       const res = await sendRuntimeMessage({ type: 'ablesciClearAutoWatcherLogs' });
       const msg = res.ok
-        ? '已清除 watcher 日志和 trace。'
+        ? '已清除 watcher 日志、trace 和候选审计。'
         : (typeof globalThis.t === 'function' ? globalThis.t('清除失败：') : '清除失败：') + (res.reason || (typeof globalThis.t === 'function' ? globalThis.t('未知错误') : '未知错误'));
       showText('status', msg, !res.ok);
     }

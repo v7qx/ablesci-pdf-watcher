@@ -79,20 +79,10 @@
         detailUrl: String(candidate.detailUrl || '').slice(0, 500),
         listUrl: String(candidate.listUrl || listUrl || '').slice(0, 500),
         title: String(candidate.title || '').slice(0, 240),
-        rowText: String(candidate.rowText || '').slice(0, 1200),
         doi: String(candidate.doi || '').slice(0, 160),
-        hasDoi: candidate.hasDoi === true,
         publisherName: String(candidate.publisherName || pagePick.publisher || '').slice(0, 160),
         journalShortName: String(candidate.journalShortName || '').slice(0, 160),
-        reported: candidate.reported === true,
-        rejected: candidate.rejected === true,
-        supplement: candidate.supplement === true,
-        documentType: String(candidate.documentType || '').slice(0, 80),
-        documentTypeText: String(candidate.documentTypeText || '').slice(0, 160),
-        statusText: String(candidate.statusText || '').slice(0, 160),
         assistTimeText: String(candidate.assistTimeText || '').slice(0, 80),
-        assistAgeSeconds: Number.isFinite(Number(candidate.assistAgeSeconds)) ? Number(candidate.assistAgeSeconds) : '',
-        sticky: candidate.sticky === true,
         index: Number.isFinite(Number(candidate.index)) ? Number(candidate.index) : 0,
         page: Number.isFinite(Number(pagePick.pickedPage)) ? Number(pagePick.pickedPage) : '',
         pageOrder: pagePick.pageOrder || '',
@@ -174,6 +164,8 @@
         added: 0,
         refreshed: 0,
         seenSkipped: 0,
+        addedExamples: [],
+        refreshedExamples: [],
         seenSkippedExamples: [],
         parsedCount: parsedCandidates.length,
         queueableCount: rawCandidates.length,
@@ -190,10 +182,44 @@
           if (existing.has(key)) {
             Object.assign(existing.get(key), item, { enqueuedAt: existing.get(key).enqueuedAt || item.enqueuedAt });
             result.refreshed += 1;
+            if (result.refreshedExamples.length < 20) {
+              result.refreshedExamples.push({
+                assistId: item.assistId,
+                detailUrl: item.detailUrl,
+                listUrl: item.listUrl,
+                title: item.title,
+                doi: item.doi,
+                journalShortName: item.journalShortName,
+                publisherName: item.publisherName,
+                page: item.page,
+                pageOrder: item.pageOrder,
+                index: item.index,
+                assistTimeText: item.assistTimeText,
+                urlKey: item.urlKey,
+                reason: 'queue_refreshed'
+              });
+            }
           } else if (!shouldRememberSeen || !queue.seen[key]) {
             queue.items.push(item);
             existing.set(key, item);
             result.added += 1;
+            if (result.addedExamples.length < 20) {
+              result.addedExamples.push({
+                assistId: item.assistId,
+                detailUrl: item.detailUrl,
+                listUrl: item.listUrl,
+                title: item.title,
+                doi: item.doi,
+                journalShortName: item.journalShortName,
+                publisherName: item.publisherName,
+                page: item.page,
+                pageOrder: item.pageOrder,
+                index: item.index,
+                assistTimeText: item.assistTimeText,
+                urlKey: item.urlKey,
+                reason: 'queue_added'
+              });
+            }
           } else {
             result.seenSkipped += 1;
             if (result.seenSkippedExamples.length < 20) {
@@ -207,6 +233,9 @@
                 publisherName: item.publisherName,
                 page: item.page,
                 pageOrder: item.pageOrder,
+                index: item.index,
+                assistTimeText: item.assistTimeText,
+                urlKey: item.urlKey,
                 reason: 'seen_before'
               });
             }
@@ -247,7 +276,7 @@
             updatedAt: new Date().toISOString()
           };
         }
-        if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
+        if (pagePick.urlKey && pagePick.skipCursorUpdate !== true && Number.isFinite(Number(pagePick.pickedPage))) {
           const cursorMaxPage = parsedMaxPage || numericOrEmpty(pagePick.pageMax);
           queue.refillCursors[pagePick.urlKey] = {
             page: Number(pagePick.pickedPage),

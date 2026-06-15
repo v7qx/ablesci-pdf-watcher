@@ -86,9 +86,270 @@
       return sourceKeyFromUrl(candidate.listUrl || pagePick.configuredUrl || pagePick.pickedListUrl || '');
     }
 
+    const CANDIDATE_AUDIT_KEY = 'autoWatcherCandidateAudit';
+    const CANDIDATE_AUDIT_INDEX_KEY = 'autoWatcherCandidateAuditIndex';
+    const CANDIDATE_AUDIT_LIMIT = 20000;
+    const CANDIDATE_AUDIT_INDEX_LIMIT = 50000;
+    const CANDIDATE_AUDIT_RECENT_EVENTS_LIMIT = 8;
+    const MIDPOINT_RESCAN_WINDOW = 10;
+    const RUNNING_LOCK_STALE_MS = 20 * 60 * 1000;
+
+    function safeAuditText(value, limit = 500) {
+      return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
+    }
+
+    function auditNumberOrEmpty(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : '';
+    }
+
+    function buildCandidateAuditEntry(phase, candidate = {}, extra = {}) {
+      const assistId = safeAuditText(candidate.assistId || extra.assistId || '', 80);
+      const detailUrl = safeAuditText(
+        candidate.detailUrl || extra.detailUrl || (assistId ? `https://www.ablesci.com/assist/detail?id=${assistId}` : ''),
+        500
+      );
+      return {
+        time: extra.time || new Date().toISOString(),
+        phase: safeAuditText(phase, 80),
+        status: safeAuditText(extra.status || '', 80),
+        reason: safeAuditText(extra.reason || '', 240),
+        trigger: safeAuditText(extra.trigger || '', 80),
+        assistId,
+        title: safeAuditText(candidate.title || extra.title || '', 240),
+        doi: safeAuditText(candidate.doi || extra.doi || '', 160),
+        journalShortName: safeAuditText(candidate.journalShortName || extra.journalShortName || '', 160),
+        journalName: safeAuditText(candidate.journalName || extra.journalName || '', 240),
+        publisherName: safeAuditText(candidate.publisherName || extra.publisherName || extra.publisher || '', 160),
+        detailUrl,
+        listUrl: safeAuditText(candidate.listUrl || extra.listUrl || extra.pickedListUrl || '', 500),
+        page: auditNumberOrEmpty(extra.page ?? extra.pickedPage ?? candidate.page),
+        pageOrder: safeAuditText(extra.pageOrder || candidate.pageOrder || '', 20),
+        pageMax: auditNumberOrEmpty(extra.pageMax ?? candidate.pageMax),
+        urlKey: safeAuditText(extra.urlKey || candidate.urlKey || '', 240),
+        listIndex: auditNumberOrEmpty(extra.listIndex ?? candidate.index),
+        assistTimeText: safeAuditText(candidate.assistTimeText || extra.assistTimeText || '', 80),
+        assistAgeSeconds: auditNumberOrEmpty(candidate.assistAgeSeconds ?? extra.assistAgeSeconds),
+        source: safeAuditText(extra.source || '', 80),
+        tabId: safeAuditText(extra.tabId || '', 40),
+        details: extra.details && typeof extra.details === 'object' ? extra.details : {}
+      };
+    }
+
+    async function appendCandidateAuditEntries(entries = []) {
+      const batch = (Array.isArray(entries) ? entries : []).filter(entry => entry && entry.assistId);
+      if (batch.length <= 0) return;
+      try {
+        const storage = (typeof chrome !== 'undefined' ? chrome : browser).storage.local;
+        const stored = await storage.get([CANDIDATE_AUDIT_KEY, CANDIDATE_AUDIT_INDEX_KEY]);
+        const current = Array.isArray(stored[CANDIDATE_AUDIT_KEY]) ? stored[CANDIDATE_AUDIT_KEY] : [];
+        const currentIndex = stored[CANDIDATE_AUDIT_INDEX_KEY] && typeof stored[CANDIDATE_AUDIT_INDEX_KEY] === 'object' && !Array.isArray(stored[CANDIDATE_AUDIT_INDEX_KEY])
+          ? stored[CANDIDATE_AUDIT_INDEX_KEY]
+          : {};
+        await storage.set({
+          [CANDIDATE_AUDIT_KEY]: batch.concat(current).slice(0, CANDIDATE_AUDIT_LIMIT),
+          [CANDIDATE_AUDIT_INDEX_KEY]: updateCandidateAuditIndex(currentIndex, batch)
+        });
+      } catch (err) {
+        console.warn('[candidateAudit] failed', err);
+      }
+    }
+
+    function auditEventSignature(entry = {}) {
+      return [
+        entry.phase || '',
+        entry.status || '',
+        entry.reason || '',
+        entry.page ?? '',
+        entry.listIndex ?? ''
+      ].join('|');
+    }
+
+    function compactAuditEvent(entry = {}) {
+      return {
+        time: entry.time || new Date().toISOString(),
+        phase: entry.phase || '',
+        status: entry.status || '',
+        reason: entry.reason || '',
+        page: entry.page ?? '',
+        listIndex: entry.listIndex ?? ''
+      };
+    }
+
+    function updateCandidateAuditIndex(index, batch) {
+      const next = { ...(index || {}) };
+      for (const entry of batch) {
+        const assistId = safeAuditText(entry.assistId || '', 80);
+        if (!assistId) continue;
+        const prev = next[assistId] && typeof next[assistId] === 'object' ? next[assistId] : {};
+        const recentEvents = Array.isArray(prev.recentEvents) ? prev.recentEvents.slice() : [];
+        const event = compactAuditEvent(entry);
+        const lastEvent = recentEvents[recentEvents.length - 1] || null;
+        if (!lastEvent || auditEventSignature(lastEvent) !== auditEventSignature(event)) {
+          recentEvents.push(event);
+        } else {
+          recentEvents[recentEvents.length - 1] = event;
+        }
+        const pages = Array.isArray(prev.pages) ? prev.pages.slice() : [];
+        const pageValue = Number(entry.page);
+        if (Number.isFinite(pageValue) && !pages.includes(pageValue)) pages.push(pageValue);
+        next[assistId] = {
+          assistId,
+          firstSeenAt: prev.firstSeenAt || entry.time || new Date().toISOString(),
+          lastAt: entry.time || prev.lastAt || new Date().toISOString(),
+          eventCount: Number(prev.eventCount || 0) + 1,
+          latestPhase: entry.phase || prev.latestPhase || '',
+          latestStatus: entry.status || prev.latestStatus || '',
+          latestReason: entry.reason || prev.latestReason || '',
+          title: safeAuditText(entry.title || prev.title || '', 240),
+          journalShortName: safeAuditText(entry.journalShortName || prev.journalShortName || '', 160),
+          publisherName: safeAuditText(entry.publisherName || prev.publisherName || '', 160),
+          doi: safeAuditText(entry.doi || prev.doi || '', 160),
+          assistTimeText: safeAuditText(entry.assistTimeText || prev.assistTimeText || '', 80),
+          detailUrl: safeAuditText(entry.detailUrl || prev.detailUrl || '', 500),
+          firstListUrl: safeAuditText(prev.firstListUrl || entry.listUrl || '', 500),
+          lastListUrl: safeAuditText(entry.listUrl || prev.lastListUrl || '', 500),
+          firstPage: prev.firstPage || entry.page || '',
+          lastPage: entry.page || prev.lastPage || '',
+          lastListIndex: entry.listIndex ?? prev.lastListIndex ?? '',
+          pages: pages.slice(-20),
+          recentEvents: recentEvents.slice(-CANDIDATE_AUDIT_RECENT_EVENTS_LIMIT)
+        };
+      }
+      const entries = Object.entries(next);
+      if (entries.length <= CANDIDATE_AUDIT_INDEX_LIMIT) return next;
+      entries.sort((a, b) => new Date(b[1]?.lastAt || 0).getTime() - new Date(a[1]?.lastAt || 0).getTime());
+      return Object.fromEntries(entries.slice(0, CANDIDATE_AUDIT_INDEX_LIMIT));
+    }
+
+    function listUrlWithAuditPage(listUrl, page) {
+      if (!Number.isFinite(Number(page))) return listUrl;
+      try {
+        const u = new URL(listUrl);
+        u.searchParams.set('page', String(Number(page)));
+        return u.toString();
+      } catch (_) {
+        return listUrl;
+      }
+    }
+
+    async function auditParsedListCandidates(parsed, pagePick, pickedListUrl, trigger, reason = 'parsed_from_list') {
+      const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+      const auditPage = Number.isFinite(Number(parsed?.listStats?.currentPage))
+        ? Number(parsed.listStats.currentPage)
+        : pagePick.pickedPage;
+      const auditListUrl = listUrlWithAuditPage(pickedListUrl, auditPage);
+      await appendCandidateAuditEntries(candidates.map((candidate, index) => buildCandidateAuditEntry('list_seen', candidate, {
+        status: 'seen',
+        reason,
+        trigger,
+        listUrl: auditListUrl,
+        page: auditPage,
+        pageOrder: pagePick.pageOrder,
+        pageMax: parsed?.listStats?.maxPage || pagePick.pageMax,
+        urlKey: pagePick.urlKey,
+        publisher: pagePick.publisher,
+        listIndex: candidate.index ?? index,
+        source: 'list_page',
+        details: Number(pagePick.pickedPage) !== Number(auditPage)
+          ? { requestedPage: pagePick.pickedPage }
+          : {}
+      })));
+    }
+
+    async function auditEnqueueResult(enqueueResult, pagePick, pickedListUrl, trigger, source = 'candidate_queue') {
+      const enqueueAuditRows = [];
+      for (const item of enqueueResult.addedExamples || []) {
+        enqueueAuditRows.push(buildCandidateAuditEntry('queue_added', item, {
+          status: 'queued',
+          reason: 'queue_added',
+          trigger,
+          listUrl: item.listUrl || pickedListUrl,
+          page: item.page || pagePick.pickedPage,
+          pageOrder: item.pageOrder || pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          source
+        }));
+      }
+      for (const item of enqueueResult.refreshedExamples || []) {
+        enqueueAuditRows.push(buildCandidateAuditEntry('queue_refreshed', item, {
+          status: 'queued',
+          reason: 'queue_refreshed',
+          trigger,
+          listUrl: item.listUrl || pickedListUrl,
+          page: item.page || pagePick.pickedPage,
+          pageOrder: item.pageOrder || pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          source
+        }));
+      }
+      for (const item of enqueueResult.seenSkippedExamples || []) {
+        enqueueAuditRows.push(buildCandidateAuditEntry('queue_seen_skip', item, {
+          status: 'skipped',
+          reason: 'seen_before',
+          trigger,
+          listUrl: item.listUrl || pickedListUrl,
+          page: item.page || pagePick.pickedPage,
+          pageOrder: item.pageOrder || pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          source
+        }));
+      }
+      await appendCandidateAuditEntries(enqueueAuditRows);
+    }
+
+    function normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl) {
+      const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+      const auditPage = Number.isFinite(Number(parsed?.listStats?.currentPage))
+        ? Number(parsed.listStats.currentPage)
+        : pagePick.pickedPage;
+      const auditListUrl = listUrlWithAuditPage(pickedListUrl, auditPage);
+      for (const candidate of candidates) {
+        if (!candidate || typeof candidate !== 'object') continue;
+        candidate.listUrl = auditListUrl;
+        candidate.page = auditPage;
+        candidate.pageOrder = pagePick.pageOrder || candidate.pageOrder || '';
+        candidate.pageMax = parsed?.listStats?.maxPage || pagePick.pageMax || candidate.pageMax || '';
+        candidate.urlKey = pagePick.urlKey || candidate.urlKey || '';
+      }
+    }
+
     function sourceDetailAttemptBudget(listUrl, sourceCount) {
       if (sourceCount <= 1) return 5;
       return isHighFreqSourceKey(sourceKeyFromUrl(listUrl)) ? 4 : 2;
+    }
+
+    function describeCurrentListScan(scan = {}) {
+      if (!scan || typeof scan !== 'object') return '';
+      const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
+      const page = scan.page ? `第 ${scan.page} 页` : '';
+      const range = scan.range ? `范围 ${scan.range}` : '';
+      const mode = scan.mode === 'midpoint_rescan' ? '半程重扫' : '后台拉取';
+      return [mode, publisher, page, range].filter(Boolean).join(' ');
+    }
+
+    async function saveCurrentListScan(stateForTargets, details = {}) {
+      const scan = {
+        ...details,
+        updatedAt: new Date().toISOString()
+      };
+      stateForTargets.currentListScan = scan;
+      await saveWatcherStateSafe(stateForTargets);
+    }
+
+    async function clearCurrentListScan() {
+      try {
+        const state = await getWatcherState();
+        if (!state.currentListScan) return;
+        state.currentListScan = null;
+        await saveWatcherStateSafe(state);
+      } catch (_) {}
     }
 
     function rotateRecentSource(urls = [], state = {}) {
@@ -316,15 +577,27 @@
       });
     }
 
-    async function queueableCandidatesFromList(candidates, opts, trigger, pagePick) {
+    async function queueableCandidatesFromList(candidates, opts, trigger, pagePick, blacklistedIds = []) {
       const stateForListFilter = await getWatcherState();
       const queueable = [];
+      const auditEntries = [];
       const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
       for (const rawCandidate of Array.isArray(candidates) ? candidates : []) {
         const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForListFilter);
-        const listAllowed = isListCandidateAllowed(candidate, opts, stateForListFilter);
+        const listAllowed = isListCandidateAllowed(candidate, opts, stateForListFilter, blacklistedIds);
         if (listAllowed.ok) {
           queueable.push(candidate);
+          auditEntries.push(buildCandidateAuditEntry('list_queueable', candidate, {
+            status: 'queueable',
+            reason: 'passed_list_filter',
+            trigger,
+            page: pagePick.pickedPage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            source: 'list_page_refill'
+          }));
           continue;
         }
         await appendWatcherTrace('candidate_skip_list_filter', {
@@ -346,10 +619,230 @@
           const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
           if (shortName) journalBlockedSummary.journals.add(shortName);
         }
+        auditEntries.push(buildCandidateAuditEntry('list_skip', candidate, {
+          status: 'skipped',
+          reason: listAllowed.reason,
+          trigger,
+          page: pagePick.pickedPage,
+          pageOrder: pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          source: 'list_page_refill',
+          details: {
+            reasonText: describeWatcherReason(listAllowed.reason),
+            journalAccess: listAllowed.journalAccess || null
+          }
+        }));
         await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
       }
+      await appendCandidateAuditEntries(auditEntries);
       await appendJournalBlockedSummary(journalBlockedSummary, trigger);
       return queueable;
+    }
+
+    function shouldRunMidpointRescan(pagePick, stateForTargets, detectedMaxPage) {
+      const maxPage = Number(detectedMaxPage || pagePick.pageMax || 0);
+      const pickedPage = Number(pagePick.pickedPage);
+      if (pagePick.pageOrder !== 'desc') return false;
+      if (!pagePick.urlKey) return false;
+      if (!Number.isFinite(maxPage) || maxPage <= 1) return false;
+      if (!Number.isFinite(pickedPage) || pickedPage <= 0) return false;
+      if (pickedPage > Math.floor(maxPage / 2)) return false;
+      const done = stateForTargets.midpointRescans?.[pagePick.urlKey];
+      return Number(done?.maxPage || 0) !== maxPage;
+    }
+
+    async function runMidpointRescanIfDue({
+      listUrl,
+      pagePick,
+      detectedMaxPage,
+      stateForTargets,
+      opts,
+      trigger,
+      blacklistedIds
+    }) {
+      const maxPage = Number(detectedMaxPage || pagePick.pageMax || 0);
+      if (!shouldRunMidpointRescan(pagePick, stateForTargets, maxPage)) {
+        return { ran: false };
+      }
+
+      const originalLastVisited = stateForTargets.lastVisitedPages?.[pagePick.urlKey];
+      const endPage = Math.max(1, maxPage - MIDPOINT_RESCAN_WINDOW + 1);
+      let scannedPages = 0;
+      let added = 0;
+      let refreshed = 0;
+      let seenSkipped = 0;
+      let parsedCount = 0;
+      let abortedReason = '';
+
+      await appendWatcherTrace('midpoint_rescan_start', {
+        reason: 'desc_cursor_reached_half',
+        trigger,
+        configuredUrl: listUrl,
+        urlKey: pagePick.urlKey,
+        currentPage: pagePick.pickedPage,
+        maxPage,
+        window: MIDPOINT_RESCAN_WINDOW,
+        startPage: maxPage,
+        endPage
+      });
+      await saveCurrentListScan(stateForTargets, {
+        mode: 'midpoint_rescan',
+        trigger,
+        configuredUrl: listUrl,
+        urlKey: pagePick.urlKey,
+        publisher: pagePick.publisher || '',
+        page: maxPage,
+        pageOrder: 'desc',
+        pageMin: endPage,
+        pageMax: maxPage,
+        range: `${maxPage}-${endPage}`,
+        window: MIDPOINT_RESCAN_WINDOW
+      });
+
+      for (let page = maxPage; page >= endPage; page -= 1) {
+        const rescanListUrl = listUrlWithAuditPage(listUrl, page);
+        const rescanPick = {
+          ...pagePick,
+          pickedListUrl: rescanListUrl,
+          pickedPage: page,
+          pageMax: maxPage,
+          pageOrder: 'desc',
+          skipCursorUpdate: true
+        };
+        await saveCurrentListScan(stateForTargets, {
+          mode: 'midpoint_rescan',
+          trigger,
+          configuredUrl: listUrl,
+          pickedListUrl: rescanListUrl,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher || '',
+          page,
+          pageOrder: 'desc',
+          pageMin: endPage,
+          pageMax: maxPage,
+          range: `${maxPage}-${endPage}`,
+          window: MIDPOINT_RESCAN_WINDOW
+        });
+        if (await shouldSkipBackedOffPage(rescanPick)) {
+          await appendWatcherTrace('midpoint_rescan_page_backoff', {
+            reason: 'page_backoff_active',
+            trigger,
+            listUrl: rescanListUrl,
+            urlKey: pagePick.urlKey,
+            pickedPage: page,
+            maxPage
+          });
+          continue;
+        }
+
+        await incrementDaily('checked', trigger);
+        const parseStartedAt = Date.now();
+        const parsed = await parseListUrl(rescanListUrl);
+        await appendWatcherTrace('perf_midpoint_rescan_parse', {
+          reason: 'midpoint_rescan_parse_done',
+          trigger,
+          durationMs: Date.now() - parseStartedAt,
+          pickedPage: page,
+          urlKey: pagePick.urlKey,
+          parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+          maxPage: parsed?.listStats?.maxPage || maxPage
+        });
+
+        if (parsed?.isErrorPage) {
+          abortedReason = 'site_error';
+          await appendWatcherTrace('midpoint_rescan_aborted', {
+            reason: abortedReason,
+            trigger,
+            listUrl: rescanListUrl,
+            pickedPage: page,
+            errorTitle: parsed.errorTitle || ''
+          });
+          break;
+        }
+        if (parsed?.cfChallenge) {
+          abortedReason = 'cf_challenge';
+          await appendWatcherTrace('midpoint_rescan_aborted', {
+            reason: abortedReason,
+            trigger,
+            listUrl: rescanListUrl,
+            pickedPage: page
+          });
+          break;
+        }
+
+        normalizeParsedListCandidateContext(parsed, rescanPick, rescanListUrl);
+        await auditParsedListCandidates(parsed, rescanPick, rescanListUrl, trigger, 'midpoint_rescan_seen');
+        const sourceGate = minSeekingGateForList(parsed, rescanListUrl, rescanPick.publisher, opts);
+        if (!sourceGate.ok) {
+          await appendWatcherTrace('midpoint_rescan_source_gate_skip', {
+            reason: sourceGate.reason,
+            trigger,
+            listUrl: rescanListUrl,
+            publisher: sourceGate.publisher,
+            count: sourceGate.count,
+            threshold: sourceGate.threshold
+          });
+          scannedPages += 1;
+          parsedCount += Array.isArray(parsed.candidates) ? parsed.candidates.length : 0;
+          continue;
+        }
+
+        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, sessionSize(opts));
+        const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, rescanPick, blacklistedIds);
+        const enqueueResult = await enqueueParsedCandidates(parsed, rescanPick, rescanListUrl, trigger, queueableCandidates);
+        await auditEnqueueResult(enqueueResult, rescanPick, rescanListUrl, trigger, 'midpoint_rescan_queue');
+        scannedPages += 1;
+        parsedCount += Array.isArray(parsed.candidates) ? parsed.candidates.length : 0;
+        added += enqueueResult.added || 0;
+        refreshed += enqueueResult.refreshed || 0;
+        seenSkipped += enqueueResult.seenSkipped || 0;
+      }
+
+      stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
+      if (originalLastVisited === undefined) {
+        delete stateForTargets.lastVisitedPages[pagePick.urlKey];
+      } else {
+        stateForTargets.lastVisitedPages[pagePick.urlKey] = originalLastVisited;
+      }
+      stateForTargets.midpointRescans = stateForTargets.midpointRescans || {};
+      stateForTargets.midpointRescans[pagePick.urlKey] = {
+        maxPage,
+        window: MIDPOINT_RESCAN_WINDOW,
+        startPage: maxPage,
+        endPage,
+        scannedPages,
+        parsedCount,
+        added,
+        refreshed,
+        seenSkipped,
+        abortedReason,
+        completedAt: new Date().toISOString()
+      };
+      await saveWatcherStateSafe(stateForTargets);
+
+      await appendWatcherTrace(added > 0 ? 'midpoint_rescan_done' : 'midpoint_rescan_no_new_ids', {
+        reason: added > 0 ? 'midpoint_rescan_added_candidates' : 'midpoint_rescan_no_new_ids',
+        trigger,
+        configuredUrl: listUrl,
+        urlKey: pagePick.urlKey,
+        maxPage,
+        startPage: maxPage,
+        endPage,
+        scannedPages,
+        parsedCount,
+        added,
+        refreshed,
+        seenSkipped,
+        abortedReason
+      });
+
+      const latestState = await getWatcherState();
+      stateForTargets.assistCandidateQueue = latestState.assistCandidateQueue;
+      stateForTargets.detectedMaxPages = latestState.detectedMaxPages || stateForTargets.detectedMaxPages;
+      stateForTargets.midpointRescans = latestState.midpointRescans || stateForTargets.midpointRescans;
+      return { ran: true, added, scannedPages };
     }
 
     async function processCandidateBatch(candidates, context) {
@@ -375,7 +868,7 @@
         const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForCandidate);
         const candidatePage = candidate.page || pagePick.pickedPage || '';
         if (getHandledCount() >= targetSessionSize) break;
-        const listAllowed = isListCandidateAllowed(candidate, opts, stateForCandidate);
+        const listAllowed = isListCandidateAllowed(candidate, opts, stateForCandidate, blacklistedIds);
         if (!listAllowed.ok) {
           const candidateKey = getProcessedKey(candidate);
           await appendWatcherTrace('candidate_skip_list_filter', {
@@ -400,6 +893,21 @@
             const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
             if (shortName) journalBlockedSummary.journals.add(shortName);
           }
+          await appendCandidateAuditEntries([buildCandidateAuditEntry('consume_list_skip', candidate, {
+            status: 'skipped',
+            reason: listAllowed.reason,
+            trigger,
+            page: candidatePage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            source: fromQueue ? 'candidate_queue' : 'list_page',
+            details: {
+              reasonText: describeWatcherReason(listAllowed.reason),
+              journalAccess: listAllowed.journalAccess || null
+            }
+          })]);
           await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
           await removeQueuedCandidate(candidate, listAllowed.reason);
           continue;
@@ -412,6 +920,17 @@
             assistId: candidate.assistId || '',
             source: fromQueue ? 'candidate_queue' : 'list_page'
           });
+          await appendCandidateAuditEntries([buildCandidateAuditEntry('processed_skip', candidate, {
+            status: 'skipped',
+            reason: 'processed_before',
+            trigger,
+            page: candidatePage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          })]);
           await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
           await removeQueuedCandidate(candidate, 'processed_before');
           continue;
@@ -425,6 +944,18 @@
             sourceKey: sourceKeyFromCandidate(candidate, pagePick),
             source: fromQueue ? 'candidate_queue' : 'list_page'
           });
+          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_budget_exhausted', candidate, {
+            status: 'pending',
+            reason: 'source_detail_attempt_budget',
+            trigger,
+            page: candidatePage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            source: fromQueue ? 'candidate_queue' : 'list_page',
+            details: { maxDetailAttempts }
+          })]);
           break;
         }
         detailAttempts += 1;
@@ -436,6 +967,17 @@
           title: candidate.title || '',
           source: fromQueue ? 'candidate_queue' : 'list_page'
         });
+        await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_start', candidate, {
+          status: 'processing',
+          reason: 'candidate_passed_list_filter',
+          trigger,
+          page: candidatePage,
+          pageOrder: pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          source: fromQueue ? 'candidate_queue' : 'list_page'
+        })]);
         await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
         const detailStartedAt = Date.now();
         const detail = await inspectDetail(candidate);
@@ -460,6 +1002,17 @@
           await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
           await incrementDaily('failed', trigger);
           await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: candidatePage });
+          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_failed', candidate, {
+            status: 'failed',
+            reason: detail.reason,
+            trigger,
+            page: candidatePage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            source: fromQueue ? 'candidate_queue' : 'list_page'
+          })]);
           await removeQueuedCandidate(candidate, detail.reason);
           continue;
         }
@@ -483,6 +1036,19 @@
           await updateProcessed(key, 'skipped', detailAllowed.reason);
           await incrementDaily('skipped', trigger);
           await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: candidatePage });
+          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_skip', { ...candidate, ...payload }, {
+            status: 'skipped',
+            reason: detailAllowed.reason,
+            trigger,
+            page: candidatePage,
+            pageOrder: pagePick.pageOrder,
+            pageMax: pagePick.pageMax,
+            urlKey: pagePick.urlKey,
+            publisher: pagePick.publisher,
+            tabId: detail.tabId,
+            source: fromQueue ? 'candidate_queue' : 'list_page',
+            details: { reasonText: describeWatcherReason(detailAllowed.reason) }
+          })]);
           await removeQueuedCandidate(candidate, detailAllowed.reason);
           continue;
         }
@@ -500,6 +1066,22 @@
         });
         const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
         if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
+        await appendCandidateAuditEntries([buildCandidateAuditEntry(handled ? 'handled' : 'handle_not_done', { ...candidate, ...payload }, {
+          status: handled ? 'handled' : 'not_handled',
+          reason: handledResult?.reason || (handled ? 'handled' : 'candidate_not_handled'),
+          trigger,
+          page: candidatePage,
+          pageOrder: pagePick.pageOrder,
+          pageMax: pagePick.pageMax,
+          urlKey: pagePick.urlKey,
+          publisher: pagePick.publisher,
+          tabId: detail.tabId,
+          source: fromQueue ? 'candidate_queue' : 'list_page',
+          details: {
+            stopRun: handledResult?.stopRun === true,
+            removeQueue: handledResult?.removeQueue === true
+          }
+        })]);
         if (handled || handledResult?.stopRun === true || handledResult?.removeQueue === true) {
           await removeQueuedCandidate(candidate, handledResult?.reason || 'handled');
         }
@@ -569,10 +1151,35 @@
 
     async function runAutoWatcherOnce(trigger = 'alarm') {
       if (stateRef.autoWatcherRunning) {
-        await appendWatcherTrace('run_skip_already_running', { reason: 'already_running', trigger });
-        return { ok: false, reason: 'already_running' };
+        const runningSince = Number(stateRef.autoWatcherStartedAt || 0);
+        const elapsedMs = Number.isFinite(runningSince) && runningSince > 0 ? Date.now() - runningSince : 0;
+        const currentState = await getWatcherState().catch(() => ({}));
+        const scanText = describeCurrentListScan(currentState.currentListScan || {});
+        if (elapsedMs > RUNNING_LOCK_STALE_MS) {
+          await appendWatcherTrace('run_stale_lock_recovered', {
+            reason: 'stale_auto_watcher_running_lock',
+            trigger,
+            elapsedMs,
+            currentListScan: currentState.currentListScan || null
+          });
+          stateRef.autoWatcherRunning = false;
+          stateRef.autoWatcherStartedAt = 0;
+          await clearCurrentListScan();
+        } else {
+          await appendWatcherTrace('run_skip_already_running', {
+            reason: 'already_running',
+            trigger,
+            elapsedMs,
+            currentListScan: currentState.currentListScan || null
+          });
+          return {
+            ok: false,
+            reason: scanText ? `already_running：${scanText}` : 'already_running'
+          };
+        }
       }
       stateRef.autoWatcherRunning = true;
+      stateRef.autoWatcherStartedAt = Date.now();
       let runResult = null;
       let currentRunOpts = null;
       let scannedUrl = '';
@@ -918,6 +1525,24 @@
               stateForTargets.lastPickedPublisher = pagePick.publisher || '';
               stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
               stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
+              stateForTargets.currentListScan = {
+                mode: 'background_fetch_rebase',
+                trigger,
+                configuredUrl: listUrl,
+                pickedListUrl,
+                urlKey: pagePick.urlKey || '',
+                publisher: pagePick.publisher || '',
+                page: pagePick.pickedPage || '',
+                pageOrder: pagePick.pageOrder || '',
+                pageMin: pagePick.pageMin || '',
+                pageMax: pagePick.pageMax || '',
+                range: pagePick.pageOrder === 'desc' && Number.isFinite(Number(pagePick.pickedPage))
+                  ? `${pagePick.pickedPage}${pagePick.pageMin ? `-${pagePick.pageMin}` : ''}`
+                  : '',
+                scanIndex: sequentialPageScanCount + 1,
+                scanLimit: maxSequentialPageScans,
+                updatedAt: new Date().toISOString()
+              };
               await saveWatcherStateSafe(stateForTargets);
               await appendWatcherTrace('list_scan_page_progress_saved', {
                 reason: 'sequential_page_backoff_skipped',
@@ -970,6 +1595,24 @@
           stateForTargets.lastPickedPublisher = pagePick.publisher || '';
           stateForTargets.lastPickedPageOrder = pagePick.pageOrder || '';
           stateForTargets.lastPickedUrlKey = pagePick.urlKey || '';
+          stateForTargets.currentListScan = {
+            mode: 'background_fetch',
+            trigger,
+            configuredUrl: listUrl,
+            pickedListUrl,
+            urlKey: pagePick.urlKey || '',
+            publisher: pagePick.publisher || '',
+            page: pagePick.pickedPage || '',
+            pageOrder: pagePick.pageOrder || '',
+            pageMin: pagePick.pageMin || '',
+            pageMax: pagePick.pageMax || '',
+            range: pagePick.pageOrder === 'desc' && Number.isFinite(Number(pagePick.pickedPage))
+              ? `${pagePick.pickedPage}${pagePick.pageMin ? `-${pagePick.pageMin}` : ''}`
+              : '',
+            scanIndex: sequentialPageScanCount + 1,
+            scanLimit: maxSequentialPageScans,
+            updatedAt: new Date().toISOString()
+          };
           await saveWatcherStateSafe(stateForTargets);
           await incrementDaily('checked', trigger);
           const parseStartedAt = Date.now();
@@ -1001,7 +1644,6 @@
             await recordCfChallenge(opts, pickedListUrl, trigger);
             return finish({ ok: false, reason: 'cf_challenge' });
           }
-          await initCurrentPageData(pickedListUrl, pagePick, parsed);
 
           if (isSequentialPageScan && parsed?.listStats?.currentPage && Number.isFinite(parsed.listStats.currentPage)) {
             const realCurrentPage = Number(parsed.listStats.currentPage);
@@ -1033,6 +1675,10 @@
               await saveWatcherStateSafe(stateForTargets);
             }
           }
+          normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
+          const auditPickedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
+          await initCurrentPageData(auditPickedListUrl, pagePick, parsed);
+          await auditParsedListCandidates(parsed, pagePick, auditPickedListUrl, trigger);
 
           let detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
           if (Number.isFinite(detectedMaxPage) && detectedMaxPage > 0) {
@@ -1109,7 +1755,10 @@
                 await recordCfChallenge(opts, pickedListUrl, trigger);
                 return finish({ ok: false, reason: 'cf_challenge' });
               }
-              await initCurrentPageData(pickedListUrl, pagePick, parsed);
+              normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
+              const auditRebasedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
+              await initCurrentPageData(auditRebasedListUrl, pagePick, parsed);
+              await auditParsedListCandidates(parsed, pagePick, auditRebasedListUrl, trigger, 'parsed_after_rebase');
               detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
             }
           }
@@ -1173,8 +1822,9 @@
 
           const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
           const refillStartedAt = Date.now();
-          const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick);
-          await enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, queueableCandidates);
+          const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick, blacklistedIds);
+          const enqueueResult = await enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, queueableCandidates);
+          await auditEnqueueResult(enqueueResult, pagePick, pickedListUrl, trigger);
           await appendWatcherTrace('perf_queue_refill', {
             reason: 'queue_refill_done',
             trigger,
@@ -1182,7 +1832,10 @@
             pickedPage: pagePick.pickedPage,
             parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
             orderedCount: candidates.length,
-            queueableCount: queueableCandidates.length
+            queueableCount: queueableCandidates.length,
+            queueAdded: enqueueResult.added,
+            queueRefreshed: enqueueResult.refreshed,
+            queueSeenSkipped: enqueueResult.seenSkipped
           });
           const latestStateAfterQueue = await getWatcherState();
           stateForTargets.assistCandidateQueue = latestStateAfterQueue.assistCandidateQueue;
@@ -1201,6 +1854,15 @@
               pickedPage: Number(pagePick.pickedPage),
               currentPage: parsed?.listStats?.currentPage || '',
               maxPage: parsed?.listStats?.maxPage || ''
+            });
+            await runMidpointRescanIfDue({
+              listUrl,
+              pagePick,
+              detectedMaxPage,
+              stateForTargets,
+              opts,
+              trigger,
+              blacklistedIds
             });
           }
           await appendWatcherTrace('list_scan_candidates', {
@@ -1297,7 +1959,9 @@
         try { await writeDailyReports(); } catch (_) {}
         await flushWatcherLogs().catch(() => {});
         await flushWatcherTrace().catch(() => {});
+        await clearCurrentListScan();
         stateRef.autoWatcherRunning = false;
+        stateRef.autoWatcherStartedAt = 0;
       }
     }
 

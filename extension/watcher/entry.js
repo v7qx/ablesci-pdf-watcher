@@ -149,7 +149,7 @@
         }
         if (msg?.type === 'ablesciClearAutoWatcherLogs') {
           Promise.all([clearBufferedWatcherLogs(), clearBufferedWatcherTrace()])
-            .then(() => chromeApi.storage.local.remove([autoWatcherLogKey, autoWatcherTraceKey]))
+            .then(() => chromeApi.storage.local.remove([autoWatcherLogKey, autoWatcherTraceKey, 'autoWatcherCandidateAudit', 'autoWatcherCandidateAuditIndex']))
             .then(() => sendResponse({ ok: true }));
           return true;
         }

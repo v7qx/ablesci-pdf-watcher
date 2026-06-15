@@ -52,6 +52,17 @@
       .trim();
   }
 
+  function isJournalBadgeSpan(span) {
+    if (!span) return false;
+    if (span.classList?.contains('title-hint')) return false;
+    if (span.closest?.('.paper-publisher')) return false;
+    if (span.querySelector?.('i')) return false;
+    const value = cleanJournalBadgeTitle(span.dataset?.ablesciOriginalTitle || span.getAttribute('title') || span.textContent || '');
+    if (!value) return false;
+    if (/求助|违规|举报|高分|置顶|悬赏|文献类型|Book|Chapter|Supplement/i.test(value)) return false;
+    return true;
+  }
+
   function isScienceDirectListPage() {
     try {
       const url = new URL(location.href);
@@ -114,8 +125,8 @@
       row.querySelector('a[href*="/assist/detail"]');
     if (!detailAnchor) return null;
     return Array.from(detailAnchor.querySelectorAll('span[title]'))
-      .filter(span => !span.classList?.contains('title-hint') && !span.closest?.('.paper-publisher'))
-      .find(span => normalizeJournalKey(span.getAttribute('title') || span.textContent || '')) || null;
+      .filter(isJournalBadgeSpan)
+      .find(span => normalizeJournalKey(cleanJournalBadgeTitle(span.dataset?.ablesciOriginalTitle || span.getAttribute('title') || span.textContent || ''))) || null;
   }
 
   function clearJournalAccessMark(row) {

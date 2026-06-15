@@ -130,7 +130,7 @@ const TEXT_MAP = {
   "复制": "Copy",
   "未复制": "Not Copied",
   "已清除 watcher 已处理记录。": "Watcher processed records cleared.",
-  "已清除 watcher 日志和 trace。": "Watcher logs and traces cleared.",
+  "已清除 watcher 日志、trace 和候选审计。": "Watcher logs, traces, and candidate audit cleared.",
   "已清空 watcher 候选队列。": "Watcher candidate queue cleared.",
   "已清空 watcher 候选队列和列表页游标。": "Watcher candidate queue and list-page cursor cleared.",
   "清除失败：": "Clear failed: ",

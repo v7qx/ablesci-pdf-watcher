@@ -22,8 +22,15 @@
       alarmName
     } = config;
 
+    const CANDIDATE_AUDIT_KEY = 'autoWatcherCandidateAudit';
+    const CANDIDATE_AUDIT_INDEX_KEY = 'autoWatcherCandidateAuditIndex';
+
     function csvEscape(value) {
       return '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    }
+
+    function makeCsv(rows) {
+      return '\uFEFF' + rows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
     }
 
     function dataUrl(content, mime) {
@@ -396,6 +403,45 @@
       return translateReason(r, isEn);
     }
 
+    function translateCandidateAuditPhase(phase, isEn) {
+      const key = String(phase || '');
+      const zh = {
+        list_seen: '列表解析到',
+        list_queueable: '通过列表筛选',
+        list_skip: '列表页跳过',
+        queue_added: '加入队列',
+        queue_refreshed: '刷新队列',
+        queue_seen_skip: '队列已见过跳过',
+        queue_consume_seen: '本轮取出队列',
+        consume_list_skip: '消费前列表规则跳过',
+        processed_skip: '已处理记录跳过',
+        detail_budget_exhausted: '详情尝试预算用尽',
+        detail_start: '开始检查详情',
+        detail_skip: '详情页跳过',
+        detail_failed: '详情页失败',
+        handled: '已处理',
+        handle_not_done: '未处理完成'
+      };
+      const en = {
+        list_seen: 'List Seen',
+        list_queueable: 'List Queueable',
+        list_skip: 'List Skipped',
+        queue_added: 'Queue Added',
+        queue_refreshed: 'Queue Refreshed',
+        queue_seen_skip: 'Queue Seen Skipped',
+        queue_consume_seen: 'Queue Consumed',
+        consume_list_skip: 'Consumed List Skipped',
+        processed_skip: 'Processed Skipped',
+        detail_budget_exhausted: 'Detail Budget Exhausted',
+        detail_start: 'Detail Started',
+        detail_skip: 'Detail Skipped',
+        detail_failed: 'Detail Failed',
+        handled: 'Handled',
+        handle_not_done: 'Not Handled'
+      };
+      return (isEn ? en : zh)[key] || key;
+    }
+
     async function writeReportFile(filename, content, mime, opts) {
       if (opts.watcherDailyReportEnabled && deps.sendNativeMessage) {
         try {
@@ -438,7 +484,9 @@
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
         autoWatcherLogKey,
-        autoWatcherTraceKey
+        autoWatcherTraceKey,
+        CANDIDATE_AUDIT_KEY,
+        CANDIDATE_AUDIT_INDEX_KEY
       ]);
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[date] || {};
@@ -452,6 +500,11 @@
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
+      const candidateAudit = (Array.isArray(stored[CANDIDATE_AUDIT_KEY]) ? stored[CANDIDATE_AUDIT_KEY] : [])
+        .filter(entry => formatBeijingDateTime(entry.time, true) === date);
+      const candidateAuditIndex = stored[CANDIDATE_AUDIT_INDEX_KEY] && typeof stored[CANDIDATE_AUDIT_INDEX_KEY] === 'object' && !Array.isArray(stored[CANDIDATE_AUDIT_INDEX_KEY])
+        ? Object.values(stored[CANDIDATE_AUDIT_INDEX_KEY])
+        : [];
       const journalAccessStats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
         ? Object.values(state.journalAccessStats)
         : [];
@@ -651,7 +704,81 @@
           })
         }))
       ];
-      const csv = csvRows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
+      const csv = makeCsv(csvRows);
+      const candidateAuditCsvHeader = isEn
+        ? ['Time', 'Trigger', 'Page', 'Order', 'Index', 'Publisher', 'Phase', 'Status', 'Reason', 'Assist ID', 'Journal', 'DOI', 'Assist Time', 'Title', 'List URL', 'Detail URL', 'Details']
+        : ['时间', '触发方式', '页码', '页序', '列表位置', '出版社', '阶段', '结果', '原因', '求助ID', '期刊', 'DOI', '求助时间', '标题', '列表页链接', '详情页链接', '细节'];
+      const candidateAuditCsvRows = [
+        candidateAuditCsvHeader,
+        ...candidateAudit
+          .slice()
+          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+          .map(entry => [
+            formatBeijingDateTime(entry.time),
+            entry.trigger || '',
+            entry.page ?? '',
+            entry.pageOrder || '',
+            entry.listIndex ?? '',
+            entry.publisherName || '',
+            translateCandidateAuditPhase(entry.phase || '', isEn),
+            entry.status || '',
+            translateReason(entry.reason || '', isEn),
+            entry.assistId || '',
+            entry.journalShortName || entry.journalName || '',
+            entry.doi || '',
+            entry.assistTimeText || '',
+            entry.title || '',
+            entry.listUrl || '',
+            entry.detailUrl || '',
+            reportJson({
+              assistAgeSeconds: entry.assistAgeSeconds ?? '',
+              source: entry.source || '',
+              urlKey: entry.urlKey || '',
+              ...(entry.details && typeof entry.details === 'object' ? entry.details : {})
+            })
+          ])
+      ];
+      const candidateAuditCsv = makeCsv(candidateAuditCsvRows);
+      function candidateRecentEventsText(entry = {}) {
+        const events = Array.isArray(entry.recentEvents) ? entry.recentEvents : [];
+        return events.map(event => {
+          const time = event.time ? formatBeijingTimeOnly(event.time) : '';
+          const phase = translateCandidateAuditPhase(event.phase || '', isEn);
+          const reason = translateReason(event.reason || '', isEn);
+          const page = event.page ? `p${event.page}` : '';
+          return [time, page, phase, reason].filter(Boolean).join(' ');
+        }).join(' | ');
+      }
+      const candidateStateCsvHeader = isEn
+        ? ['First Seen', 'Last Update', 'Event Count', 'Assist ID', 'Journal', 'Publisher', 'Latest Phase', 'Latest Status', 'Latest Reason', 'First Page', 'Last Page', 'Pages', 'DOI', 'Assist Time', 'Title', 'Last List URL', 'Detail URL', 'Recent Events']
+        : ['首次看到', '最后更新', '事件数', '求助ID', '期刊', '出版社', '最新阶段', '最新结果', '最新原因', '首次页', '最后页', '出现页', 'DOI', '求助时间', '标题', '最后列表页链接', '详情页链接', '最近状态变化'];
+      const candidateStateCsvRows = [
+        candidateStateCsvHeader,
+        ...candidateAuditIndex
+          .filter(entry => entry?.assistId && formatBeijingDateTime(entry.lastAt, true) === date)
+          .sort((a, b) => new Date(a.lastAt).getTime() - new Date(b.lastAt).getTime())
+          .map(entry => [
+            entry.firstSeenAt ? formatBeijingDateTime(entry.firstSeenAt) : '',
+            entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
+            entry.eventCount ?? '',
+            entry.assistId || '',
+            entry.journalShortName || '',
+            entry.publisherName || '',
+            translateCandidateAuditPhase(entry.latestPhase || '', isEn),
+            entry.latestStatus || '',
+            translateReason(entry.latestReason || '', isEn),
+            entry.firstPage || '',
+            entry.lastPage || '',
+            Array.isArray(entry.pages) ? entry.pages.join('|') : '',
+            entry.doi || '',
+            entry.assistTimeText || '',
+            entry.title || '',
+            entry.lastListUrl || '',
+            entry.detailUrl || '',
+            candidateRecentEventsText(entry)
+          ])
+      ];
+      const candidateStateCsv = makeCsv(candidateStateCsvRows);
       const skipDecisionRows = [
         ...logs
           .filter(log => String(log.status) === 'skipped' || String(log.status) === 'failed')
@@ -792,9 +919,13 @@
       ]);
       summaryLines.push(
         ...(isEn ? [
+          `- Candidate Audit CSV: ${monthDir}/${date}-candidate-audit.csv (${candidateAudit.length} rows)`,
+          `- Candidate State CSV: ${monthDir}/${date}-candidate-state.csv (${candidateStateCsvRows.length - 1} IDs)`,
           `- PDF Cleaner: cleaned tasks=${cleanerStats.cleaned}, removed matches=${cleanerStats.removed}, no watermark=${cleanerStats.noWatermark}, failed=${cleanerStats.failed}`,
           `- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || 'None'}`
         ] : [
+          `- 候选审计 CSV: ${monthDir}/${date}-candidate-audit.csv（${candidateAudit.length} 行）`,
+          `- 候选状态 CSV: ${monthDir}/${date}-candidate-state.csv（${candidateStateCsvRows.length - 1} 个 ID）`,
           `- PDF 去水印: 成功清洗任务=${cleanerStats.cleaned}，已去除匹配数=${cleanerStats.removed}，未检测到水印=${cleanerStats.noWatermark}，失败=${cleanerStats.failed}`,
           `- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || '无'}`
         ])
@@ -943,6 +1074,8 @@
       ].map(line => line.trimEnd()).join('\n');
 
       await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
+      await writeReportFile(`${reportStem}-candidate-audit.csv`, candidateAuditCsv, 'text/csv', opts);
+      await writeReportFile(`${reportStem}-candidate-state.csv`, candidateStateCsv, 'text/csv', opts);
       await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
       // PRIVATE_WATCHER_ONLY: skipped writing .jsonl file to optimize disk space
     }
