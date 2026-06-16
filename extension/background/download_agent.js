@@ -230,10 +230,13 @@
         let revealed = active;
         let revealTimer = null;
         let abortListener = null;
+        let tabRemovedListener = null;
         let sourceUrlForMatching = pdfUrl;
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
+        const captureId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const pollTimeouts = new Set();
         const articleUrl = ensureHttpUrl(publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl, '出版商页面 URL');
         const payloadSummary = {
           assistId: options.payload?.assistId || '',
@@ -304,8 +307,12 @@
           if (noDownloadTimer) clearTimeout(noDownloadTimer);
           if (poller) clearInterval(poller);
           if (revealTimer) clearTimeout(revealTimer);
+          for (const timeoutId of pollTimeouts) clearTimeout(timeoutId);
+          pollTimeouts.clear();
           if (abortListener && signal) signal.removeEventListener('abort', abortListener);
           chromeApi.downloads.onCreated.removeListener(onCreated);
+          if (tabRemovedListener && chromeApi.tabs.onRemoved) chromeApi.tabs.onRemoved.removeListener(tabRemovedListener);
+          tracePublisherStep('poller_cleanup', { captureId, closeTab });
           if (tabId !== null) {
             pendingPublisherTabs.delete(tabId);
             unregisterPublisherTab(tabId).catch(() => {});
@@ -372,7 +379,7 @@
             return;
           }
           if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
-            tracePublisherStep('download-candidate-ignored', { source, reason: 'tab_mismatch', downloadId: item.id, itemTabId: item.tabId, publisherTabId: tabId });
+            tracePublisherStep('download_candidate_owner_mismatch', { source, reason: 'tab_mismatch', downloadId: item.id, itemTabId: item.tabId, publisherTabId: tabId, captureId });
             if (!seenIgnoredIds.has(item.id)) {
               seenIgnoredIds.add(item.id);
               post(port, 'progress', `⚠️ 忽略下载 #${item.id}：标签页不匹配 (下载来自 tab ${item.tabId}，期望 ${tabId})`);
@@ -381,7 +388,7 @@
           }
           const matchResult = isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching);
           if (!matchResult.ok) {
-            tracePublisherStep('download-candidate-ignored', {
+            tracePublisherStep('download_candidate_owner_mismatch', {
               source,
               reason: 'url_mismatch',
               detail: matchResult.reason,
@@ -389,7 +396,8 @@
               expectedHost,
               sourceUrl: traceUrl(sourceUrlForMatching),
               itemUrl: traceUrl(item.url),
-              finalUrl: traceUrl(item.finalUrl)
+              finalUrl: traceUrl(item.finalUrl),
+              captureId
             });
             if (!seenIgnoredIds.has(item.id)) {
               seenIgnoredIds.add(item.id);
@@ -402,7 +410,7 @@
           }
           seenIds.add(item.id);
           downloadId = item.id;
-          tracePublisherStep('download-candidate-accepted', { source, downloadId: item.id });
+          tracePublisherStep('download-candidate-accepted', { source, downloadId: item.id, captureId });
           if (noDownloadTimer) {
             clearTimeout(noDownloadTimer);
             noDownloadTimer = null;
@@ -417,6 +425,7 @@
               item._ablesciCreatedByPlugin = true;
               item._ablesciPublisherTabId = tabId;
               item._ablesciMatchSource = source;
+              item._ablesciCaptureId = captureId;
               finishOk(item);
             })
             .catch(err => {
@@ -432,6 +441,20 @@
           if (settled) return null;
           const nextUrl = ensureHttpUrl(url, '出版商 PDF URL');
           if (!nextUrl) throw new Error('出版商返回的 PDF 地址为空');
+          const currentPublisher = publisherForUrl(sourceUrlForMatching) || publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || '';
+          const nextPublisher = publisherForUrl(nextUrl) || '';
+          if (currentPublisher && nextPublisher && currentPublisher !== nextPublisher) {
+            tracePublisherStep('download_candidate_owner_mismatch', {
+              source,
+              reason: 'publisher_mismatch',
+              currentPublisher,
+              nextPublisher,
+              sourceUrl: traceUrl(sourceUrlForMatching),
+              itemUrl: traceUrl(nextUrl),
+              captureId
+            });
+            throw new Error(`出版商 PDF 地址来源不匹配：期望 ${currentPublisher}，实际 ${nextPublisher}`);
+          }
           sourceUrlForMatching = nextUrl;
           expectedHost = hostnameOf(sourceUrlForMatching);
           downloadArmed = true;
@@ -452,6 +475,7 @@
           const item = await downloadByDownloadsAPI(nextUrl, directDownloadFilenameRel, signal, { downloadTimeoutMs });
           item._ablesciPublisherTabId = tabId;
           item._ablesciMatchSource = source;
+          item._ablesciCaptureId = captureId;
           finishOk(item);
           return item;
         }
@@ -465,6 +489,14 @@
           }
         }
 
+        function schedulePoll(delayMs) {
+          const timeoutId = setTimeout(() => {
+            pollTimeouts.delete(timeoutId);
+            pollDownloads().catch(() => {});
+          }, delayMs);
+          pollTimeouts.add(timeoutId);
+        }
+
         try {
           throwIfAborted(signal);
           if (signal) {
@@ -472,13 +504,22 @@
             signal.addEventListener('abort', abortListener, { once: true });
           }
           chromeApi.downloads.onCreated.addListener(onCreated);
-          tracePublisherStep('publisher-tab-open', { active, revealAfterMs, downloadArmed, expectedHost });
+          tracePublisherStep('publisher-tab-open', { active, revealAfterMs, downloadArmed, expectedHost, captureId });
           const tab = await chromeApi.tabs.create({ url: articleUrl, active });
           tabId = tab.id;
+          if (chromeApi.tabs.onRemoved) {
+            tabRemovedListener = removedTabId => {
+              if (removedTabId !== tabId || settled) return;
+              tracePublisherStep('publisher_tab_closed', { tabId, captureId });
+              finishError(new Error('出版商标签页已关闭，已停止等待下载。'));
+            };
+            chromeApi.tabs.onRemoved.addListener(tabRemovedListener);
+          }
           pendingPublisherTabs.set(tabId, {
             pdfUrl,
             articleUrl,
             createdAt: Date.now(),
+            captureId,
             port,
             finishError,
             revealPublisherTab,
@@ -525,8 +566,8 @@
           post(port, 'progress', '正在等待浏览器下载事件；如果 PDF 已经下载但无后续进度，会通过轮询下载记录继续接管。');
 
           poller = setInterval(pollDownloads, 1000);
-          setTimeout(pollDownloads, 500);
-          setTimeout(pollDownloads, 2000);
+          schedulePoll(500);
+          schedulePoll(2000);
 
           armNoDownloadTimer(noDownloadTimeoutMs, noDownloadTimeoutMessage);
         } catch (err) {

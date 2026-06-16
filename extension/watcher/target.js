@@ -134,10 +134,10 @@
       };
     }
 
-    function speedModeFromTarget({ error, monthlyTarget, riskExhausted = false, rateMultiplier = 1 }) {
+    function speedModeFromTarget({ error, monthlyTarget, riskExhausted = false }) {
       if (riskExhausted) return 'normal';
       const thresholds = lagThresholds(monthlyTarget);
-      if (error >= thresholds.severe || rateMultiplier >= 1.55) return 'fast';
+      if (error >= thresholds.severe) return 'fast';
       if (error >= thresholds.medium) return 'normal';
       return 'normal';
     }
@@ -194,8 +194,7 @@
           actualDone: done,
           targetError: 0,
           todayTarget: 0,
-          riskLimit,
-          rateMultiplier: 1
+          riskLimit
         };
       }
       const rawSpeedMode = speedModeFromTarget({ error: lag, monthlyTarget: effectiveTarget || monthlyTarget });
@@ -211,12 +210,9 @@
         workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
         activeTimeProgressRatio: availability.activeTimeProgressRatio,
         availabilityFactor: availability.availabilityFactor,
-        availabilityExpectedWakeCount: availability.expectedWakeCount,
-        availabilityActualWakeCount: availability.actualWakeCount,
         todayTarget: calculatedTodayTarget,
         riskLimit,
-        schedulerModelMode: 'calendar_target',
-        rateMultiplier: 1
+        schedulerModelMode: 'calendar_target'
       };
     }
 

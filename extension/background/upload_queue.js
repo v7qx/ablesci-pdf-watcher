@@ -19,6 +19,7 @@
       isLikelyRscPayload,
       pauseWatcherForAccessEnvironment,
       saveErrorDiagnostic,
+      appendDiagnosticTrace,
       isNonPdfAccessPageError,
       escapeHtml,
       formatTaskError,
@@ -48,6 +49,31 @@
       const doi = payload?.doi || '';
       const title = payload?.suggestedFilename || '';
       return [id, doi || title].filter(Boolean).join(' / ') || '当前任务';
+    }
+
+    function taskDedupeKey(payload = {}) {
+      const assistId = String(payload.assistId || '').trim();
+      if (assistId) return `assist:${assistId}`;
+      const pageUrl = String(payload.pageUrl || payload.assistDetailUrl || '').trim();
+      if (pageUrl) {
+        try {
+          const url = new URL(pageUrl);
+          const id = String(url.searchParams.get('id') || '').trim();
+          if (id) return `assist:${id}`;
+          url.hash = '';
+          return `url:${url.href}`;
+        } catch (_) {
+          return `url:${pageUrl}`;
+        }
+      }
+      return '';
+    }
+
+    function findDuplicateTask(payload) {
+      const key = taskDedupeKey(payload);
+      if (!key) return null;
+      if (activeTask && !activeTask.cancelled && activeTask.dedupeKey === key) return activeTask;
+      return taskQueue.find(task => task && !task.cancelled && task.dedupeKey === key) || null;
     }
 
     function removeQueuedTask(task) {
@@ -250,11 +276,31 @@
 
     function enqueueUpload(port, payload) {
       const label = uploadLabel(payload);
+      const dedupeKey = taskDedupeKey(payload);
+      const duplicate = findDuplicateTask(payload);
+      if (duplicate) {
+        appendDiagnosticTrace?.(payload, {
+          step: 'duplicate_enqueue_prevented',
+          existingTaskId: duplicate.id,
+          dedupeKey
+        });
+        post(port, 'progress', `已忽略重复任务：${label} 正在处理或排队中。`);
+        post(port, 'done', '同一求助已在处理或排队中，本次重复请求已忽略。', {
+          html: '同一求助已在处理或排队中，本次重复请求已忽略。',
+          recomend: false,
+          reload: false,
+          downloadOnly: true,
+          skipped: true,
+          skipReason: 'duplicate_enqueue_prevented'
+        });
+        return;
+      }
       const task = {
         id: nextTaskId++,
         port,
         payload,
         label,
+        dedupeKey,
         startedAt: new Date().toISOString(),
         cancelled: false,
         cancelReason: '',

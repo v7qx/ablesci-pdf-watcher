@@ -140,6 +140,69 @@ func TestBuildCleanerArgsKeepsLegacyAccessCleanerFlags(t *testing.T) {
 	}
 }
 
+func TestBuildPageCountArgsUsesToolboxDryRun(t *testing.T) {
+	args := buildPageCountArgs(
+		filepath.Join("C:", "Tools", "zotero-pdf-toolbox.exe"),
+		"paper.pdf",
+		"summary.json",
+	)
+	want := []string{
+		"clean-access",
+		"--input", "paper.pdf",
+		"--dry-run",
+		"--summary-json", "summary.json",
+		"--timeout-seconds", "10",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %v want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q; all args=%v", i, args[i], want[i], args)
+		}
+	}
+	for _, arg := range args {
+		if arg == "--replace" || arg == "--output" || arg == "-apply" || arg == "-replace" {
+			t.Fatalf("page-count command must be non-mutating, got args=%v", args)
+		}
+	}
+}
+
+func TestBuildPageCountArgsKeepsLegacyDryRun(t *testing.T) {
+	args := buildPageCountArgs(
+		filepath.Join("C:", "Tools", "zotero-access-cleaner.exe"),
+		"paper.pdf",
+		"summary.json",
+	)
+	want := []string{
+		"-input", "paper.pdf",
+		"-summary-json", "summary.json",
+		"-timeout-seconds", "10",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length mismatch: got %v want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d mismatch: got %q want %q; all args=%v", i, args[i], want[i], args)
+		}
+	}
+}
+
+func TestAllowedTextReadPathRequiresHelperDirOrExactAllowedPath(t *testing.T) {
+	helperDir := t.TempDir()
+	allowed := filepath.Join(t.TempDir(), "blacklist.txt")
+	if !isAllowedTextReadPath(filepath.Join(helperDir, "blacklist.txt"), helperDir, "") {
+		t.Fatal("expected helper-local blacklist to be allowed")
+	}
+	if !isAllowedTextReadPath(allowed, helperDir, allowed) {
+		t.Fatal("expected exact configured blacklist path to be allowed")
+	}
+	if isAllowedTextReadPath(filepath.Join(t.TempDir(), "other.txt"), helperDir, allowed) {
+		t.Fatal("expected unrelated explicit txt path to be rejected")
+	}
+}
+
 func TestValidateOSSHostAllowsAliyunPublicEndpoints(t *testing.T) {
 	hosts := []string{
 		"https://ables1.oss-cn-shanghai.aliyuncs.com/",

@@ -537,9 +537,9 @@
         'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath', 'pdfCleanerCleanedPath',
         'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
-        'targetError', 'activeTimeProgressRatio', 'availabilityFactor', 'availabilityActualWakeCount', 'availabilityExpectedWakeCount',
-        'rateMultiplier', 'riskUsed', 'riskLimit', 'sessionSize', 'sessionHandledCount',
-        'sessionDurationMs', 'score', 'estimatedSuccessRate',
+        'targetError', 'activeTimeProgressRatio', 'availabilityFactor',
+        'riskUsed', 'riskLimit',
+        'score', 'estimatedSuccessRate',
         'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
         'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
         'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
@@ -547,8 +547,7 @@
         'lastAttemptTargetSessionSize', 'lastAttemptCheckedDelta', 'lastAttemptDownloadedDelta',
         'lastAttemptListScanStarted', 'lastAttemptPickedListUrl', 'pickedPage', 'pageCurve', 'pageMin', 'pageMax',
         'parsedListPages', 'backoffSkippedPages',
-        'pageFrontHit', 'pageAlpha', 'randomSessionPicked', 'randomSessionFinalSize',
-        'randomValue', 'step', 'trigger', 'tabId', 'url', 'details'
+        'pageFrontHit', 'pageAlpha', 'step', 'trigger', 'tabId', 'url', 'details'
       ];
       const baseReportFields = {
         workTimeProgressRatio: state.workTimeProgressRatio || '',
@@ -557,14 +556,8 @@
         targetError: state.targetError || state.lag || '',
         activeTimeProgressRatio: state.activeTimeProgressRatio || '',
         availabilityFactor: state.availabilityFactor || '',
-        availabilityActualWakeCount: state.availabilityActualWakeCount || '',
-        availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || '',
-        rateMultiplier: state.rateMultiplier || '',
         riskUsed: daily.riskUsed || state.riskUsed || '',
         riskLimit: state.riskLimit || '',
-        sessionSize: state.lastSession?.targetSessionSize || '',
-        sessionHandledCount: state.lastSession?.handledCount || '',
-        sessionDurationMs: state.lastSession?.sessionDurationMs || '',
         currentStrategy: state.lastAssistStrategy || state.currentExecutionModel || '',
         nextAssistRunAt: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
         nextAssistStrategy: state.nextAssistStrategy || '',
@@ -593,10 +586,7 @@
         parsedListPages: lastAttempt.parsedListPages || '',
         backoffSkippedPages: lastAttempt.backoffSkippedPages || '',
         pageFrontHit: lastAttempt.frontHit === true ? 'true' : '',
-        pageAlpha: lastAttempt.alpha ?? '',
-        randomSessionPicked: lastAttempt.randomSessionPicked ?? '',
-        randomSessionFinalSize: lastAttempt.randomSessionFinalSize ?? '',
-        randomValue: lastAttempt.randomValue ?? ''
+        pageAlpha: lastAttempt.alpha ?? ''
       };
       function reportRow(type, values = {}) {
         const row = { record_type: type, ...baseReportFields, ...values };
@@ -637,12 +627,6 @@
           time: formatBeijingDateTime(new Date()),
           status: state.currentExecutionModel || state.schedulerModelMode || 'simple',
           reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`
-        }),
-        reportRow('session', {
-          time: formatBeijingDateTime(state.lastSession?.finishedAt || state.lastSession?.startedAt || new Date()),
-          sessionId: state.lastSession?.id || '',
-          status: state.lastSession?.status || '',
-          reason: state.lastSession?.cooldownMinutes ? `cooldown=${state.lastSession.cooldownMinutes}m` : ''
         }),
         reportRow('assist_strategy', {
           time: state.lastAssistDecisionAt ? formatBeijingDateTime(state.lastAssistDecisionAt) : formatBeijingDateTime(new Date()),
@@ -860,16 +844,10 @@
         `- Skipped Candidate Count: ${Number(daily.skipped || 0)}`,
         `- Failed Task Count: ${Number(daily.failed || 0)}`,
         `- Notifications Sent: ${Number(daily.notified || 0)}`,
-        `- Watcher Speed Mode: ${state.speedMode === 'adaptive' ? 'Adaptive' : (state.speedMode === 'slow' ? 'Slow' : (state.speedMode === 'fast' ? 'Fast' : 'Normal'))}`,
-        `- Scheduler Mode: ${state.schedulerModelMode || 'simple'}`,
-        `- Runtime Strategy Mode: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
-        `- Current Assist Strategy: ${state.lastAssistStrategy || ''}`,
+        `- Scheduler: ${state.lastAssistStrategy || state.currentExecutionModel || state.schedulerModelMode || 'simple'}`,
         `- Next Wake Time: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- Next Assist Attempt Time: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
         `- Next Assist Strategy & Reason: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
-        `- Next Assist Planning Info: plannedTime=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
-        `- Next Assist modelDelay/guard/finalDelay: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} mins`,
-        `- Next Assist Guard Config: mode=${state.nextAssistGuardMode || 'none'}, liftMinutes=${Number(state.nextAssistGuardLiftMinutes || 0)}m, weight=${Number(state.nextAssistGuardWeight || 0)}`,
         `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- Latest Run Trigger & Result: trigger=${state.lastRunTrigger || ''}, result=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
         `- Latest Attempt Time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
@@ -882,21 +860,10 @@
         `- Latest Selected List Link: ${latestPickedListUrl ? `[Link](${latestPickedListUrl})` : ''}`,
         `- Latest Parsed List Pages: ${lastAttempt.parsedListPages || ''}`,
         `- Latest Backoff-Skipped Pages: ${lastAttempt.backoffSkippedPages || ''}`,
-        `- Latest Random Eval Result: picked=${lastAttempt.randomSessionPicked ?? ''}, final=${lastAttempt.randomSessionFinalSize ?? ''}, randomValue=${lastAttempt.randomValue ?? ''}`,
-        `- Assist Trend Coefficient: ${Number(state.trendFactor || 1).toFixed(2)}`,
-        `- Work Time Progress Ratio: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
-        `- Active Progress / Availability Factor: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
-        `- Active Wake Count (Expected / Actual): ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
         `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- Rate Multiplier Coefficient: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
-        `- Target Assists This Hour: ${Number(state.hourTarget || 0)}`,
-        `- Risk Budget Used today / Limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- Risk Events today / Threshold: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- Target Assists Today: ${Number(state.todayTarget || 0)}`,
         `- Details File: ${monthDir}/watcher-data-${date}.jsonl`,
-        `- Recent Session ID: ${state.lastSession?.id || ''}`,
-        `- Recent Session Target Size: ${Number(state.lastSession?.targetSessionSize || 0)}`,
-        `- Recent Session Handled Count: ${Number(state.lastSession?.handledCount || 0)}`,
-        `- Recent Session Duration (sec): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
         `- Trace Event Count: ${traces.length}`
       ] : [
         `- 已检查候选数: ${Number(daily.checked || 0)}`,
@@ -905,16 +872,10 @@
         `- 已跳过候选数: ${Number(daily.skipped || 0)}`,
         `- 失败任务数: ${Number(daily.failed || 0)}`,
         `- 发送通知数: ${Number(daily.notified || 0)}`,
-        `- 值守速度模式: ${state.speedMode === 'adaptive' ? '自适应' : (state.speedMode === 'slow' ? '低频' : (state.speedMode === 'fast' ? '快速' : '标准'))}`,
-        `- 调度器模式: ${state.schedulerModelMode || 'simple'}`,
-        `- 运行时策略模式: ${state.currentSchedulerMode || ''} / ${state.currentExecutionModel || ''}`,
-        `- 当前应助策略: ${state.lastAssistStrategy || ''}`,
+        `- 调度策略: ${state.lastAssistStrategy || state.currentExecutionModel || state.schedulerModelMode || 'simple'}`,
         `- 下一次唤醒时间: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- 下一次应助尝试时间: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
         `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
-        `- 下一次应助规划数据: 规划时间=${state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : ''}`,
-        `- 下一次应助延迟模型/守卫/最终延迟: ${Number(state.nextAssistModelDelayMinutes || 0)} / ${Number(state.nextAssistGuardMinutes || 0)} / ${Number(state.nextAssistDelayMinutes || 0)} 分钟`,
-        `- 下一次应助守卫配置: 守卫模式=${state.nextAssistGuardMode || 'none'}, 抬升时间=${Number(state.nextAssistGuardLiftMinutes || 0)}m, 权重=${Number(state.nextAssistGuardWeight || 0)}`,
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- 最近一次运行原因与结果: 触发方式=${state.lastRunTrigger || ''}, 结果=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
         `- 最近一次尝试时间: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
@@ -927,34 +888,21 @@
         `- 最近一次选中的列表页链接: ${latestPickedListUrl ? `[点击跳转](${latestPickedListUrl})` : ''}`,
         `- 最近一次实际解析页: ${lastAttempt.parsedListPages || ''}`,
         `- 最近一次冷却跳过页: ${lastAttempt.backoffSkippedPages || ''}`,
-        `- 最近一次随机评估结果: 选中=${lastAttempt.randomSessionPicked ?? ''}, 最终=${lastAttempt.randomSessionFinalSize ?? ''}, 随机值=${lastAttempt.randomValue ?? ''}`,
-        `- 应助趋势系数: ${Number(state.trendFactor || 1).toFixed(2)}`,
-        `- 工作时间进度比率: ${Number(state.workTimeProgressRatio || 0).toFixed(4)}`,
-        `- 活跃时间进度 / 可用性系数: ${Number(state.activeTimeProgressRatio || 0).toFixed(4)} / ${Number(state.availabilityFactor || 1).toFixed(3)}`,
-        `- 活跃唤醒次数 (预计 / 实际): ${Number(state.availabilityExpectedWakeCount || 0)} / ${Number(state.availabilityActualWakeCount || 0)}`,
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- 速率倍增系数: ${Number(state.rateMultiplier || 1).toFixed(3)}`,
-        `- 本小时目标应助数: ${Number(state.hourTarget || 0)}`,
-        `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
+        `- 今日风险事件累计 / 阈值: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`,
         `- 详细事件数据 file: ${monthDir}/watcher-data-${date}.jsonl`,
-        `- 最近会话 ID: ${state.lastSession?.id || ''}`,
-        `- 最近会话目标大小: ${Number(state.lastSession?.targetSessionSize || 0)}`,
-        `- 最近会话已处理数: ${Number(state.lastSession?.handledCount || 0)}`,
-        `- 最近会话执行时长 (秒): ${Math.round(Number(state.lastSession?.sessionDurationMs || 0) / 1000)}`,
         `- Trace 事件记录数: ${traces.length}`
       ]);
       summaryLines.push(
         ...(isEn ? [
           `- Candidate Audit CSV: ${monthDir}/${date}-candidate-audit.csv (${candidateAudit.length} rows)`,
           `- Candidate State CSV: ${monthDir}/${date}-candidate-state.csv (${candidateStateCsvRows.length - 1} IDs)`,
-          `- PDF Cleaner: cleaned tasks=${cleanerStats.cleaned}, removed matches=${cleanerStats.removed}, no watermark=${cleanerStats.noWatermark}, failed=${cleanerStats.failed}`,
-          `- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || 'None'}`
+          ...(cleanerStats.failed > 0 ? [`- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`] : [])
         ] : [
           `- 候选审计 CSV: ${monthDir}/${date}-candidate-audit.csv（${candidateAudit.length} 行）`,
           `- 候选状态 CSV: ${monthDir}/${date}-candidate-state.csv（${candidateStateCsvRows.length - 1} 个 ID）`,
-          `- PDF 去水印: 成功清洗任务=${cleanerStats.cleaned}，已去除匹配数=${cleanerStats.removed}，未检测到水印=${cleanerStats.noWatermark}，失败=${cleanerStats.failed}`,
-          `- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || '无'}`
+          ...(cleanerStats.failed > 0 ? [`- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`] : [])
         ])
       );
 

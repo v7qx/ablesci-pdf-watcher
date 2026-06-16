@@ -11,16 +11,13 @@
       const cap = sessionExecutionCap(opts, state, false);
       const finalSize = cap > 0 ? 1 : 0;
       if (state) {
-        state.lastSessionSizeDecision = {
+        state.lastSessionCapacityDecision = {
           mode: state.speedMode || 'normal',
-          picked: finalSize,
           cap,
           finalSize,
-          random: 0,
-          total: 1,
-          weights: [0, 1],
           allowZero: false
         };
+        delete state.lastSessionSizeDecision;
       }
       return finalSize;
     }

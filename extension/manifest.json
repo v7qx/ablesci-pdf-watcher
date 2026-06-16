@@ -100,6 +100,7 @@
         "content/publisher_sciencedirect.js",
         "content/publisher_direct_pdf.js",
         "content/publisher_rsc.js",
+        "content/publisher_ieee.js",
         "content/publisher_aip.js",
         "content/publisher_nature.js",
         "content/publisher_cnpe.js",

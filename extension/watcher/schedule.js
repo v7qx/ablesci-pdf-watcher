@@ -152,11 +152,9 @@
         reason: cfBackoffApplied ? `${reason}_cf_backoff_${cfStreak}` : reason,
         strategy: 'calendar_target_lognormal',
         speedMode,
-        rateMultiplier: 1,
         targetError,
         severeLag,
-        mediumLag,
-        combinedMultiplier: 1
+        mediumLag
       };
     }
 
@@ -193,12 +191,10 @@
         strategy: plan.strategy,
         reason: plan.reason,
         speedMode: plan.speedMode || '',
-        rateMultiplier: plan.rateMultiplier || '',
         targetError: plan.targetError || 0,
         dailyDownloaded: plan.dailyDownloaded ?? dailyDownloadedFromState(state),
         dailyLimit: plan.dailyLimit ?? Number(opts.watcherDailyLimit || 0),
         todayTarget: plan.todayTarget ?? Number(state.todayTarget || 0),
-        combinedMultiplier: plan.combinedMultiplier || '',
         rawModelDelayMinutes: plan.rawModelDelayMinutes ? Number(plan.rawModelDelayMinutes.toFixed(2)) : '',
         modelDelayMinutes: plan.modelDelayMinutes ? Number(plan.modelDelayMinutes.toFixed(2)) : '',
         guardMinutes: plan.guardMinutes ? Number(plan.guardMinutes.toFixed(2)) : '',
@@ -347,8 +343,7 @@
         nextAssistRunAt: state.nextAssistRunAt || '',
         nextAssistStrategy: state.nextAssistStrategy || '',
         nextAssistReason: state.nextAssistReason || '',
-        speedMode: state.speedMode || '',
-        rateMultiplier: state.rateMultiplier || ''
+        speedMode: state.speedMode || ''
       });
     }
 

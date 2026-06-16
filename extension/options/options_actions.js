@@ -196,8 +196,6 @@
           nextAssistGuardApplied: state.nextAssistGuardApplied === true,
           nextAssistPlan: state.nextAssistPlan || null,
           nextAssistPlannedAt: state.nextAssistPlannedAt || '',
-          targetPreview: state.targetPreview || null,
-          targetPreviewAt: state.targetPreviewAt || '',
           chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || '',
           lastAttempt: state.lastAttempt || null,
           lastAssistStrategy: state.lastAssistStrategy || '',
@@ -212,12 +210,9 @@
           workTimeProgressRatio: state.workTimeProgressRatio || 0,
           activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
           availabilityFactor: state.availabilityFactor || 1,
-          availabilityActualWakeCount: state.availabilityActualWakeCount || 0,
-          availabilityExpectedWakeCount: state.availabilityExpectedWakeCount || 0,
           expectedDone: state.expectedDone || 0,
           actualDone: state.actualDone || state.monthDone || 0,
           targetError: state.targetError || state.lag || 0,
-          rateMultiplier: state.rateMultiplier || 1,
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
           currentSession: state.currentSession || null,
@@ -572,10 +567,14 @@
           bold = true;
         }
 
-        const safeText = isHtml ? text : escapeHtml(text);
-        const styledLine = `<div style="color: ${color}; font-weight: ${bold ? 'bold' : 'normal'}; margin-bottom: 6px; font-size: 11px; line-height: 1.4;">${emoji} ${safeText}</div>`;
-
-        logContainer.innerHTML += styledLine;
+        const line = document.createElement('div');
+        line.style.color = color;
+        line.style.fontWeight = bold ? 'bold' : 'normal';
+        line.style.marginBottom = '6px';
+        line.style.fontSize = '11px';
+        line.style.lineHeight = '1.4';
+        line.textContent = `${emoji} ${isHtml ? String(text || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '') : String(text || '')}`;
+        logContainer.appendChild(line);
         logContainer.scrollTop = logContainer.scrollHeight;
       }
 

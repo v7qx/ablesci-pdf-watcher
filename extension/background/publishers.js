@@ -264,7 +264,9 @@
     const sourceHost = getHostname(sourceUrl);
     const finalHost = getHostname(url);
     const expected = getHostname(expectedHost || '').toLowerCase();
-    const pdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url) || looksLikePdfDownloadUrl(sourceUrl);
+    const actualPdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url);
+    const sourcePdfLike = looksLikePdfDownloadUrl(sourceUrl);
+    const pdfLike = actualPdfLike || sourcePdfLike;
 
     if (!pdfLike) {
       return { ok: false, reason: `pdfLike_check_failed (filename: "${filename}", mime: "${mime}", looksLikeUrl: ${looksLikePdfDownloadUrl(url)}, looksLikeSource: ${looksLikePdfDownloadUrl(sourceUrl)})` };
@@ -342,6 +344,9 @@
 
     // 当初始请求为 DOI (doi.org) 跳转时，允许匹配支持的各大出版社 PDF 下载主机
     if (isDoiHost(expected) || isDoiHost(sourceHost)) {
+      if (!actualPdfLike) {
+        return { ok: false, reason: `doi_fallback_requires_actual_pdf_like_url (filename: "${filename}", mime: "${mime}", url: "${url}")` };
+      }
       if (isScienceDirectRelatedHost(finalHost)) return { ok: true };
       if (isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
       if (isAipRelatedDownloadHost(finalHost)) return { ok: true };

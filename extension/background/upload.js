@@ -37,6 +37,7 @@
       sanitizeDownloadItem,
       saveDiagnostic,
       saveErrorDiagnostic,
+      appendDiagnosticTrace,
       isNonPdfAccessPageError,
       isHtmlDownloadItem,
       stopForNonPdfDownload,
@@ -207,7 +208,10 @@
         try {
           const res = await sendNativeMessage(opts.nativeHostName, {
             action: 'read_text_file',
-            path: opts.watcherBlacklistPath || ''
+            path: opts.watcherBlacklistPath || '',
+            extra: {
+              allowed_path: opts.watcherBlacklistPath || ''
+            }
           }, nativeMessageLongTimeoutMs);
           if (res && res.ok && res.body) {
             const blacklistMap = new Map();
@@ -559,6 +563,7 @@
       isLikelyRscPayload,
       pauseWatcherForAccessEnvironment,
       saveErrorDiagnostic,
+      appendDiagnosticTrace,
       isNonPdfAccessPageError,
       escapeHtml,
       formatTaskError,

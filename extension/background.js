@@ -17,7 +17,8 @@ importScripts(
   'background/upload_client.js',
   'background/upload.js',
   'background/task_snapshot.js',
-  'background/tab_registry.js'
+  'background/tab_registry.js',
+  'background/watcher_metrics.js'
 );
 
 const {
@@ -87,9 +88,11 @@ const { createBackgroundPublisherMessagesApi } = globalThis.AblesciBackgroundPub
 const { createBackgroundUploadQueueApi } = globalThis.AblesciBackgroundUploadQueue;
 const { createBackgroundUploadClientApi } = globalThis.AblesciBackgroundUploadClient;
 const { createBackgroundUploadApi } = globalThis.AblesciBackgroundUpload;
+const { createBackgroundWatcherMetricsApi } = globalThis.AblesciBackgroundWatcherMetrics;
 
 const PUBLISHER_TAB_REGISTRY_KEY = 'publisherTabRegistry';
 const UPLOAD_TASK_SNAPSHOT_KEY = 'uploadTaskSnapshot';
+const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
 const NATIVE_MESSAGE_DEFAULT_TIMEOUT_MS = 30 * 1000;
 const NATIVE_MESSAGE_LONG_TIMEOUT_MS = 5 * 60 * 1000;
 const ORPHAN_PUBLISHER_TAB_MAX_AGE_MS = 5 * 60 * 1000;
@@ -98,55 +101,10 @@ const HTML_DOWNLOAD_MESSAGE = '浏览器下载到了 HTML 页面，而不是 PDF
 // tabId -> pending publisher task. 只对插件主动打开的出版商页生效，避免污染普通浏览。
 const pendingPublisherTabs = new Map();
 
-function todayKeyBeijingForMetrics() {
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(new Date()).reduce((acc, item) => {
-    acc[item.type] = item.value;
-    return acc;
-  }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-async function recordManualWatcherDaily(field) {
-  const key = todayKeyBeijingForMetrics();
-  const stored = await chrome.storage.local.get(AUTO_WATCHER_STATE_KEY);
-  const state = stored[AUTO_WATCHER_STATE_KEY] && typeof stored[AUTO_WATCHER_STATE_KEY] === 'object'
-    ? stored[AUTO_WATCHER_STATE_KEY]
-    : { processed: {}, daily: {} };
-  state.daily = state.daily || {};
-  const daily = state.daily[key] || {};
-  state.daily[key] = daily;
-  daily.checked = Number(daily.checked || 0);
-  daily.downloaded = Number(daily.downloaded || 0);
-  daily.downloadedAuto = Number(daily.downloadedAuto || 0);
-  daily.downloadedManual = Number(daily.downloadedManual || 0);
-  daily.uploaded = Number(daily.uploaded || 0);
-  daily.skipped = Number(daily.skipped || 0);
-  daily.failed = Number(daily.failed || 0);
-  daily.notified = Number(daily.notified || 0);
-  daily[field] = Number(daily[field] || 0) + 1;
-  if (field === 'downloaded') {
-    daily.downloadedManual = Number(daily.downloadedManual || 0) + 1;
-  }
-  if (field === 'uploaded') {
-    state.monthDone = Number(state.monthDone || 0) + 1;
-    state.actualDone = Number(state.actualDone || 0) + 1;
-    const previousTargetError = Number(state.targetError || state.lag || 0);
-    const previousLag = Number(state.lag || state.targetError || 0);
-    state.targetError = previousTargetError - 1;
-    state.lag = previousLag - 1;
-    if (Number.isFinite(Number(state.actualTotalAssists))) {
-      state.actualTotalAssists = Number(state.actualTotalAssists) + 1;
-    }
-  }
-  state.lastManualAssistMetricAt = new Date().toISOString();
-  state._version = Number(state._version || 0) + 1;
-  await chrome.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
-}
+const { recordManualWatcherDaily } = createBackgroundWatcherMetricsApi({
+  chromeApi: chrome,
+  autoWatcherStateKey: AUTO_WATCHER_STATE_KEY
+});
 
 async function getOptions() {
   return loadOptionsFromStorage();
@@ -306,6 +264,7 @@ const {
   isOxfordUrl,
   isIopUrl,
   isScienceDirectAssetPdfUrl,
+  publisherForUrl,
   isExpectedPublisherPage,
   recordPublisherCfChallenge,
   appendDiagnosticTrace
@@ -348,6 +307,7 @@ const {
   sanitizeDownloadItem,
   saveDiagnostic,
   saveErrorDiagnostic,
+  appendDiagnosticTrace,
   isNonPdfAccessPageError,
   isHtmlDownloadItem,
   stopForNonPdfDownload,
@@ -374,7 +334,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
+  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/candidate_audit.js', 'watcher/list_scan_status.js', 'watcher/candidate_processor.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

@@ -50,7 +50,6 @@
       setText('watcherWebTotalAssists', syncText);
 
       setText('advancedError', String(Number(state.targetError || state.lag || 0)));
-      setText('advancedRateMultiplier', Number(state.rateMultiplier || 1).toFixed(3));
       setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
       setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
       

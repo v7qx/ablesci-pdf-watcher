@@ -75,6 +75,9 @@
   const { createWatcherLoggingApi } = globalThis.AblesciWatcherLoggingModule;
   const { createWatcherRuntimeHelpersApi } = globalThis.AblesciWatcherRuntimeHelpersModule;
   const { createWatcherBootstrapApi } = globalThis.AblesciWatcherBootstrapModule;
+  const { createWatcherCandidateAuditApi } = globalThis.AblesciWatcherCandidateAuditModule;
+  const { createWatcherListScanStatusApi } = globalThis.AblesciWatcherListScanStatusModule;
+  const { createWatcherCandidateProcessorApi } = globalThis.AblesciWatcherCandidateProcessorModule;
   const { createWatcherOrchestratorApi } = globalThis.AblesciWatcherOrchestratorModule;
   const { createWatcherEntryApi } = globalThis.AblesciWatcherEntryModule;
   const {
@@ -379,6 +382,55 @@
     sessionExecutionCap,
     riskSnapshot
   });
+  const {
+    buildCandidateAuditEntry,
+    appendCandidateAuditEntries,
+    auditParsedListCandidates,
+    auditEnqueueResult,
+    listUrlWithAuditPage
+  } = createWatcherCandidateAuditApi({
+    chromeApi: globalThis.chrome
+  });
+  const {
+    normalizeParsedListCandidateContext,
+    buildCurrentListScan,
+    describeCurrentListScan,
+    clearCurrentListScan,
+    initCurrentPageData,
+    updateCurrentPageCandidateStatus
+  } = createWatcherListScanStatusApi({
+    chromeApi: globalThis.chrome,
+    getWatcherState,
+    saveWatcherStateSafe: saveWatcherState,
+    listUrlWithAuditPage
+  });
+  const {
+    queueableCandidatesFromList,
+    consumeQueuedCandidates,
+    sourceDetailAttemptBudget
+  } = createWatcherCandidateProcessorApi({
+    depsRef,
+    getWatcherState,
+    saveWatcherStateSafe: saveWatcherState,
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
+    incrementDaily,
+    enrichCandidateJournalFromMap,
+    isListCandidateAllowed,
+    describeWatcherReason,
+    wasRecentlyProcessed,
+    inspectDetail,
+    closeTabQuietly,
+    updateProcessed,
+    appendWatcherLog: entry => appendWatcherLog(entry),
+    getProcessedKey,
+    isDetailAllowedForWatcher,
+    handleAllowedPayload,
+    queuedCandidatesSnapshot,
+    removeQueuedCandidate,
+    buildCandidateAuditEntry,
+    appendCandidateAuditEntries,
+    updateCurrentPageCandidateStatus
+  });
   const { runAutoWatcherOnce } = createWatcherOrchestratorApi({
     depsRef,
     stateRef,
@@ -412,17 +464,7 @@
     parseListUrl,
     minSeekingGateForList,
     orderCandidatesForRun,
-    enrichCandidateJournalFromMap,
-    isListCandidateAllowed,
-    describeWatcherReason,
-    wasRecentlyProcessed,
-    inspectDetail,
-    closeTabQuietly,
-    updateProcessed,
     appendWatcherLog: entry => appendWatcherLog(entry),
-    getProcessedKey,
-    isDetailAllowedForWatcher,
-    handleAllowedPayload,
     recordRunFinish,
     scheduleNextAssistAfterRun,
     refreshAlarmAfterRun,
@@ -431,10 +473,19 @@
     flushWatcherLogs,
     flushWatcherTrace,
     enqueueParsedCandidates,
-    queuedCandidatesSnapshot,
-    removeQueuedCandidate,
+    queueableCandidatesFromList,
+    consumeQueuedCandidates,
+    sourceDetailAttemptBudget,
     shouldSkipBackedOffPage,
-    stateWithQueueRefillCursor
+    stateWithQueueRefillCursor,
+    auditParsedListCandidates,
+    auditEnqueueResult,
+    listUrlWithAuditPage,
+    normalizeParsedListCandidateContext,
+    buildCurrentListScan,
+    describeCurrentListScan,
+    clearCurrentListScan,
+    initCurrentPageData
   });
 
   const { initAutoWatcher } = createWatcherEntryApi({

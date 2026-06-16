@@ -486,12 +486,12 @@ func handleOpenLocalStorageDir(req Request) error {
 func handleReadTextFile(req Request) error {
 	p := strings.Trim(req.Path, "\" ")
 	var resolved string
+	helperDir, err := nativeHelperDir()
+	if err != nil {
+		return err
+	}
 	if p == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		resolved = filepath.Clean(filepath.Join(filepath.Dir(exe), "blacklist.txt"))
+		resolved = filepath.Clean(filepath.Join(helperDir, "blacklist.txt"))
 	} else {
 		abs, err := filepath.Abs(p)
 		if err != nil {
@@ -503,6 +503,9 @@ func handleReadTextFile(req Request) error {
 	// 仅允许读取 .txt 文件以防任意读取敏感系统文件
 	if !strings.HasSuffix(strings.ToLower(resolved), ".txt") {
 		return errors.New("refuse to read non-txt file")
+	}
+	if p != "" && !isAllowedTextReadPath(resolved, helperDir, req.Extra["allowed_path"]) {
+		return errors.New("text file path is outside allowed helper/configured path")
 	}
 
 	// 自动创建黑名单文件（如果不存在）。空路径使用 Helper 本地目录，显式路径使用用户配置的位置。
@@ -530,6 +533,29 @@ AAAAAAA # 示例用户，拉黑原因备注，例如：2026-06-04 临时测试�
 		Path:   resolved,
 		Body:   string(content),
 	})
+}
+
+func nativeHelperDir() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(filepath.Dir(exe)), nil
+}
+
+func isAllowedTextReadPath(path string, helperDir string, allowedPath string) bool {
+	if isPathInsideDir(path, helperDir) {
+		return true
+	}
+	allowed := strings.Trim(allowedPath, "\" ")
+	if allowed == "" {
+		return false
+	}
+	abs, err := filepath.Abs(allowed)
+	if err != nil {
+		return false
+	}
+	return sameFilePath(filepath.Clean(path), filepath.Clean(abs))
 }
 
 func handleWriteTextFile(req Request) error {
@@ -865,25 +891,7 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 	tmpFile.Close()
 	defer os.Remove(summaryPath)
 
-	var args []string
-	base := filepath.Base(cleanerPath)
-	if strings.EqualFold(base, "zotero-pdf-toolbox.exe") {
-		args = []string{
-			"clean-access",
-			"--input", pdfPath,
-			"--dry-run",
-			"--summary-json", summaryPath,
-			"--timeout-seconds", "10",
-		}
-	} else {
-		// Legacy zotero-access-cleaner.exe:
-		// Default is dry-run (apply=false) if we don't pass "-apply"
-		args = []string{
-			"-input", pdfPath,
-			"-summary-json", summaryPath,
-			"-timeout-seconds", "10",
-		}
-	}
+	args := buildPageCountArgs(cleanerPath, pdfPath, summaryPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -910,6 +918,25 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 		return summary.PageCount
 	}
 	return 0
+}
+
+func buildPageCountArgs(cleanerPath, pdfPath, summaryPath string) []string {
+	base := filepath.Base(cleanerPath)
+	if strings.EqualFold(base, "zotero-pdf-toolbox.exe") {
+		return []string{
+			"clean-access",
+			"--input", pdfPath,
+			"--dry-run",
+			"--summary-json", summaryPath,
+			"--timeout-seconds", "10",
+		}
+	}
+	// Legacy zotero-access-cleaner.exe: default is dry-run (apply=false) if we don't pass "-apply".
+	return []string{
+		"-input", pdfPath,
+		"-summary-json", summaryPath,
+		"-timeout-seconds", "10",
+	}
 }
 
 func addPDFExtension(src string) (string, error) {

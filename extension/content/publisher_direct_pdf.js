@@ -4,7 +4,7 @@
   const common = window.AblesciPublisherCommon;
   if (!common) return;
 
-  const supported = new Set(['springer', 'oxford', 'wiley', 'acs', 'ieee', 'sage']);
+  const supported = new Set(['springer', 'oxford', 'wiley', 'acs', 'sage']);
   let pdfTriggered = false;
   let observer = null;
   let stopTimer = null;
@@ -157,60 +157,8 @@
     return false;
   }
 
-  function ieeeArticleNumberFromUrl(url) {
-    try {
-      const u = new URL(String(url || ''), location.href);
-      const documentMatch = (u.pathname || '').match(/^\/document\/(\d+)\/?$/i);
-      if (documentMatch) return documentMatch[1];
-      if (/^\/stamp\/stamp\.jsp$/i.test(u.pathname || '')) {
-        const arnumber = u.searchParams.get('arnumber');
-        return arnumber && /^\d+$/.test(arnumber) ? arnumber : '';
-      }
-    } catch (_) {}
-    return '';
-  }
-
-  function encodeIeeeRef(articleUrl) {
-    try {
-      return btoa(String(articleUrl || ''));
-    } catch (_) {
-      return '';
-    }
-  }
-
-  function ieeeGetPdfUrlFromArticleNumber(arnumber, articleUrl) {
-    if (!arnumber || !/^\d+$/.test(arnumber)) return null;
-    const ref = encodeIeeeRef(articleUrl || `https://ieeexplore.ieee.org/document/${arnumber}`);
-    const suffix = ref ? `&ref=${encodeURIComponent(ref)}` : '';
-    return `https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber=${encodeURIComponent(arnumber)}${suffix}`;
-  }
-
-  function findIeeePdfDownloadUrl() {
-    if (common.currentPublisher() !== 'ieee') return null;
-    if (/^\/stamp\/stamp\.jsp$/i.test(location.pathname || '')) {
-      const iframeSrc = document.querySelector('iframe[src*="/stampPDF/getPDF.jsp"]')?.getAttribute('src') || '';
-      if (iframeSrc) return normalize(iframeSrc);
-      return ieeeGetPdfUrlFromArticleNumber(ieeeArticleNumberFromUrl(location.href), document.referrer || '');
-    }
-    if (!/^\/document\/\d+\/?$/i.test(location.pathname || '')) return null;
-    const articleUrl = `https://ieeexplore.ieee.org/document/${ieeeArticleNumberFromUrl(location.href)}`;
-    const getPdfUrl = ieeeGetPdfUrlFromArticleNumber(ieeeArticleNumberFromUrl(location.href), articleUrl);
-    if (getPdfUrl) return getPdfUrl;
-    const scripts = Array.from(document.scripts)
-      .map(script => script.textContent || '')
-      .filter(Boolean)
-      .join('\n');
-    const pathMatch = scripts.match(/"pdfPath"\s*:\s*"([^"]+?\.pdf)"/i) ||
-      scripts.match(/'pdfPath'\s*:\s*'([^']+?\.pdf)'/i);
-    if (!pathMatch) return null;
-    const pdfUrl = normalize(pathMatch[1]);
-    if (!pdfUrl || !/\/iel\d*\/.+\.pdf(?:[?#].*)?$/i.test(pdfUrl)) return null;
-    const arnumber = ieeeArticleNumberFromUrl(location.href);
-    return ieeeGetPdfUrlFromArticleNumber(arnumber, articleUrl) || pdfUrl;
-  }
-
   function isPdfHref(href) {
-    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdfdirect\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\/|\/stampPDF\/getPDF\.jsp|\/stamp\/stamp\.jsp/i.test(href || '');
+    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdfdirect\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\//i.test(href || '');
   }
 
   function directPdfSelectors() {
@@ -224,8 +172,6 @@
       'a[href*="/doi/epdf/"]',
       'a[href*="/article-pdf/"]',
       'a[href*="/articlepdf/"]',
-      'a[href*="/stampPDF/getPDF.jsp"]',
-      'a[href*="/stamp/stamp.jsp"]',
       'a[href$=".pdf"]',
       'a[href*=".pdf?"]'
     ];
@@ -424,21 +370,6 @@
       stopObserver();
       return;
     } else if (isWileyPdfReaderPage) {
-      return;
-    }
-    const ieeePdfDownloadUrl = findIeeePdfDownloadUrl();
-    if (ieeePdfDownloadUrl) {
-      pdfTriggered = true;
-      common.sendPublisherMessage(publisher, {
-        articleUrl: location.href,
-        pdfUrl: ieeePdfDownloadUrl,
-        source: 'ieee_stamp_pdf_getpdf',
-        diagnostics: {
-          pagePath: location.pathname,
-          endpoint: 'stampPDF/getPDF.jsp'
-        }
-      });
-      stopObserver();
       return;
     }
     const result = findPdfLink();

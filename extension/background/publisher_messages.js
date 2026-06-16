@@ -23,6 +23,7 @@
       isOxfordUrl,
       isIopUrl,
       isScienceDirectAssetPdfUrl,
+      publisherForUrl,
       isExpectedPublisherPage,
       recordPublisherCfChallenge,
       appendDiagnosticTrace
@@ -70,6 +71,33 @@
     function markPublisherChallengePassed(pending) {
       if (!pending?.publisherChallengeSeen) return;
       pending.publisherChallengePassed = true;
+    }
+
+    function trustedSenderPageUrl(sender) {
+      return normalizeHttpUrl(sender?.tab?.url || '');
+    }
+
+    function validateTrustedPublisherSender(pending, sender, msg = {}) {
+      const pageUrl = trustedSenderPageUrl(sender);
+      if (!pageUrl || !isExpectedPublisherPage(pending, pageUrl)) {
+        tracePublisherStep(pending, 'publisher_message_sender_mismatch', {
+          publisher: msg.publisher || pending.publisher || '',
+          articleUrl: pending.articleUrl || '',
+          pdfUrl: msg.pdfUrl || pending.lastNativePdfUrl || pending.pdfUrl || '',
+          trustedPageUrl: shortUrl(pageUrl),
+          messagePageUrl: shortUrl(msg.pageUrl || ''),
+          messageArticleUrl: shortUrl(msg.articleUrl || '')
+        });
+        return { ok: false, pageUrl, reason: 'publisher sender page mismatch' };
+      }
+      return { ok: true, pageUrl };
+    }
+
+    function isCompatiblePublisherUrl(pending, url) {
+      if (!url) return false;
+      if (isExpectedPublisherPage(pending, url)) return true;
+      const actualPublisher = publisherForUrl?.(url) || '';
+      return !actualPublisher || !pending.publisher || actualPublisher === pending.publisher;
     }
 
     function schedulePublisherChallengeReveal(pending, token, delayMs = 10000) {
@@ -122,9 +150,7 @@
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
       if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isCnpeUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
         pending.articleUrl = url;
-        pending.publisher = isScienceDirectUrl(url)
-          ? 'sciencedirect'
-          : (isNatureUrl(url) ? 'nature' : (isCnpeUrl(url) ? 'cnpe' : (isSpringerUrl(url) ? 'springer' : (isRscUrl(url) ? 'rsc' : (isWileyUrl(url) ? 'wiley' : (isAipUrl(url) ? 'aip' : (isAcsUrl(url) ? 'acs' : (isIeeeUrl(url) ? 'ieee' : (isOxfordUrl(url) ? 'oxford' : 'iop')))))))));
+        pending.publisher = publisherForUrl?.(url) || pending.publisher || '';
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
       }
@@ -160,7 +186,8 @@
       if (msg?.type === 'ablesciPublisherCanControl') {
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
         if (msg.publisher && pending.publisher && msg.publisher !== pending.publisher) return sendResponse({ ok: false, reason: 'publisher mismatch' });
-        if (!isExpectedPublisherPage(pending, msg.pageUrl || '')) return sendResponse({ ok: false, reason: 'publisher page mismatch' });
+        const trusted = validateTrustedPublisherSender(pending, sender, msg);
+        if (!trusted.ok) return sendResponse({ ok: false, reason: trusted.reason });
         return sendResponse({ ok: true });
       }
 
@@ -169,8 +196,9 @@
         sendResponse({ ok: false, ignored: true, reason: 'no pending publisher task' });
         return false;
       }
-      if (!isExpectedPublisherPage(pending, msg.pageUrl || '')) {
-        sendResponse({ ok: false, ignored: true, reason: 'publisher page mismatch' });
+      const trusted = validateTrustedPublisherSender(pending, sender, msg);
+      if (!trusted.ok) {
+        sendResponse({ ok: false, ignored: true, reason: trusted.reason });
         return false;
       }
 
@@ -184,6 +212,18 @@
             reason: 'unsafe_pdf_url_scheme'
           });
           sendResponse({ ok: false, ignored: true, reason: 'unsafe_pdf_url_scheme' });
+          return false;
+        }
+        if (!isCompatiblePublisherUrl(pending, safePdfUrl)) {
+          tracePublisherStep(pending, 'publisher-pdf-url-rejected', {
+            publisher: msg.publisher || pending.publisher || '',
+            articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+            pdfUrl: safePdfUrl,
+            source: msg.source || '',
+            reason: 'publisher_pdf_url_mismatch',
+            trustedPageUrl: shortUrl(trusted.pageUrl)
+          });
+          sendResponse({ ok: false, ignored: true, reason: 'publisher_pdf_url_mismatch' });
           return false;
         }
         if (safePdfUrl !== msg.pdfUrl) msg = { ...msg, pdfUrl: safePdfUrl };
