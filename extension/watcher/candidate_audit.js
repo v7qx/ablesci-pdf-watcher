@@ -222,58 +222,10 @@
       })));
     }
 
-    async function auditEnqueueResult(enqueueResult, pagePick, pickedListUrl, trigger, source = 'candidate_queue') {
-      const enqueueAuditRows = [];
-      for (const item of enqueueResult.addedExamples || []) {
-        enqueueAuditRows.push(buildCandidateAuditEntry('queue_added', item, {
-          status: 'queued',
-          reason: 'queue_added',
-          trigger,
-          listUrl: item.listUrl || pickedListUrl,
-          page: item.page || pagePick.pickedPage,
-          pageOrder: item.pageOrder || pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          source
-        }));
-      }
-      for (const item of enqueueResult.refreshedExamples || []) {
-        enqueueAuditRows.push(buildCandidateAuditEntry('queue_refreshed', item, {
-          status: 'queued',
-          reason: 'queue_refreshed',
-          trigger,
-          listUrl: item.listUrl || pickedListUrl,
-          page: item.page || pagePick.pickedPage,
-          pageOrder: item.pageOrder || pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          source
-        }));
-      }
-      for (const item of enqueueResult.seenSkippedExamples || []) {
-        enqueueAuditRows.push(buildCandidateAuditEntry('queue_seen_skip', item, {
-          status: 'skipped',
-          reason: 'seen_before',
-          trigger,
-          listUrl: item.listUrl || pickedListUrl,
-          page: item.page || pagePick.pickedPage,
-          pageOrder: item.pageOrder || pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          source
-        }));
-      }
-      await appendCandidateAuditEntries(enqueueAuditRows);
-    }
-
     return {
       buildCandidateAuditEntry,
       appendCandidateAuditEntries,
       auditParsedListCandidates,
-      auditEnqueueResult,
       listUrlWithAuditPage
     };
   }

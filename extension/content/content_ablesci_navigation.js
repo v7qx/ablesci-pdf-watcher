@@ -4,7 +4,7 @@
   const OPTION_KEY = 'openAssistLinksInCurrentTab';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const JOURNAL_ACCESS_STYLE_ID = 'ablesci-journal-access-style';
-  const JOURNAL_ACCESS_TTL_TOOLTIP = '本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试';
+  const JOURNAL_ACCESS_TTL_TOOLTIP = '本地记录：当前出版社明确无订阅权限；过期后会自动重试';
   const HIDE_NO_ACCESS_ROWS_KEY = 'hideScienceDirectNoAccessRows';
   let enabled = false;
   let hideNoAccessRows = false;
@@ -47,7 +47,7 @@
 
   function cleanJournalBadgeTitle(value) {
     return String(value || '')
-      .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+      .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -63,14 +63,35 @@
     return true;
   }
 
-  function isScienceDirectListPage() {
+  function publisherKeyFromText(value) {
+    const text = String(value || '');
+    if (/ieee/i.test(text)) return 'ieee';
+    if (/elsevier|science\s*direct|sciencedirect/i.test(text)) return 'sciencedirect';
+    if (/wiley/i.test(text)) return 'wiley';
+    if (/\brsc\b|royal\s+society\s+of\s+chemistry/i.test(text)) return 'rsc';
+    if (/\bacs\b/i.test(text)) return 'acs';
+    if (/sage/i.test(text)) return 'sage';
+    return '';
+  }
+
+  function publisherKeyFromListPage() {
     try {
       const url = new URL(location.href);
       const publisher = String(url.searchParams.get('publisher') || '').toLowerCase();
-      if (/elsevier|sciencedirect/.test(publisher)) return true;
+      const key = publisherKeyFromText(publisher);
+      if (key) return key;
     } catch (_) {}
     const activePublisher = document.querySelector('.waiting-publisher-item-this img[title], .waiting-publisher-item.active img[title]');
-    return /elsevier|sciencedirect/i.test(activePublisher?.getAttribute('title') || '');
+    return publisherKeyFromText(activePublisher?.getAttribute('title') || '');
+  }
+
+  function publisherKeyFromRow(row) {
+    const iconTitle = row?.querySelector?.('.paper-publisher img[title]')?.getAttribute('title') || '';
+    return publisherKeyFromText(iconTitle) || publisherKeyFromListPage();
+  }
+
+  function journalAccessCacheKey(publisher, journalKey) {
+    return publisher && journalKey ? `${publisher}:${journalKey}` : '';
   }
 
   function validJournalAccessEntries(state) {
@@ -79,13 +100,16 @@
     const entries = new Map();
     Object.entries(stats).forEach(([key, entry]) => {
       if (!entry || typeof entry !== 'object') return;
-      if (entry.publisher !== 'sciencedirect') return;
+      const publisher = publisherKeyFromText(entry.publisher || '');
+      if (!publisher || publisher === 'ieee') return;
+      if (entry.status && entry.status !== 'blocked') return;
       if (entry.reason !== 'explicit_no_subscription') return;
       const expiresAt = Date.parse(entry.expiresAt || '');
       if (!Number.isFinite(expiresAt) || expiresAt <= now) return;
-      const normalizedKey = normalizeJournalKey(key || entry.shortName);
+      const normalizedKey = normalizeJournalKey(entry.shortName || key);
       if (!normalizedKey) return;
-      entries.set(normalizedKey, entry);
+      entries.set(journalAccessCacheKey(publisher, normalizedKey), entry);
+      if (publisher === 'sciencedirect') entries.set(normalizedKey, entry);
     });
     return entries;
   }
@@ -145,7 +169,6 @@
 
   function applyJournalAccessMarks() {
     if (!isListPage()) return;
-    if (!isScienceDirectListPage()) return;
     if (!journalAccessCache.size) {
       document.querySelectorAll('.ablesci-journal-no-access-row').forEach(clearJournalAccessMark);
       return;
@@ -155,7 +178,8 @@
     rows.forEach(row => {
       const badge = journalBadgeFromRow(row);
       const key = normalizeJournalKey(cleanJournalBadgeTitle(badge?.getAttribute('title') || badge?.textContent || ''));
-      const entry = key ? journalAccessCache.get(key) : null;
+      const publisher = publisherKeyFromRow(row);
+      const entry = key ? (journalAccessCache.get(journalAccessCacheKey(publisher, key)) || journalAccessCache.get(key)) : null;
       if (!badge || !entry) {
         clearJournalAccessMark(row);
         return;

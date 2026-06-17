@@ -141,17 +141,15 @@
 
     // 1. 精准匹配 SAGE 专属无权限按钮/容器选择器
     const hasPaywallDom = !!document.querySelector(
-      'a[href="#core-collateral-purchase-access"], [data-id="article-nav-menubar-purchaseAccess"], .denial-block, section.denial-block'
+      'a[href="#core-collateral-purchase-access"], [data-id="article-nav-menubar-purchaseAccess"], .denial-block, section.denial-block, [data-article-access="no"], .meta-panel__access--other'
     );
     if (hasPaywallDom) return true;
 
-    // 2. 备用页面文本匹配 + PDF 下载按钮缺失校验
+    // 2. 外站无权限页常保留隐藏 Download PDF 链接，不能再依赖“无 PDF 候选”才能判定
     const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
-    const hasPurchaseOptions = /Get full access to this article|Purchase Instant Access|Buy PDF|Subscribe to this journal/i.test(text);
-    const hasAccessRestricted = /You do not have access to this content|Access Options|View all access and purchase options/i.test(text);
-
-    const result = findPdfLink();
-    if (!result.selected && (hasPurchaseOptions || hasAccessRestricted)) {
+    const hasPurchaseOptions = /Get full access to this article|Purchase Instant Access|Buy PDF|Subscribe to this journal|Get Access/i.test(text);
+    const hasAccessRestricted = /You do not have access to this content|You currently have no access to this content|Restricted access|View all access and purchase options|Visit the access options page to authenticate|View access options/i.test(text);
+    if (hasPurchaseOptions || hasAccessRestricted) {
       return true;
     }
     return false;

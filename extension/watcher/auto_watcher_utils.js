@@ -152,12 +152,10 @@
       const parsedConfiguredPage = parseInt(u.searchParams.get('page') || '', 10);
       const hasConfiguredPage = Number.isInteger(parsedConfiguredPage) && parsedConfiguredPage > 0;
       const configuredPage = hasConfiguredPage ? parsedConfiguredPage : 0;
-      const customOrder = u.searchParams.get('order') || u.searchParams.get('page_order');
       const hasRange = !!ASSIST_RANDOM_PAGE_RANGES[publisher];
-      const pageOrder = customOrder === 'desc' || customOrder === 'asc'
-        ? customOrder
-        : (hasRange ? (hasConfiguredPage && !hasExplicitPageMin && !hasExplicitPageMax ? 'desc' : 'random') : 'asc');
-      const hasSequentialOrder = pageOrder === 'desc' || pageOrder === 'asc';
+      // Deprecated: order/page_order used to enable sequential reverse/forward scans.
+      // The watcher now only supports a low-frequency single random page per run.
+      const pageOrder = 'random';
 
       let min = 1;
       let max = 1;
@@ -172,11 +170,11 @@
         const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
         if (range) {
           min = clampInt(range.min ?? 1, 1, 9999);
-          max = clampInt(hasConfiguredPage && hasSequentialOrder ? configuredPage : (range.max ?? min), min, 9999);
+          max = clampInt(range.max ?? min, min, 9999);
           curve = range.curve || 'uniform';
         } else {
           min = 1;
-          max = 1;
+          max = clampInt(hasConfiguredPage ? configuredPage : 1, min, 9999);
           curve = 'uniform';
         }
       }
@@ -235,7 +233,7 @@
     };
   }
 
-  function randomizeAssistListUrlWithMeta(url, state = null) {
+  function randomizeAssistListUrlWithMeta(url) {
     const meta = {
       configuredUrl: url,
       pickedListUrl: url,
@@ -257,14 +255,6 @@
       if (!pageMeta) return meta;
 
       const urlKey = getListUrlKey(url);
-      const detectedMaxPage = Number(state?.detectedMaxPages?.[urlKey] || 0);
-      if (
-        Number.isFinite(detectedMaxPage) &&
-        detectedMaxPage > 0 &&
-        pageMeta.hasExplicitPageMax !== true
-      ) {
-        pageMeta.range.max = Math.max(Number(pageMeta.range.min || 1), detectedMaxPage);
-      }
       if (u.searchParams.get('page_min') === 'half') {
         pageMeta.range.min = Math.max(1, Math.floor(pageMeta.range.max / 2));
       }
@@ -273,45 +263,7 @@
       meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;
       meta.hasExplicitPageMax = pageMeta.hasExplicitPageMax === true;
 
-      let pickedPage = 1;
-      let picked = null;
-
-      if ((pageMeta.pageOrder === 'desc' || pageMeta.pageOrder === 'asc') && state) {
-        const lastVisitedPages = state.lastVisitedPages || {};
-        const lastPage = lastVisitedPages[urlKey];
-        const min = pageMeta.range.min;
-        const max = pageMeta.range.max;
-
-        if (pageMeta.pageOrder === 'desc') {
-          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
-            pickedPage = max;
-          } else {
-            pickedPage = Number(lastPage) - 1;
-            if (pickedPage < min) {
-              pickedPage = max;
-            }
-          }
-        } else {
-          if (lastPage === undefined || Number(lastPage) < min || Number(lastPage) > max) {
-            pickedPage = min;
-          } else {
-            pickedPage = Number(lastPage) + 1;
-            if (pickedPage > max) {
-              pickedPage = min;
-            }
-          }
-        }
-        picked = {
-          pickedPage,
-          pageCurve: pageMeta.range.curve || 'uniform',
-          pageMin: min,
-          pageMax: max,
-          frontHit: false,
-          alpha: ''
-        };
-      } else {
-        picked = pickAssistPage(pageMeta.range);
-      }
+      const picked = pickAssistPage(pageMeta.range);
 
       u.searchParams.set('page', String(picked.pickedPage));
       u.searchParams.delete('order');
@@ -346,15 +298,7 @@
     }
     if (urls.length <= 1) return urls;
 
-    const highFreq = urls.filter(url => /sciencedirect|elsevier/i.test(url));
-    const lowFreq = urls.filter(url => !/sciencedirect|elsevier/i.test(url));
-    if (!highFreq.length || !lowFreq.length) return shuffle(urls);
-
-    const preferHighFreq = Math.random() < 0.70;
-    if (preferHighFreq) {
-      return [...shuffle(highFreq), ...shuffle(lowFreq)];
-    }
-    return [...shuffle(lowFreq), ...shuffle(highFreq)];
+    return shuffle(urls);
   }
 
   globalThis.AblesciAutoWatcherUtils = {

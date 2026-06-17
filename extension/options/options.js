@@ -165,7 +165,7 @@ const TEXT_MAP = {
 
   "候选筛选": "Candidate Filter",
   "列表 URL": "List URLs",
-  "每行一个 Ablesci 求助列表链接。追加 <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> 可按页码倒序依次扫描。": "One Ablesci helper list link per line. Add <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> for sequential reverse scanning.",
+  "每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；如需限制范围可追加 <code>&amp;page_min=1&amp;page_max=5</code>。": "One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Add <code>&amp;page_min=1&amp;page_max=5</code> to limit the page range.",
   "非 SD 最低求助量": "Min Non-SD Requests",
   "除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。": "Min waiting count required to parse non-SD pages. 0 to disable, defaults to 200.",
   "控制哪些求助在列表页和详情页被跳过。": "Control which requests are skipped on list and details pages.",
@@ -229,21 +229,21 @@ const TEXT_MAP = {
 
   "本地记录维护": "Local Cache Cleanup",
   "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
-  "仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理 ScienceDirect 无权限期刊缓存。": "Clears local processed records, watcher logs, and traces; does not clear the ScienceDirect no-access journal cache.",
+  "仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理期刊权限缓存。": "Clears local processed records, watcher logs, and traces; does not clear the journal access cache.",
   "清除已处理": "Clear Processed Cache",
   "清空候选队列": "Clear Candidate Queue",
   "清空队列/页游标": "Clear Queue/Cursor",
   "清除日志/Trace": "Clear Logs & Traces",
-  "ScienceDirect 无权限期刊缓存": "ScienceDirect No-Access Journal Cache",
-  "记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。": "Stores journal short names with explicit no-subscription results for list-page markers and auto-watcher prefiltering.",
+  "期刊权限缓存": "Journal Access Cache",
+  "记录明确有权限/无权限的出版社期刊短名；默认仅用无权限记录进行列表页标注和自动值守预过滤。": "Records publisher journal short names with confirmed access/no-access. By default, only no-access records are used for list-page marking and auto-watcher prefiltering.",
   "隐藏列表命中项": "Hide Matched Rows",
-  "在求助列表页隐藏命中本地无权限缓存的 ScienceDirect 求助": "Hide ScienceDirect requests matched by the local no-access cache on list pages.",
+  "在求助列表页隐藏命中本地无权限缓存的求助": "Hide requests matched by the local no-access cache on list pages.",
   "导出": "Export",
   "导入": "Import",
   "清空": "Clear",
   "未加载": "Not Loaded",
   "暂无缓存。": "No cache entries.",
-  "已清空 ScienceDirect 无权限期刊缓存。": "ScienceDirect no-access journal cache cleared.",
+  "已清空期刊权限缓存。": "Journal access cache cleared.",
   "有效缓存": "Valid Cache",
   "条": "entries",
   "最近": "Recent",
@@ -485,7 +485,7 @@ async function load() {
     document.title = 'Ablesci PDF Watcher Settings';
     const descNode = el('watcherListUrlsDesc');
     if (descNode) {
-      descNode.textContent = 'One Ablesci assist list URL per line. Add &page_min=1&page_max=5&order=desc for reverse sequential scanning.';
+      descNode.textContent = 'One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Add &page_min=1&page_max=5 to limit the page range.';
     }
   }
 

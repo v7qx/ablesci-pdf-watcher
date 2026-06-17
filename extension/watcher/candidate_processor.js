@@ -20,7 +20,6 @@
       getProcessedKey,
       isDetailAllowedForWatcher,
       handleAllowedPayload,
-      queuedCandidatesSnapshot,
       removeQueuedCandidate,
       buildCandidateAuditEntry,
       appendCandidateAuditEntries,
@@ -44,17 +43,21 @@
       return text.slice(0, 80) || 'unknown';
     }
 
-    function isHighFreqSourceKey(key = '') {
-      return /sciencedirect|elsevier/i.test(String(key || ''));
-    }
-
     function sourceKeyFromCandidate(candidate = {}, pagePick = {}) {
       return sourceKeyFromUrl(candidate.listUrl || pagePick.configuredUrl || pagePick.pickedListUrl || '');
     }
 
-    function sourceDetailAttemptBudget(listUrl, sourceCount) {
-      if (sourceCount <= 1) return 5;
-      return isHighFreqSourceKey(sourceKeyFromUrl(listUrl)) ? 4 : 2;
+    function processedMeta(candidate = {}, payload = {}, pagePick = {}, page = '') {
+      payload = payload && typeof payload === 'object' ? payload : {};
+      return {
+        assistAgeSeconds: candidate.assistAgeSeconds ?? payload.assistAgeSeconds ?? '',
+        assistTimeText: candidate.assistTimeText || payload.assistTimeText || '',
+        listUrl: candidate.listUrl || pagePick.pickedListUrl || pagePick.configuredUrl || '',
+        page: page || candidate.page || pagePick.pickedPage || '',
+        publisherName: candidate.publisherName || payload.publisherName || pagePick.publisher || '',
+        publisher: pagePick.publisher || '',
+        journalShortName: payload.journalShortName || candidate.journalShortName || ''
+      };
     }
 
     async function appendJournalBlockedSummary(summary, trigger) {
@@ -126,6 +129,12 @@
             journalAccess: listAllowed.journalAccess || null
           }
         }));
+        await updateProcessed(
+          getProcessedKey(candidate),
+          'skipped',
+          listAllowed.reason,
+          processedMeta(candidate, null, pagePick, pagePick.pickedPage)
+        );
         await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
       }
       await appendCandidateAuditEntries(auditEntries);
@@ -170,8 +179,8 @@
             journalAccess: listAllowed.journalAccess || null,
             source: fromQueue ? 'candidate_queue' : 'list_page'
           });
-          if (candidateKey && listAllowed.reason === 'not_waiting') {
-            await updateProcessed(candidateKey, 'skipped', listAllowed.reason);
+          if (candidateKey) {
+            await updateProcessed(candidateKey, 'skipped', listAllowed.reason, processedMeta(candidate, null, pagePick, candidatePage));
           }
           if (listAllowed.reason === 'journal_blocked_rule') {
             journalBlockedSummary.count += 1;
@@ -284,7 +293,7 @@
             await appendJournalBlockedSummary(journalBlockedSummary, trigger);
             return { stop: true, result: { ok: false, reason: 'site_error' }, handledAny };
           }
-          await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason);
+          await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason, processedMeta(candidate, null, pagePick, candidatePage));
           await incrementDaily('failed', trigger);
           await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: candidatePage });
           await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_failed', candidate, {
@@ -318,7 +327,7 @@
             source: fromQueue ? 'candidate_queue' : 'list_page'
           });
           await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
-          await updateProcessed(key, 'skipped', detailAllowed.reason);
+          await updateProcessed(key, 'skipped', detailAllowed.reason, processedMeta(candidate, payload, pagePick, candidatePage));
           await incrementDaily('skipped', trigger);
           await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: candidatePage });
           await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_skip', { ...candidate, ...payload }, {
@@ -409,34 +418,9 @@
       return { stop: false, handledAny };
     }
 
-    async function consumeQueuedCandidates(trigger, opts, blacklistedIds, targetSessionSize, handledCountRef, lastHandledReasonRef, runListUrls = null, maxDetailAttempts = 0) {
-      const queued = await queuedCandidatesSnapshot(undefined, runListUrls);
-      if (queued.length <= 0) return { stop: false };
-      await appendWatcherTrace('candidate_queue_consume_start', {
-        reason: 'consume_existing_queue',
-        trigger,
-        queueSize: queued.length,
-        targetSessionSize,
-        configuredUrlCount: Array.isArray(runListUrls) ? runListUrls.length : '',
-        activeListUrls: Array.isArray(runListUrls) ? runListUrls : []
-      });
-      return await processCandidateBatch(queued, {
-        opts,
-        trigger,
-        blacklistedIds,
-        targetSessionSize,
-        getHandledCount: () => handledCountRef.value,
-        setHandledCount: value => { handledCountRef.value = value; },
-        setLastHandledReason: value => { if (lastHandledReasonRef) lastHandledReasonRef.value = value; },
-        maxDetailAttempts,
-        fromQueue: true
-      });
-    }
-
     return {
       queueableCandidatesFromList,
-      consumeQueuedCandidates,
-      sourceDetailAttemptBudget
+      processCandidateBatch
     };
   }
 

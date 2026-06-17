@@ -14,6 +14,7 @@
       doiFailureSkipThreshold
     } = config;
     const JOURNAL_ACCESS_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+    const JOURNAL_ACCESS_CACHEABLE_PUBLISHERS = new Set(['sciencedirect', 'wiley', 'rsc', 'acs', 'sage']);
 
     function candidatePublisherName(candidate) {
       return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
@@ -50,9 +51,49 @@
 
     function cleanJournalAccessName(value) {
       return normalizeText(value)
-        .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+        .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+    }
+
+    function journalAccessPublisherKey(candidate = {}, payload = null) {
+      const values = [
+        candidate?.publisherName,
+        payload?.publisherName,
+        candidate?.listUrl,
+        candidate?.detailUrl,
+        payload?.pdfUrl,
+        payload?.articleUrl,
+        payload?.pageUrl,
+        candidate?.doi,
+        payload?.doi,
+        candidate?.rowText,
+        candidate?.journalShortName
+      ].map(value => String(value || '')).join(' ');
+      if (/ieee/i.test(values)) return 'ieee';
+      if (/elsevier|science\s*direct|sciencedirect\.com|10\.1016\//i.test(values)) return 'sciencedirect';
+      if (/wiley|onlinelibrary\.wiley\.com|10\.1002\//i.test(values)) return 'wiley';
+      if (/\brsc\b|royal\s+society\s+of\s+chemistry|pubs\.rsc\.org|10\.1039\//i.test(values)) return 'rsc';
+      if (/\bacs\b|acs\.org|pubs\.acs\.org|10\.1021\//i.test(values)) return 'acs';
+      if (/sage|journals\.sagepub\.com|10\.1177\//i.test(values)) return 'sage';
+      const alias = publisherAlias(values).toLowerCase();
+      if (/elsevier|sciencedirect/.test(alias)) return 'sciencedirect';
+      if (/wiley/.test(alias)) return 'wiley';
+      if (/\brsc\b/.test(alias)) return 'rsc';
+      if (/\bacs\b/.test(alias)) return 'acs';
+      if (/sage/.test(alias)) return 'sage';
+      if (/ieee/.test(alias)) return 'ieee';
+      return alias && alias !== 'unknown' ? alias : '';
+    }
+
+    function isCacheableJournalAccessPublisher(publisherKey) {
+      return JOURNAL_ACCESS_CACHEABLE_PUBLISHERS.has(String(publisherKey || '').toLowerCase());
+    }
+
+    function journalAccessCacheKey(publisherKey, journalKey) {
+      const p = String(publisherKey || '').toLowerCase();
+      const j = String(journalKey || '').toLowerCase();
+      return p && j ? `${p}:${j}` : '';
     }
 
     function journalRuleNames(entry) {
@@ -84,29 +125,19 @@
     }
 
     function isScienceDirectCandidate(candidate = {}, payload = null) {
-      const alias = candidatePublisherName(candidate);
-      if (/elsevier|sciencedirect/i.test(alias)) return true;
-      const haystack = [
-        candidate.publisherName,
-        candidate.listUrl,
-        candidate.detailUrl,
-        candidate.doi,
-        candidate.rowText,
-        payload?.publisherName,
-        payload?.doi,
-        payload?.pdfUrl,
-        payload?.articleUrl
-      ].map(value => String(value || '')).join(' ');
-      return /elsevier|sciencedirect|sciencedirect\.com|10\.1016\//i.test(haystack);
+      return journalAccessPublisherKey(candidate, payload) === 'sciencedirect';
     }
 
     function journalAccessEntryForCandidate(candidate, state = {}) {
       const shortName = cleanJournalAccessName(candidate?.journalShortName || '');
       const key = normalizeJournalKey(shortName);
-      if (!key || !isScienceDirectCandidate(candidate)) return null;
-      const entry = journalAccessStatsFromState(state)[key];
+      const publisherKey = journalAccessPublisherKey(candidate);
+      if (!key || !isCacheableJournalAccessPublisher(publisherKey)) return null;
+      const stats = journalAccessStatsFromState(state);
+      const entry = stats[journalAccessCacheKey(publisherKey, key)] || (publisherKey === 'sciencedirect' ? stats[key] : null);
       if (!entry || typeof entry !== 'object') return null;
-      if (entry.publisher !== 'sciencedirect') return null;
+      if ((entry.publisher || publisherKey) !== publisherKey && !(publisherKey === 'sciencedirect' && entry.publisher === 'sciencedirect')) return null;
+      if (entry.status && entry.status !== 'blocked') return null;
       if (entry.reason !== 'explicit_no_subscription') return null;
       const expiresAt = Date.parse(entry.expiresAt || '');
       if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
@@ -121,6 +152,7 @@
         detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
         listUrl: candidate?.listUrl || '',
         publisherName: candidate?.publisherName || payload?.publisherName || '',
+        publisher: journalAccessPublisherKey(candidate, payload),
         journalShortName: cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || ''),
         journalName: payload?.journalName || '',
         doi: payload?.doi || candidate?.doi || '',
@@ -239,7 +271,7 @@
       }
       function cleanJournalAccessNameLocal(value) {
         return normalizeTextLocal(value)
-          .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+          .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
           .trim();
       }
       function isJournalBadgeSpan(span) {
@@ -592,7 +624,7 @@
     function isCacheableScienceDirectNoAccess(reason) {
       return reason === 'explicit_no_subscription' ||
         reason === 'no_access' ||
-        /does not subscribe to this content on ScienceDirect|ScienceDirect\s+明确返回无正文订阅权限|明确返回无正文订阅权限|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限/i.test(String(reason || ''));
+        /does not subscribe to this content on ScienceDirect|ScienceDirect\s+明确返回无正文订阅权限|明确返回无正文订阅权限|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限|no\s+access|access\s+denied|no[-_\s]?access|subscribe/i.test(String(reason || ''));
     }
 
     async function recordJournalAccessBlocked(candidate, payload = null, reason = '') {
@@ -600,8 +632,9 @@
         await traceJournalAccessRecordSkipped('non_cacheable_reason', candidate, payload, { sourceReason: reason || '' });
         return false;
       }
-      if (!isScienceDirectCandidate(candidate, payload)) {
-        await traceJournalAccessRecordSkipped('not_sciencedirect_candidate', candidate, payload, { sourceReason: reason || '' });
+      const publisherKey = journalAccessPublisherKey(candidate, payload);
+      if (!isCacheableJournalAccessPublisher(publisherKey)) {
+        await traceJournalAccessRecordSkipped(publisherKey === 'ieee' ? 'ieee_journal_cache_disabled' : 'not_cacheable_publisher', candidate, payload, { sourceReason: reason || '', publisher: publisherKey });
         return false;
       }
       const state = await getWatcherState();
@@ -621,18 +654,23 @@
         return false;
       }
       const stats = journalAccessStatsFromState(state);
-      const existing = stats[key] || {};
+      const cacheKey = journalAccessCacheKey(publisherKey, key);
+      const existing = stats[cacheKey] || (publisherKey === 'sciencedirect' ? stats[key] : {}) || {};
       const now = Date.now();
       const nowIso = new Date(now).toISOString();
-      stats[key] = {
+      stats[cacheKey] = {
         shortName,
-        publisher: 'sciencedirect',
+        publisher: publisherKey,
+        status: 'blocked',
         reason: 'explicit_no_subscription',
         lastAt: nowIso,
         expiresAt: new Date(now + JOURNAL_ACCESS_TTL_MS).toISOString(),
         hitCount: Math.max(0, Number(existing.hitCount || 0) || 0) + 1,
         lastAssistId: payload?.assistId || candidate?.assistId || ''
       };
+      if (publisherKey === 'sciencedirect' && stats[key] && key !== cacheKey) {
+        delete stats[key];
+      }
       state.journalAccessStats = stats;
       await saveWatcherState(state);
       await appendWatcherTrace('journal_access_blocked_recorded', {
@@ -640,27 +678,45 @@
         sourceReason: reason || '',
         assistId: payload?.assistId || candidate?.assistId || '',
         detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+        publisher: publisherKey,
         shortName,
-        expiresAt: stats[key].expiresAt
+        expiresAt: stats[cacheKey].expiresAt
       });
       return true;
     }
 
     async function clearJournalAccessBlocked(candidate, payload = null) {
-      if (!isScienceDirectCandidate(candidate, payload)) return false;
+      const publisherKey = journalAccessPublisherKey(candidate, payload);
+      if (!isCacheableJournalAccessPublisher(publisherKey)) return false;
       const shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
       const key = normalizeJournalKey(shortName);
       if (!key) return false;
       const state = await getWatcherState();
       const stats = journalAccessStatsFromState(state);
-      if (!stats[key]) return false;
-      delete stats[key];
+      const cacheKey = journalAccessCacheKey(publisherKey, key);
+      const existing = stats[cacheKey] || (publisherKey === 'sciencedirect' ? stats[key] : {}) || {};
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      stats[cacheKey] = {
+        shortName,
+        publisher: publisherKey,
+        status: 'allowed',
+        reason: 'access_confirmed',
+        lastAt: nowIso,
+        expiresAt: new Date(now + JOURNAL_ACCESS_TTL_MS).toISOString(),
+        hitCount: Math.max(0, Number(existing.hitCount || 0) || 0) + 1,
+        lastAssistId: payload?.assistId || candidate?.assistId || ''
+      };
+      if (publisherKey === 'sciencedirect' && stats[key] && key !== cacheKey) {
+        delete stats[key];
+      }
       state.journalAccessStats = stats;
       await saveWatcherState(state);
-      await appendWatcherTrace('journal_access_blocked_cleared', {
+      await appendWatcherTrace('journal_access_allowed_recorded', {
         reason: 'upload_success_same_journal',
         assistId: payload?.assistId || candidate?.assistId || '',
         detailUrl: candidate?.detailUrl || payload?.pageUrl || '',
+        publisher: publisherKey,
         shortName
       });
       return true;

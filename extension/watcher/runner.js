@@ -322,7 +322,7 @@
               paused,
               pdfCleanerResult: msg.pdfCleanerResult || null
               }),
-              updateProcessed(context.key, 'failed', msg.message || 'upload_failed'),
+              updateProcessed(context.key, 'failed', msg.message || 'upload_failed', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
               appendWatcherLog({
@@ -344,7 +344,7 @@
             const blockText = [blockReason, msg.message || ''].join(' ');
             const shouldTryRecordJournalAccess = blockReason === 'explicit_no_subscription' ||
               blockReason === 'no_access' ||
-              /does not subscribe to this content on ScienceDirect|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限/i.test(blockText);
+              /does not subscribe to this content on ScienceDirect|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限|no[-_\s]?access|access\s+denied|subscribe/i.test(blockText);
             let journalAccessRecorded = null;
             if (shouldTryRecordJournalAccess) {
               try {
@@ -373,7 +373,7 @@
                 durationMs,
                 pdfCleanerResult: msg.pdfCleanerResult || null
               }),
-              updateProcessed(context.key, 'failed', msg.message || 'blocked'),
+              updateProcessed(context.key, 'failed', msg.message || 'blocked', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked'),
               appendWatcherLog({
@@ -404,6 +404,7 @@
                 durationMs,
                 pdfCleanerResult: msg.pdfCleanerResult || null
               }),
+              updateProcessed(context.key, 'success', cleanReason, processedMeta(context.candidate, context.payload)),
               recordRiskEvent(context.opts || {}, cleanReason, 'success'),
               appendWatcherLog({
                 ...context.payload,
@@ -427,6 +428,17 @@
           }
         },
         disconnect
+      };
+    }
+
+    function processedMeta(candidate = {}, payload = {}) {
+      return {
+        assistAgeSeconds: candidate.assistAgeSeconds ?? payload.assistAgeSeconds ?? '',
+        assistTimeText: candidate.assistTimeText || payload.assistTimeText || '',
+        listUrl: candidate.listUrl || '',
+        page: candidate.page || payload.page || '',
+        publisherName: candidate.publisherName || payload.publisherName || '',
+        journalShortName: payload.journalShortName || candidate.journalShortName || ''
       };
     }
 
@@ -481,7 +493,7 @@
 
       if (deps.hasActiveTask()) {
         await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
-        await updateProcessed(key, 'skipped', 'active_task');
+        await updateProcessed(key, 'skipped', 'active_task', processedMeta(candidate, payload));
         await incrementDaily('skipped', trigger || session?.trigger || '');
         await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger: trigger || session?.trigger || '', status: 'skipped', reason: 'active_task' });
         return false;
@@ -512,7 +524,7 @@
       });
       deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
       await incrementDaily('downloaded', trigger || session?.trigger || '');
-      await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload');
+      await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload', processedMeta(candidate, payload));
       await appendWatcherLog({
         ...payload,
         detailUrl: candidate.detailUrl,

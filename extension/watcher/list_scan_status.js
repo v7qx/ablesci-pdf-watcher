@@ -41,9 +41,7 @@
         pageOrder: pagePick.pageOrder || '',
         pageMin: pagePick.pageMin || '',
         pageMax: pagePick.pageMax || '',
-        range: pagePick.pageOrder === 'desc' && Number.isFinite(Number(pagePick.pickedPage))
-          ? `${pagePick.pickedPage}${pagePick.pageMin ? `-${pagePick.pageMin}` : ''}`
-          : '',
+        range: '',
         scanIndex,
         scanLimit,
         updatedAt: new Date().toISOString()
@@ -54,9 +52,8 @@
       if (!scan || typeof scan !== 'object') return '';
       const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
       const page = scan.page ? `第 ${scan.page} 页` : '';
-      const range = scan.range ? `范围 ${scan.range}` : '';
-      const mode = '后台拉取';
-      return [mode, publisher, page, range].filter(Boolean).join(' ');
+      const mode = '随机页';
+      return [mode, publisher, page].filter(Boolean).join(' ');
     }
 
     async function clearCurrentListScan() {

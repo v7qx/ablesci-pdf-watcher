@@ -35,6 +35,7 @@
       incrementDaily,
       parseListUrl,
       minSeekingGateForList,
+      orderCandidatesForRun,
       appendWatcherLog,
       recordRunFinish,
       scheduleNextAssistAfterRun,
@@ -43,57 +44,20 @@
       writeDailyReports,
       flushWatcherLogs,
       flushWatcherTrace,
-      enqueueParsedCandidates,
       queueableCandidatesFromList,
-      consumeQueuedCandidates,
-      sourceDetailAttemptBudget,
-      shouldSkipBackedOffPage,
-      stateWithQueueRefillCursor,
+      processCandidateBatch,
       auditParsedListCandidates,
-      auditEnqueueResult,
       listUrlWithAuditPage,
       normalizeParsedListCandidateContext,
       buildCurrentListScan,
       describeCurrentListScan,
       clearCurrentListScan,
-      initCurrentPageData
+      initCurrentPageData,
+      pruneWatcherState,
+      emergencyStorageTrim
     } = config;
 
-    function sourceKeyFromUrl(url = '') {
-      try {
-        const u = new URL(url);
-        const publisher = String(u.searchParams.get('publisher') || '').trim().toLowerCase();
-        if (publisher) return publisher;
-      } catch (_) {}
-      const text = String(url || '').toLowerCase();
-      if (/sciencedirect|elsevier/.test(text)) return 'elsevier';
-      if (/ieee/.test(text)) return 'ieee';
-      if (/\brsc\b|royal\s+society\s+of\s+chemistry/.test(text)) return 'rsc';
-      if (/wiley/.test(text)) return 'wiley';
-      if (/springer/.test(text)) return 'springer';
-      if (/sage/.test(text)) return 'sage';
-      if (/\bacs\b/.test(text)) return 'acs';
-      return text.slice(0, 80) || 'unknown';
-    }
-
     const RUNNING_LOCK_STALE_MS = 20 * 60 * 1000;
-
-    function rotateRecentSource(urls = [], state = {}) {
-      const lastKey = String(state.lastHandledPublisherKey || '').toLowerCase();
-      if (!lastKey || urls.length <= 1) return urls;
-      const otherSources = [];
-      const recentSources = [];
-      for (const url of urls) {
-        const key = sourceKeyFromUrl(url);
-        if (key === lastKey) {
-          recentSources.push(url);
-        } else {
-          otherSources.push(url);
-        }
-      }
-      if (otherSources.length <= 0 || recentSources.length <= 0) return urls;
-      return [...otherSources, ...recentSources];
-    }
 
     async function syncActualAssistCount(state, opts) {
       const now = Date.now();
@@ -311,10 +275,10 @@
     function updateStateLastPicked(state, pagePick = {}, pickedListUrl = '') {
       state.lastPickedListUrl = pickedListUrl;
       state.lastPickedPage = pagePick.pickedPage || '';
-      state.lastPickedPageMax = pagePick.pageMax || '';
       state.lastPickedPublisher = pagePick.publisher || '';
-      state.lastPickedPageOrder = pagePick.pageOrder || '';
-      state.lastPickedUrlKey = pagePick.urlKey || '';
+      delete state.lastPickedPageMax;
+      delete state.lastPickedPageOrder;
+      delete state.lastPickedUrlKey;
     }
 
     function createScanContext(run, listUrl, urlCount) {
@@ -327,10 +291,6 @@
         maxBackoffSkips: urlCount > 1 ? 5 : 25,
         startedAt: 0
       };
-    }
-
-    function canContinueScan(scan) {
-      return scan.pageScanCount < scan.maxPageScans && scan.backoffSkipCount < scan.maxBackoffSkips;
     }
 
     function scanDisplayIndex(scan) {
@@ -349,12 +309,6 @@
       });
     }
 
-    function recordBackoffSkippedPage(scan, page) {
-      scan.run.backoffSkippedPages.push(page);
-      scan.run.attempt.backoffSkippedPages = scan.run.backoffSkippedPages.join(',');
-      scan.run.attempt.listScanBackoffSkipped = scan.run.backoffSkippedPages.length;
-    }
-
     function recordParsedListPage(scan, page) {
       if (!Number.isFinite(Number(page))) return;
       scan.run.parsedListPages.push(Number(page));
@@ -366,80 +320,6 @@
       scan.run.scannedPublisher = pagePick.publisher || '';
       scan.run.scannedPage = pagePick.pickedPage || '';
       recordParsedListPage(scan, pagePick.pickedPage);
-    }
-
-    async function consumeQueuePhase(details) {
-      const {
-        run,
-        opts,
-        blacklistedIds,
-        targetSessionSize,
-        handledCountRef,
-        lastHandledReasonRef,
-        runListUrls,
-        phase,
-        onlyListUrl = null
-      } = details;
-      const listUrls = onlyListUrl ? [onlyListUrl] : runListUrls;
-      let queuedResult = null;
-      await appendWatcherTrace('queue_consume_phase_start', {
-        reason: phase,
-        phase,
-        trigger: run.trigger,
-        runId: run.runId,
-        listUrlCount: listUrls.length,
-        targetSessionSize,
-        handledCount: handledCountRef.value
-      });
-      for (const listUrl of listUrls) {
-        const isHighFreq = /sciencedirect|elsevier/i.test(listUrl);
-        if (isHighFreq && handledCountRef.value >= targetSessionSize) continue;
-        const handledBeforeSource = handledCountRef.value;
-        queuedResult = await consumeQueuedCandidates(
-          run.trigger,
-          opts,
-          blacklistedIds,
-          targetSessionSize,
-          handledCountRef,
-          lastHandledReasonRef,
-          [listUrl],
-          sourceDetailAttemptBudget(listUrl, runListUrls.length)
-        );
-        const handledCount = handledCountRef.value;
-        if (phase === 'queue_consume_after_refill') {
-          await appendPerfCheckpoint(run, 'queue_consumed_after_refill_source', { listUrl, handledCount, stop: queuedResult.stop === true });
-        }
-        if (queuedResult.stop) {
-          await appendWatcherTrace('queue_consume_phase_done', {
-            reason: queuedResult.result?.reason || phase,
-            phase,
-            trigger: run.trigger,
-            runId: run.runId,
-            handledCount,
-            stopRun: true
-          });
-          return { stopRun: true, result: queuedResult.result, handledCount };
-        }
-        if (runListUrls.length > 1 && handledCount > handledBeforeSource) {
-          await appendWatcherTrace('queue_consume_phase_done', {
-            reason: lastHandledReasonRef.value || 'candidate_handled',
-            phase,
-            trigger: run.trigger,
-            runId: run.runId,
-            handledCount,
-            stopRun: true
-          });
-          return { stopRun: true, result: { ok: true, reason: lastHandledReasonRef.value || 'candidate_handled' }, handledCount };
-        }
-      }
-      await appendWatcherTrace('queue_consume_phase_done', {
-        reason: phase,
-        phase,
-        trigger: run.trigger,
-        runId: run.runId,
-        handledCount: handledCountRef.value
-      });
-      return { stopRun: false, result: null, handledCount: handledCountRef.value };
     }
 
     async function prepareTargetPhase(run, opts) {
@@ -665,6 +545,8 @@
       try {
         await appendWatcherTrace('run_start', { reason: 'watcher_triggered', phase: 'run_start', trigger, runId: run.runId });
         await appendPerfCheckpoint(run, 'run_start');
+        await emergencyStorageTrim().catch(() => {});
+        await pruneWatcherState().catch(() => {});
         const opts = normalizeOptions(await depsRef.getOptions());
         run.opts = opts;
         await recordRunStart(trigger, opts);
@@ -706,427 +588,162 @@
         if (sessionPhase.stopRun) return finish(sessionPhase.result);
         const { targetSessionSize } = sessionPhase;
 
-        const runListUrls = rotateRecentSource(listUrlsForRun(opts), stateForTargets);
-        const hasHighFreqSource = runListUrls.some(url => /sciencedirect|elsevier/i.test(url));
-        const hasLowFreqSource = runListUrls.some(url => !/sciencedirect|elsevier/i.test(url));
-        const firstSourceIsHighFreq = /sciencedirect|elsevier/i.test(runListUrls[0] || '');
-        let queuedResult = null;
-        await appendWatcherTrace('run_source_order', {
-          reason: runListUrls.length > 1
-            ? (hasHighFreqSource && hasLowFreqSource
-                ? (firstSourceIsHighFreq ? 'weighted_high_first' : 'weighted_low_first')
-                : 'random_source_order')
-            : 'single_list_url',
+        const singleRunListUrls = listUrlsForRun(opts);
+        const singleListUrl = singleRunListUrls[0] || '';
+        await appendWatcherTrace('random_single_assist_source', {
+          reason: singleListUrl ? 'single_random_source_selected' : 'no_list_url',
+          phase: 'single_random_run',
           trigger,
-          lastHandledPublisherKey: stateForTargets.lastHandledPublisherKey || '',
-          listUrls: runListUrls
+          runId: run.runId,
+          configuredUrlCount: singleRunListUrls.length,
+          listUrl: singleListUrl
         });
-        const blacklistedIds = await readBlacklistedIds(opts, trigger);
-        await appendPerfCheckpoint(run, 'blacklist_loaded', { blacklistCount: blacklistedIds.length });
+        if (!singleListUrl) {
+          await appendWatcherLog({
+            trigger,
+            status: 'skipped',
+            reason: 'no_list_url',
+            message: 'random single-assist run: no valid list URL configured.'
+          });
+          return finish({ ok: true, reason: 'no_list_url' });
+        }
 
-        queuedResult = await consumeQueuePhase({
-          run,
+        const singleBlacklistedIds = await readBlacklistedIds(opts, trigger);
+        await appendPerfCheckpoint(run, 'blacklist_loaded', { blacklistCount: singleBlacklistedIds.length });
+
+        const scan = createScanContext(run, singleListUrl, 1);
+        const pagePick = randomizeAssistListUrlWithMeta(singleListUrl);
+        const pickedListUrl = pagePick.pickedListUrl;
+        attempt.listScanStarted = true;
+        scan.startedAt = Date.now();
+        applyAttemptPagePick(attempt, pagePick, pickedListUrl, { listScanStarted: true });
+        updateStateLastPicked(stateForTargets, pagePick, pickedListUrl);
+        stateForTargets.currentListScan = buildScanStatus(scan, pagePick, pickedListUrl, 'single_random_page');
+        await saveWatcherStateSafe(stateForTargets);
+        await appendWatcherTrace('random_single_assist_page', {
+          reason: 'single_random_page_selected',
+          phase: 'single_random_run',
+          trigger,
+          runId: run.runId,
+          listUrl: pickedListUrl,
+          configuredUrl: singleListUrl,
+          publisher: pagePick.publisher,
+          pickedPage: pagePick.pickedPage,
+          pageMin: pagePick.pageMin,
+          pageMax: pagePick.pageMax
+        });
+        await incrementDaily('checked', trigger);
+
+        const parseStartedAt = Date.now();
+        const parsed = await parseListUrl(pickedListUrl);
+        recordScannedPage(scan, pickedListUrl, pagePick);
+        await appendWatcherTrace('perf_list_parse', {
+          reason: 'single_random_list_parse_done',
+          phase: 'single_random_run',
+          trigger,
+          runId: run.runId,
+          durationMs: Date.now() - parseStartedAt,
+          pickedPage: pagePick.pickedPage,
+          parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+          maxPage: parsed?.listStats?.maxPage || ''
+        });
+        if (parsed.isErrorPage) {
+          await appendWatcherLog({
+            type: 'warning',
+            message: `random single-assist run: AbleSci returned an error page (${parsed.errorTitle || 'site_error'}); run stopped.`
+          });
+          return finish({ ok: false, reason: 'site_error', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+        }
+        if (parsed.cfChallenge) {
+          await recordCfChallenge(opts, pickedListUrl, trigger);
+          return finish({ ok: false, reason: 'cf_challenge', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+        }
+
+        normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
+        const auditPickedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
+        await initCurrentPageData(auditPickedListUrl, pagePick, parsed);
+        await auditParsedListCandidates(parsed, pagePick, auditPickedListUrl, trigger);
+
+        const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
+        if (!sourceGate.ok) {
+          await appendWatcherTrace('random_single_assist_source_gate_skip', {
+            reason: sourceGate.reason,
+            phase: 'single_random_run',
+            trigger,
+            runId: run.runId,
+            listUrl: pickedListUrl,
+            publisher: sourceGate.publisher,
+            count: sourceGate.count,
+            threshold: sourceGate.threshold
+          });
+          await appendWatcherLog({
+            trigger,
+            status: 'skipped',
+            reason: sourceGate.reason,
+            page: pagePick.pickedPage,
+            message: `random single-assist run: current page skipped (${sourceGate.reason}).`
+          });
+          return finish({ ok: true, reason: sourceGate.reason, scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+        }
+        await resetCfChallengeStreak();
+
+        const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, 1);
+        const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick, singleBlacklistedIds);
+        await appendWatcherTrace('random_single_assist_candidates', {
+          reason: 'single_random_candidates_filtered',
+          phase: 'single_random_run',
+          trigger,
+          runId: run.runId,
+          listUrl: pickedListUrl,
+          parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+          queueableCount: queueableCandidates.length
+        });
+        if (queueableCandidates.length <= 0) {
+          await appendWatcherLog({
+            trigger,
+            status: 'skipped',
+            reason: 'no_candidate',
+            page: pagePick.pickedPage,
+            message: `random single-assist run: no available candidate on page ${pagePick.pickedPage || ''}.`
+          });
+          return finish({ ok: true, reason: 'no_candidate', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+        }
+
+        const selectedCandidate = queueableCandidates[Math.floor(Math.random() * queueableCandidates.length)];
+        await appendWatcherTrace('random_single_candidate_selected', {
+          reason: 'single_random_candidate_selected',
+          phase: 'single_random_run',
+          trigger,
+          runId: run.runId,
+          listUrl: pickedListUrl,
+          pickedPage: pagePick.pickedPage,
+          candidateCount: queueableCandidates.length,
+          assistId: selectedCandidate?.assistId || '',
+          detailUrl: selectedCandidate?.detailUrl || '',
+          journalShortName: selectedCandidate?.journalShortName || ''
+        });
+        const singleHandledCountRef = { value: 0 };
+        const singleLastHandledReasonRef = { value: '' };
+        const singleResult = await processCandidateBatch([selectedCandidate], {
           opts,
-          blacklistedIds,
-          targetSessionSize,
-          handledCountRef,
-          lastHandledReasonRef,
-          runListUrls,
-          phase: 'queue_consume_before_refill'
+          trigger,
+          blacklistedIds: singleBlacklistedIds,
+          targetSessionSize: 1,
+          getHandledCount: () => singleHandledCountRef.value,
+          setHandledCount: value => { singleHandledCountRef.value = value; },
+          setLastHandledReason: value => { singleLastHandledReasonRef.value = value; },
+          pagePick,
+          fromQueue: false,
+          maxDetailAttempts: 1
         });
-        handledCount = queuedResult.handledCount;
-        if (queuedResult.stopRun) return finish(queuedResult.result);
-        await appendPerfCheckpoint(run, 'queue_consumed_before_refill', { handledCount });
-        if (handledCount >= targetSessionSize) return finish({ ok: true, reason: handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled') });
-
-        for (const listUrl of runListUrls) {
-          const isHighFreq = /sciencedirect|elsevier/i.test(listUrl);
-          if (isHighFreq && handledCount >= targetSessionSize) {
-            continue;
-          }
-          const scan = createScanContext(run, listUrl, runListUrls.length);
-          while (canContinueScan(scan)) {
-          const pagePick = randomizeAssistListUrlWithMeta(listUrl, stateWithQueueRefillCursor(listUrl, stateForTargets));
-          let pickedListUrl = pagePick.pickedListUrl;
-          const isSequentialPageScan = pagePick.pageOrder === 'desc' || pagePick.pageOrder === 'asc';
-          if (await shouldSkipBackedOffPage(pagePick)) {
-            await appendWatcherTrace('list_scan_skip_backoff', {
-              reason: 'candidate_queue_page_backoff',
-              phase: 'list_scan',
-              trigger,
-              runId: run.runId,
-              configuredUrl: listUrl,
-              publisher: pagePick.publisher,
-              pageOrder: pagePick.pageOrder,
-              urlKey: pagePick.urlKey,
-              pickedPage: pagePick.pickedPage
-            });
-            if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
-              const skippedPage = Number(pagePick.pickedPage);
-              recordBackoffSkippedPage(scan, skippedPage);
-              applyAttemptPagePick(attempt, pagePick, pickedListUrl);
-              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-              stateForTargets.lastVisitedPages[pagePick.urlKey] = skippedPage;
-              updateStateLastPicked(stateForTargets, pagePick, pickedListUrl);
-              stateForTargets.currentListScan = buildScanStatus(scan, pagePick, pickedListUrl, 'background_fetch_rebase');
-              await saveWatcherStateSafe(stateForTargets);
-              await appendWatcherTrace('list_scan_page_progress_saved', {
-                reason: 'sequential_page_backoff_skipped',
-                phase: 'list_scan',
-                trigger,
-                runId: run.runId,
-                listUrl: pickedListUrl,
-                configuredUrl: listUrl,
-                publisher: pagePick.publisher,
-                pageOrder: pagePick.pageOrder,
-                urlKey: pagePick.urlKey,
-                pickedPage: skippedPage,
-                backoffSkippedPages: run.backoffSkippedPages.slice(-10),
-                maxSequentialBackoffSkips: scan.maxBackoffSkips
-              });
-              scan.backoffSkipCount += 1;
-              continue;
-            }
-            break;
-          }
-          attempt.listScanStarted = true;
-          scan.startedAt = Date.now();
-          applyAttemptPagePick(attempt, pagePick, pickedListUrl, { listScanStarted: true });
-          await appendWatcherTrace('list_scan_start', {
-            reason: pickedListUrl === listUrl ? 'configured_url' : 'picked_page',
-            phase: 'list_scan',
-            trigger,
-            runId: run.runId,
-            listUrl: pickedListUrl,
-            configuredUrl: listUrl,
-            publisher: pagePick.publisher,
-            pageCurve: pagePick.pageCurve,
-            pageOrder: pagePick.pageOrder,
-            urlKey: pagePick.urlKey,
-            pickedPage: pagePick.pickedPage,
-            pageMin: pagePick.pageMin,
-            pageMax: pagePick.pageMax,
-            frontHit: pagePick.frontHit,
-            alpha: pagePick.alpha,
-            handledCount,
-            targetSessionSize
-          });
-          updateStateLastPicked(stateForTargets, pagePick, pickedListUrl);
-          stateForTargets.currentListScan = buildScanStatus(scan, pagePick, pickedListUrl);
-          await saveWatcherStateSafe(stateForTargets);
-          await incrementDaily('checked', trigger);
-          const parseStartedAt = Date.now();
-          let parsed = await parseListUrl(pickedListUrl);
-          recordScannedPage(scan, pickedListUrl, pagePick);
-          await appendWatcherTrace('perf_list_parse', {
-            reason: 'list_parse_done',
-            phase: 'list_scan',
-            trigger,
-            runId: run.runId,
-            durationMs: Date.now() - parseStartedAt,
-            pickedPage: pagePick.pickedPage,
-            urlKey: pagePick.urlKey,
-            parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
-            maxPage: parsed?.listStats?.maxPage || ''
-          });
-          if (parsed.isErrorPage) {
-            await appendWatcherLog({
-              type: 'warning',
-              message: `🔄 ⚠️ 无法扫描列表：科研通网站返回服务错误 (${parsed.errorTitle || '502 Bad Gateway'})，值守已暂停并等待下一次轮询。`
-            });
-            return finish({ ok: false, reason: 'site_error' });
-          }
-          if (parsed.cfChallenge) {
-            await recordCfChallenge(opts, pickedListUrl, trigger);
-            return finish({ ok: false, reason: 'cf_challenge' });
-          }
-
-          if (isSequentialPageScan && parsed?.listStats?.currentPage && Number.isFinite(parsed.listStats.currentPage)) {
-            const realCurrentPage = Number(parsed.listStats.currentPage);
-            if (realCurrentPage < Number(pagePick.pickedPage)) {
-              await appendWatcherTrace('list_scan_page_corrected', {
-                reason: 'requested_page_exceeds_max_page',
-                phase: 'list_scan',
-                trigger,
-                runId: run.runId,
-                requestedPage: pagePick.pickedPage,
-                correctedPage: realCurrentPage,
-                maxPage: parsed.listStats.maxPage
-              });
-              pagePick.pickedPage = realCurrentPage;
-              attempt.pickedPage = realCurrentPage;
-              stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-              if (pagePick.pageOrder === 'desc') {
-                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage + 1;
-              } else if (pagePick.pageOrder === 'asc') {
-                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage - 1;
-              } else {
-                stateForTargets.lastVisitedPages[pagePick.urlKey] = realCurrentPage;
-              }
-
-              if (parsed.listStats.maxPage && Number.isFinite(parsed.listStats.maxPage)) {
-                pagePick.pageMax = Number(parsed.listStats.maxPage);
-                attempt.pageMax = Number(parsed.listStats.maxPage);
-                stateForTargets.detectedMaxPages = stateForTargets.detectedMaxPages || {};
-                stateForTargets.detectedMaxPages[pagePick.urlKey] = Number(parsed.listStats.maxPage);
-              }
-              await saveWatcherStateSafe(stateForTargets);
-            }
-          }
-          normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
-          const auditPickedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
-          await initCurrentPageData(auditPickedListUrl, pagePick, parsed);
-          await auditParsedListCandidates(parsed, pagePick, auditPickedListUrl, trigger);
-
-          let detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
-          if (Number.isFinite(detectedMaxPage) && detectedMaxPage > 0) {
-            stateForTargets.lastPickedPageMax = detectedMaxPage;
-            await saveWatcherStateSafe(stateForTargets);
-          }
-          if (
-            isSequentialPageScan &&
-            pagePick.urlKey &&
-            Number.isFinite(detectedMaxPage) &&
-            detectedMaxPage > 0
-          ) {
-            const adjustedState = stateWithQueueRefillCursor(listUrl, stateForTargets, detectedMaxPage);
-            const adjustedPagePick = randomizeAssistListUrlWithMeta(listUrl, adjustedState);
-            const adjustedPage = Number(adjustedPagePick.pickedPage);
-            const currentPickedPage = Number(pagePick.pickedPage);
-            if (
-              adjustedPagePick.urlKey === pagePick.urlKey &&
-              adjustedPagePick.pageOrder === pagePick.pageOrder &&
-              Number.isFinite(adjustedPage) &&
-              Number.isFinite(currentPickedPage) &&
-              adjustedPage > 0 &&
-              adjustedPage !== currentPickedPage
-            ) {
-              await appendWatcherTrace('list_scan_refill_cursor_rebased', {
-                reason: 'detected_max_page_changed',
-                phase: 'list_scan',
-                trigger,
-                runId: run.runId,
-                configuredUrl: listUrl,
-                previousListUrl: pickedListUrl,
-                previousPickedPage: pagePick.pickedPage,
-                adjustedPickedPage: adjustedPage,
-                detectedMaxPage,
-                urlKey: pagePick.urlKey
-              });
-              pickedListUrl = adjustedPagePick.pickedListUrl;
-              Object.assign(pagePick, adjustedPagePick);
-              applyAttemptPagePick(attempt, pagePick, pickedListUrl);
-              updateStateLastPicked(stateForTargets, pagePick, pickedListUrl);
-              await saveWatcherStateSafe(stateForTargets);
-              await incrementDaily('checked', trigger);
-              const reparseStartedAt = Date.now();
-              parsed = await parseListUrl(pickedListUrl);
-              recordScannedPage(scan, pickedListUrl, pagePick);
-              await appendWatcherTrace('perf_list_parse', {
-                reason: 'list_reparse_after_rebase_done',
-                phase: 'list_scan',
-                trigger,
-                runId: run.runId,
-                durationMs: Date.now() - reparseStartedAt,
-                pickedPage: pagePick.pickedPage,
-                urlKey: pagePick.urlKey,
-                parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
-                maxPage: parsed?.listStats?.maxPage || ''
-              });
-              if (parsed.isErrorPage) {
-                await appendWatcherLog({
-                  type: 'warning',
-                  message: `🔄 ⚠️ 无法扫描列表：科研通网站返回服务错误 (${parsed.errorTitle || '502 Bad Gateway'})，值守已暂停并等待下一次轮询。`
-                });
-                return finish({ ok: false, reason: 'site_error' });
-              }
-              if (parsed.cfChallenge) {
-                await recordCfChallenge(opts, pickedListUrl, trigger);
-                return finish({ ok: false, reason: 'cf_challenge' });
-              }
-              normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
-              const auditRebasedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
-              await initCurrentPageData(auditRebasedListUrl, pagePick, parsed);
-              await auditParsedListCandidates(parsed, pagePick, auditRebasedListUrl, trigger, 'parsed_after_rebase');
-              detectedMaxPage = Number(parsed?.listStats?.maxPage || 0);
-            }
-          }
-
-          if (
-            trigger === 'manual' &&
-            pagePick.pageOrder === 'desc' &&
-            pagePick.hasExplicitPageMax !== true &&
-            Number.isFinite(detectedMaxPage) &&
-            detectedMaxPage > Number(pagePick.pageMax || 0) &&
-            pagePick.urlKey
-          ) {
-            stateForTargets.detectedMaxPages = stateForTargets.detectedMaxPages || {};
-            stateForTargets.detectedMaxPages[pagePick.urlKey] = detectedMaxPage;
-            await saveWatcherStateSafe(stateForTargets);
-            await appendWatcherTrace('list_scan_detected_tail_page_saved', {
-              reason: 'manual_order_desc_detected_max_page_saved',
-              phase: 'list_scan',
-              trigger,
-              runId: run.runId,
-              configuredUrl: listUrl,
-              listUrl: pickedListUrl,
-              publisher: pagePick.publisher,
-              urlKey: pagePick.urlKey,
-              detectedMaxPage
-            });
-          }
-
-          const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
-          if (!sourceGate.ok) {
-            await appendWatcherTrace('list_scan_skip_source_gate', {
-              reason: sourceGate.reason,
-              phase: 'list_scan',
-              trigger,
-              runId: run.runId,
-              listUrl: pickedListUrl,
-              publisher: sourceGate.publisher,
-              count: sourceGate.count,
-              threshold: sourceGate.threshold
-            });
-            if (isSequentialPageScan) {
-              if (pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
-                stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-                stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
-                await saveWatcherStateSafe(stateForTargets);
-                await appendWatcherTrace('list_scan_page_progress_saved', {
-                  reason: 'sequential_page_exhausted_source_gate',
-                  phase: 'list_scan',
-                  trigger,
-                  runId: run.runId,
-                  listUrl: pickedListUrl,
-                  configuredUrl: listUrl,
-                  publisher: pagePick.publisher,
-                  pageOrder: pagePick.pageOrder,
-                  urlKey: pagePick.urlKey,
-                  pickedPage: Number(pagePick.pickedPage),
-                  currentPage: parsed?.listStats?.currentPage || '',
-                  maxPage: parsed?.listStats?.maxPage || ''
-                });
-              }
-              scan.pageScanCount += 1;
-              continue;
-            }
-            break;
-          }
-          await resetCfChallengeStreak();
-
-          const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, targetSessionSize);
-          const refillStartedAt = Date.now();
-          const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick, blacklistedIds);
-          const enqueueResult = await enqueueParsedCandidates(parsed, pagePick, pickedListUrl, trigger, queueableCandidates);
-          await auditEnqueueResult(enqueueResult, pagePick, pickedListUrl, trigger);
-          await appendWatcherTrace('perf_queue_refill', {
-            reason: 'queue_refill_done',
-            phase: 'queue_refill',
-            trigger,
-            runId: run.runId,
-            durationMs: Date.now() - refillStartedAt,
-            pickedPage: pagePick.pickedPage,
-            parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-            orderedCount: candidates.length,
-            queueableCount: queueableCandidates.length,
-            queueAdded: enqueueResult.added,
-            queueRefreshed: enqueueResult.refreshed,
-            queueSeenSkipped: enqueueResult.seenSkipped
-          });
-          const latestStateAfterQueue = await getWatcherState();
-          stateForTargets.assistCandidateQueue = latestStateAfterQueue.assistCandidateQueue;
-          stateForTargets.detectedMaxPages = latestStateAfterQueue.detectedMaxPages || stateForTargets.detectedMaxPages;
-          if (isSequentialPageScan && pagePick.urlKey && Number.isFinite(Number(pagePick.pickedPage))) {
-            stateForTargets.lastVisitedPages = stateForTargets.lastVisitedPages || {};
-            stateForTargets.lastVisitedPages[pagePick.urlKey] = Number(pagePick.pickedPage);
-            await appendWatcherTrace('list_scan_page_cursor_advanced', {
-              reason: 'sequential_page_snapshot_enqueued_in_memory',
-              phase: 'list_scan',
-              trigger,
-              runId: run.runId,
-              listUrl: pickedListUrl,
-              configuredUrl: listUrl,
-              publisher: pagePick.publisher,
-              pageOrder: pagePick.pageOrder,
-              urlKey: pagePick.urlKey,
-              pickedPage: Number(pagePick.pickedPage),
-              currentPage: parsed?.listStats?.currentPage || ''
-            });
-          }
-          await appendWatcherTrace('list_scan_candidates', {
-            reason: 'ordered_candidates',
-            phase: 'queue_refill',
-            trigger,
-            runId: run.runId,
-            listUrl: pickedListUrl,
-            parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-            orderedCount: candidates.length,
-            queueableCount: queueableCandidates.length
-          });
-
-          if (isSequentialPageScan) {
-            scan.pageScanCount += 1;
-            if (scan.pageScanCount < scan.maxPageScans) {
-              await appendWatcherTrace('list_scan_continue_next_page', {
-                reason: 'sequential_page_snapshot_enqueued',
-                phase: 'list_scan',
-                trigger,
-                runId: run.runId,
-                listUrl: pickedListUrl,
-                configuredUrl: listUrl,
-                publisher: pagePick.publisher,
-                pageOrder: pagePick.pageOrder,
-                urlKey: pagePick.urlKey,
-                pickedPage: pagePick.pickedPage,
-                nextScanIndex: scan.pageScanCount + 1,
-                maxSequentialPageScans: scan.maxPageScans,
-                parsedListPages: run.parsedListPages.slice(-10),
-                backoffSkippedPages: run.backoffSkippedPages.slice(-10)
-              });
-              continue;
-            }
-          }
-          await appendWatcherTrace('perf_list_scan_page', {
-            reason: 'list_scan_page_done',
-            phase: 'list_scan',
-            trigger,
-            runId: run.runId,
-            durationMs: Date.now() - scan.startedAt,
-            pickedPage: pagePick.pickedPage,
-            parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-            queueableCount: queueableCandidates.length
-          });
-          break;
-          }
-
-          queuedResult = await consumeQueuePhase({
-            run,
-            opts,
-            blacklistedIds,
-            targetSessionSize,
-            handledCountRef,
-            lastHandledReasonRef,
-            runListUrls,
-            phase: 'queue_consume_after_refill',
-            onlyListUrl: listUrl
-          });
-          handledCount = queuedResult.handledCount;
-          if (queuedResult.stopRun) return finish(queuedResult.result);
+        if (singleResult.stop) {
+          return finish(singleResult.result || { ok: true, reason: singleLastHandledReasonRef.value || 'candidate_handled' });
         }
-
-        const reason = handledCount
-          ? (handledCount > 1 ? 'session_candidates_handled' : (lastHandledReasonRef.value || 'candidate_handled'))
-          : (run.parsedListPages.length <= 0 && run.backoffSkippedPages.length > 0 ? 'list_pages_backoff_only' : 'no_candidate');
-        const finalResult = { ok: true, reason };
-        if (reason === 'no_candidate' || reason === 'list_pages_backoff_only') {
-          finalResult.scannedUrl = run.scannedUrl;
-          finalResult.scannedPublisher = run.scannedPublisher;
-          finalResult.scannedPage = run.scannedPage;
-          finalResult.parsedListPages = run.parsedListPages.slice(-20);
-          finalResult.backoffSkippedPages = run.backoffSkippedPages.slice(-30);
+        if (singleHandledCountRef.value > 0) {
+          return finish({ ok: true, reason: singleLastHandledReasonRef.value || 'candidate_handled', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
         }
-        return finish(finalResult);
+        return finish({ ok: true, reason: 'single_candidate_skipped', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+
       } catch (err) {
         await appendWatcherTrace('run_error', { reason: err?.message || String(err), trigger });
         await incrementDaily('failed', trigger);

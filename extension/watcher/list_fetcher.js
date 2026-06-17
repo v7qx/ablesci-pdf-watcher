@@ -39,7 +39,7 @@
 
     function cleanJournalAccessName(value) {
       return normalizeText(htmlDecode(value))
-        .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+        .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
         .trim();
     }
 

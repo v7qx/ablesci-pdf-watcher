@@ -52,12 +52,10 @@
 
     function formatCurrentListScan(scan = {}) {
       if (!scan || typeof scan !== 'object') return '';
-      const mode = scan.mode === 'midpoint_rescan' ? '半程重扫' : '后台拉取';
+      const mode = '随机页';
       const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
       const page = scan.page ? `第 ${scan.page} 页` : '';
-      const range = scan.range ? `范围 ${scan.range}` : '';
-      const index = scan.scanLimit ? `${scan.scanIndex || 1}/${scan.scanLimit}` : '';
-      return [mode, publisher, page, range, index].filter(Boolean).join(' ');
+      return [mode, publisher, page].filter(Boolean).join(' ');
     }
 
     async function readCurrentListScanText() {
@@ -71,7 +69,7 @@
 
     function cleanJournalAccessName(value) {
       return String(value || '')
-        .replace(/\s*\|\s*本地记录：ScienceDirect 明确无订阅权限；过期后会自动重试\s*/g, '')
+        .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
         .replace(/\s*\|\s*ScienceDirect no-subscription record;.*$/i, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -216,10 +214,8 @@
           riskUsed: state.riskUsed || 0,
           riskLimit: state.riskLimit || 0,
           currentSession: state.currentSession || null,
-          candidateQueueSize: Array.isArray(state.assistCandidateQueue?.items) ? state.assistCandidateQueue.items.length : 0,
           lastPickedListUrl: state.lastPickedListUrl || '',
           lastPickedPage: state.lastPickedPage || '',
-          lastPickedPageMax: state.lastPickedPageMax || '',
           lastPickedPublisher: state.lastPickedPublisher || '',
           lastHandledPublisherKey: state.lastHandledPublisherKey || '',
           lastHandledPublisherAt: state.lastHandledPublisherAt || '',
@@ -340,8 +336,8 @@
       const now = Date.now();
       return Object.values(stats)
         .filter(entry => entry && typeof entry === 'object')
-        .filter(entry => entry.publisher === 'sciencedirect')
-        .filter(entry => entry.reason === 'explicit_no_subscription')
+        .filter(entry => publisherKeyFromJournalAccessEntry(entry) && publisherKeyFromJournalAccessEntry(entry) !== 'ieee')
+        .filter(entry => (entry.status || (entry.reason === 'explicit_no_subscription' ? 'blocked' : '')) === 'blocked' || entry.status === 'allowed')
         .filter(entry => {
           const expiresAt = Date.parse(entry.expiresAt || '');
           return Number.isFinite(expiresAt) && expiresAt > now;
@@ -349,21 +345,42 @@
         .sort((a, b) => Date.parse(b.lastAt || '') - Date.parse(a.lastAt || ''));
     }
 
+    function publisherKeyFromJournalAccessEntry(entry = {}) {
+      const text = String(entry.publisher || entry.publisherName || '');
+      if (/ieee/i.test(text)) return 'ieee';
+      if (/elsevier|science\s*direct|sciencedirect/i.test(text)) return 'sciencedirect';
+      if (/wiley/i.test(text)) return 'wiley';
+      if (/\brsc\b|royal\s+society\s+of\s+chemistry/i.test(text)) return 'rsc';
+      if (/\bacs\b/i.test(text)) return 'acs';
+      if (/sage/i.test(text)) return 'sage';
+      return '';
+    }
+
+    function journalAccessStatsKey(entry = {}) {
+      const publisher = publisherKeyFromJournalAccessEntry(entry);
+      const shortName = cleanJournalAccessName(entry.shortName || entry.journalShortName || '');
+      const key = normalizeJournalAccessKey(shortName);
+      return publisher && key ? `${publisher}:${key}` : '';
+    }
+
     function normalizedJournalAccessStatsFromEntries(entries = []) {
       const stats = {};
       entries.forEach(entry => {
         if (!entry || typeof entry !== 'object') return;
-        if (entry.publisher !== 'sciencedirect') return;
-        if (entry.reason !== 'explicit_no_subscription') return;
+        const publisher = publisherKeyFromJournalAccessEntry(entry);
+        if (!publisher || publisher === 'ieee') return;
+        const status = entry.status === 'allowed' ? 'allowed' : 'blocked';
+        const reason = status === 'allowed' ? 'access_confirmed' : 'explicit_no_subscription';
         const shortName = cleanJournalAccessName(entry.shortName || entry.journalShortName || '');
-        const key = normalizeJournalAccessKey(shortName);
+        const key = journalAccessStatsKey({ ...entry, publisher, shortName });
         if (!key) return;
         const expiresAt = Date.parse(entry.expiresAt || '');
         if (!Number.isFinite(expiresAt)) return;
         stats[key] = {
           shortName,
-          publisher: 'sciencedirect',
-          reason: 'explicit_no_subscription',
+          publisher,
+          status,
+          reason,
           lastAt: entry.lastAt || '',
           expiresAt: new Date(expiresAt).toISOString(),
           hitCount: Number(entry.hitCount || 0) || 0,
@@ -376,8 +393,8 @@
     function journalAccessExportPayload(state = {}) {
       const entries = validJournalAccessEntries(state);
       return {
-        type: 'ablesci-sciencedirect-journal-access-cache',
-        version: 1,
+        type: 'ablesci-journal-access-cache',
+        version: 2,
         exportedAt: new Date().toISOString(),
         journalAccessStats: normalizedJournalAccessStatsFromEntries(entries)
       };
@@ -411,21 +428,27 @@
             return;
           }
           const emptyText = globalThis.watcherActiveLanguage === 'en'
-            ? 'No active ScienceDirect no-subscription cache.'
-            : '暂无有效的 ScienceDirect 无权限期刊缓存。';
+            ? 'No active journal access cache.'
+            : '暂无有效的期刊权限缓存。';
           summary.textContent = emptyText;
           summary.title = emptyText;
           showPill('journalAccessCacheStatus', journalAccessCountText(0));
           return;
         }
+        const blockedCount = entries.filter(entry => (entry.status || 'blocked') !== 'allowed').length;
+        const allowedCount = entries.filter(entry => entry.status === 'allowed').length;
         const recent = entries
           .slice(0, 5)
-          .map(entry => cleanJournalAccessName(entry.shortName))
+          .map(entry => {
+            const publisher = publisherKeyFromJournalAccessEntry(entry).toUpperCase();
+            const label = cleanJournalAccessName(entry.shortName);
+            return publisher && label ? `${publisher}:${label}` : label;
+          })
           .filter(Boolean);
         const separator = globalThis.watcherActiveLanguage === 'en' ? ', ' : '、';
         const prefix = globalThis.watcherActiveLanguage === 'en'
-          ? `Active cache: ${entries.length} entries`
-          : `有效缓存 ${entries.length} 条`;
+          ? `Active cache: ${entries.length} entries (${blockedCount} blocked / ${allowedCount} allowed)`
+          : `有效缓存 ${entries.length} 条（无权限 ${blockedCount} / 有权限 ${allowedCount}）`;
         const recentText = recent.length
           ? (globalThis.watcherActiveLanguage === 'en' ? `; recent: ${recent.join(separator)}` : `；最近命中：${recent.join(separator)}`)
           : '';
@@ -447,7 +470,7 @@
       const payload = journalAccessExportPayload(data[autoWatcherStateKey] || {});
       await copyTextToClipboard(JSON.stringify(payload, null, 2));
       const count = Object.keys(payload.journalAccessStats || {}).length;
-      showText('status', `已复制 ScienceDirect 无权限期刊缓存：${count} 条。`);
+      showText('status', `已复制期刊权限缓存：${count} 条。`);
     }
 
     async function importJournalAccessCache() {
@@ -457,7 +480,7 @@
         const incomingStats = normalizedJournalAccessStatsFromEntries(journalAccessImportEntriesFromPayload(payload));
         const incomingCount = Object.keys(incomingStats).length;
         if (!incomingCount) {
-          showText('status', '剪贴板中没有可导入的 ScienceDirect 无权限期刊缓存。', true);
+          showText('status', '剪贴板中没有可导入的期刊权限缓存。', true);
           return;
         }
         const data = await chromeApi.storage.local.get({ [autoWatcherStateKey]: {} });
@@ -468,7 +491,7 @@
         };
         await chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
         await refreshJournalAccessCacheSummary();
-        showText('status', `已导入 ScienceDirect 无权限期刊缓存：${incomingCount} 条。`);
+        showText('status', `已导入期刊权限缓存：${incomingCount} 条。`);
       } catch (err) {
         showText('status', '导入失败：' + (err?.message || '剪贴板不是有效 JSON'), true);
       }
@@ -489,7 +512,7 @@
       await chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
       await chromeApi.storage.local.remove(['journalAccessStats', 'journalAccessLookupIndex']);
       await refreshJournalAccessCacheSummary({ forceEmpty: true });
-      showText('status', '已清空 ScienceDirect 无权限期刊缓存。');
+      showText('status', '已清空期刊权限缓存。');
     }
 
     async function simulateAssist() {

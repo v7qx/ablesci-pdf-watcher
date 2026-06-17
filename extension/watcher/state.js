@@ -13,12 +13,183 @@
       updateActionBadge
     } = config;
 
+    const PROCESSED_MAX_TTL_MS = 5 * 24 * 60 * 60 * 1000;
+    const PROCESSED_MIN_TTL_MS = 6 * 60 * 60 * 1000;
+    const PROCESSED_DEFAULT_TTL_MS = 48 * 60 * 60 * 1000;
+    const MAX_DAILY_ENTRIES = 60;
+    const MAX_PROCESSED_ENTRIES = 5000;
+    const EMERGENCY_PROCESSED_ENTRIES = 2000;
+
     async function getWatcherState() {
       const stored = await chromeApi.storage.local.get(stateKey);
       const state = stored[stateKey] || { processed: {}, daily: {} };
       if (!state || typeof state !== 'object') return { processed: {}, daily: {}, _version: 0 };
       if (!Number.isFinite(Number(state._version))) state._version = 0;
       return state;
+    }
+
+    function pruneExpiredProcessed(state) {
+      if (!state.processed || typeof state.processed !== 'object') return 0;
+      const now = Date.now();
+      let removed = 0;
+      const keys = Object.keys(state.processed);
+      for (const key of keys) {
+        const entry = state.processed[key];
+        if (!entry || typeof entry !== 'object') {
+          delete state.processed[key];
+          removed += 1;
+          continue;
+        }
+        const expiresAt = Date.parse(entry.expiresAt || '');
+        if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+          delete state.processed[key];
+          removed += 1;
+        }
+      }
+      return removed;
+    }
+
+    function pruneOldDaily(state) {
+      if (!state.daily || typeof state.daily !== 'object') return 0;
+      const keys = Object.keys(state.daily).sort();
+      if (keys.length <= MAX_DAILY_ENTRIES) return 0;
+      const toRemove = keys.slice(0, keys.length - MAX_DAILY_ENTRIES);
+      for (const key of toRemove) {
+        delete state.daily[key];
+      }
+      return toRemove.length;
+    }
+
+    function pruneExpiredJournalAccessStats(state) {
+      if (!state.journalAccessStats || typeof state.journalAccessStats !== 'object' || Array.isArray(state.journalAccessStats)) return 0;
+      const now = Date.now();
+      let removed = 0;
+      const keys = Object.keys(state.journalAccessStats);
+      for (const key of keys) {
+        const entry = state.journalAccessStats[key];
+        if (!entry || typeof entry !== 'object') {
+          delete state.journalAccessStats[key];
+          removed += 1;
+          continue;
+        }
+        const expiresAt = Date.parse(entry.expiresAt || '');
+        if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+          delete state.journalAccessStats[key];
+          removed += 1;
+        }
+      }
+      return removed;
+    }
+
+    function trimProcessedToMax(state, max) {
+      if (!state.processed || typeof state.processed !== 'object') return 0;
+      const keys = Object.keys(state.processed);
+      const limit = Number.isFinite(max) ? max : MAX_PROCESSED_ENTRIES;
+      if (keys.length <= limit) return 0;
+      const entries = keys.map(k => ({ k, ts: Date.parse(state.processed[k]?.lastAt || '') || 0 }));
+      entries.sort((a, b) => a.ts - b.ts);
+      const toRemove = entries.slice(0, entries.length - limit);
+      for (const entry of toRemove) {
+        delete state.processed[entry.k];
+      }
+      return toRemove.length;
+    }
+
+    async function emergencyStorageTrim() {
+      const allLargeKeys = config.largeStorageKeys;
+      if (!allLargeKeys || !allLargeKeys.length) return 0;
+      try {
+        const stored = await chromeApi.storage.local.get(allLargeKeys);
+        let dirty = false;
+        for (const key of allLargeKeys) {
+          const val = stored[key];
+          if (Array.isArray(val)) {
+            const newLen = Math.min(val.length, 30);
+            if (val.length > newLen) {
+              stored[key] = val.slice(0, newLen);
+              dirty = true;
+            }
+          }
+        }
+        if (!dirty) return 0;
+        const keysWritten = [];
+        for (const key of allLargeKeys) {
+          if (stored[key] !== undefined) keysWritten.push(key);
+        }
+        if (keysWritten.length > 0) {
+          const patch = {};
+          for (const key of keysWritten) {
+            patch[key] = stored[key];
+          }
+          await chromeApi.storage.local.set(patch);
+        }
+        return keysWritten.length;
+      } catch (_) { return 0; }
+    }
+
+    async function pruneWatcherState(state) {
+      if (!state) state = await getWatcherState();
+      const prC = pruneExpiredProcessed(state);
+      const prD = pruneOldDaily(state);
+      const prJ = pruneExpiredJournalAccessStats(state);
+      const prT = trimProcessedToMax(state);
+      const totalRemoved = prC + prD + prJ + prT;
+      if (totalRemoved > 0) {
+        await saveStateRaw(state);
+        try { await appendWatcherTrace('state_pruned', { processedRemoved: prC, dailyRemoved: prD, journalAccessRemoved: prJ, trimmedToMax: prT, totalRemoved, processedRemaining: Object.keys(state.processed || {}).length, dailyRemaining: Object.keys(state.daily || {}).length }); } catch (_) {}
+      }
+      return totalRemoved;
+    }
+
+    async function saveStateRaw(state) {
+      try {
+        await chromeApi.storage.local.set({ [stateKey]: state });
+      } catch (err) {
+        if (String(err && err.message || '').includes('quota')) {
+          await emergencyStorageTrim();
+          pruneExpiredProcessed(state);
+          pruneOldDaily(state);
+          pruneExpiredJournalAccessStats(state);
+          trimProcessedToMax(state, EMERGENCY_PROCESSED_ENTRIES);
+          await chromeApi.storage.local.set({ [stateKey]: state });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    async function setStorageSafe(obj) {
+      try {
+        await chromeApi.storage.local.set(obj);
+      } catch (err) {
+        if (String(err && err.message || '').includes('quota')) {
+          await emergencyStorageTrim();
+          const st = obj[stateKey];
+          if (st) {
+            pruneExpiredProcessed(st);
+            pruneOldDaily(st);
+            pruneExpiredJournalAccessStats(st);
+            trimProcessedToMax(st, EMERGENCY_PROCESSED_ENTRIES);
+          }
+          try {
+            await chromeApi.storage.local.set(obj);
+          } catch (err2) {
+            if (String(err2 && err2.message || '').includes('quota')) {
+              console.warn('[Ablesci Auto Watcher] storage quota still exceeded after emergency trim, clearing processed');
+              if (st) {
+                st.processed = {};
+                st.daily = {};
+                st.journalAccessStats = {};
+              }
+              await chromeApi.storage.local.set(obj);
+            } else {
+              throw err2;
+            }
+          }
+        } else {
+          throw err;
+        }
+      }
     }
 
     async function saveWatcherState(state) {
@@ -34,7 +205,7 @@
           journalAccessStats: { ...(current.journalAccessStats || {}), ...(incoming.journalAccessStats || {}) },
           _version: currentVersion + 1
         };
-        await chromeApi.storage.local.set({ [stateKey]: next });
+        await setStorageSafe({ [stateKey]: next });
         const verify = await getWatcherState();
         if (Number(verify._version || 0) === currentVersion + 1) {
           Object.assign(incoming, next);
@@ -50,7 +221,7 @@
         journalAccessStats: { ...(current.journalAccessStats || {}), ...(incoming.journalAccessStats || {}) },
         _version: Number(current._version || 0) + 1
       };
-      await chromeApi.storage.local.set({ [stateKey]: next });
+      await setStorageSafe({ [stateKey]: next });
       Object.assign(incoming, next);
       return next;
     }
@@ -71,14 +242,47 @@
       return await saveWatcherState(state);
     }
 
-    async function updateProcessed(key, status, reason) {
+    function normalizeProcessedMeta(meta = {}) {
+      return meta && typeof meta === 'object' ? meta : {};
+    }
+
+    function processedTtlMs(meta = {}) {
+      meta = normalizeProcessedMeta(meta);
+      const ageSeconds = Number(meta.assistAgeSeconds);
+      if (Number.isFinite(ageSeconds) && ageSeconds >= 0) {
+        const remaining = PROCESSED_MAX_TTL_MS - ageSeconds * 1000;
+        return Math.min(PROCESSED_MAX_TTL_MS, Math.max(PROCESSED_MIN_TTL_MS, remaining));
+      }
+      return PROCESSED_DEFAULT_TTL_MS;
+    }
+
+    function sanitizeProcessedMeta(meta = {}) {
+      meta = normalizeProcessedMeta(meta);
+      return {
+        assistAgeSeconds: Number.isFinite(Number(meta.assistAgeSeconds)) ? Number(meta.assistAgeSeconds) : '',
+        assistTimeText: normalizeText(meta.assistTimeText || '').slice(0, 80),
+        listUrl: String(meta.listUrl || '').slice(0, 500),
+        page: Number.isFinite(Number(meta.page)) ? Number(meta.page) : '',
+        publisherName: normalizeText(meta.publisherName || meta.publisher || '').slice(0, 160),
+        journalShortName: normalizeText(meta.journalShortName || '').slice(0, 160)
+      };
+    }
+
+    async function updateProcessed(key, status, reason, meta = {}) {
       if (!key) return;
+      meta = normalizeProcessedMeta(meta);
+      const ttlMs = processedTtlMs(meta);
+      const now = Date.now();
+      const metaFields = sanitizeProcessedMeta(meta);
       await updateWatcherState(state => {
         state.processed = state.processed || {};
         state.processed[key] = {
-          lastAt: new Date().toISOString(),
+          lastAt: new Date(now).toISOString(),
+          expiresAt: new Date(now + ttlMs).toISOString(),
+          ttlMs,
           status,
-          reason: normalizeText(reason).slice(0, 160)
+          reason: normalizeText(reason).slice(0, 160),
+          ...metaFields
         };
       });
     }
@@ -237,7 +441,9 @@
       recordRunFinish,
       recordAttemptFinish,
       getDailyCount,
-      dailyCounterSnapshot
+      dailyCounterSnapshot,
+      pruneWatcherState,
+      emergencyStorageTrim
     };
   }
 

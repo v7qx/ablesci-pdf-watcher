@@ -80,6 +80,14 @@
   const { createWatcherCandidateProcessorApi } = globalThis.AblesciWatcherCandidateProcessorModule;
   const { createWatcherOrchestratorApi } = globalThis.AblesciWatcherOrchestratorModule;
   const { createWatcherEntryApi } = globalThis.AblesciWatcherEntryModule;
+  const WATCHER_STORAGE_KEYS = [
+    AUTO_WATCHER_STATE_KEY,
+    AUTO_WATCHER_LOG_KEY,
+    AUTO_WATCHER_TRACE_KEY,
+    'autoWatcherCandidateAudit',
+    'autoWatcherCandidateAuditIndex'
+  ];
+
   const {
     getWatcherState,
     saveWatcherState,
@@ -90,7 +98,9 @@
     recordRunFinish,
     recordAttemptFinish,
     getDailyCount,
-    dailyCounterSnapshot
+    dailyCounterSnapshot,
+    pruneWatcherState,
+    emergencyStorageTrim
   } = createWatcherStateApi({
     chromeApi: globalThis.chrome,
     stateKey: AUTO_WATCHER_STATE_KEY,
@@ -99,7 +109,8 @@
     normalizeSchedulerMode,
     activeRunRetentionDays: ACTIVE_RUN_RETENTION_DAYS,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    updateActionBadge: state => updateActionBadge(state)
+    updateActionBadge: state => updateActionBadge(state),
+    largeStorageKeys: WATCHER_STORAGE_KEYS
   });
   const { publisherAlias } = createWatcherMarketApi({ normalizeText });
   const {
@@ -243,16 +254,9 @@
     badgeRefreshIntervalMs: BADGE_REFRESH_INTERVAL_MS
   });
   const {
-    enqueueParsedCandidates,
-    queuedCandidatesSnapshot,
-    removeQueuedCandidate,
-    shouldSkipBackedOffPage,
-    stateWithQueueRefillCursor
+    removeQueuedCandidate
   } = createWatcherCandidateQueueApi({
-    getWatcherState,
-    updateWatcherState,
-    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    getListUrlKey
+    updateWatcherState
   });
   const {
     fetchListUrl
@@ -386,7 +390,6 @@
     buildCandidateAuditEntry,
     appendCandidateAuditEntries,
     auditParsedListCandidates,
-    auditEnqueueResult,
     listUrlWithAuditPage
   } = createWatcherCandidateAuditApi({
     chromeApi: globalThis.chrome
@@ -406,8 +409,7 @@
   });
   const {
     queueableCandidatesFromList,
-    consumeQueuedCandidates,
-    sourceDetailAttemptBudget
+    processCandidateBatch
   } = createWatcherCandidateProcessorApi({
     depsRef,
     getWatcherState,
@@ -425,7 +427,6 @@
     getProcessedKey,
     isDetailAllowedForWatcher,
     handleAllowedPayload,
-    queuedCandidatesSnapshot,
     removeQueuedCandidate,
     buildCandidateAuditEntry,
     appendCandidateAuditEntries,
@@ -472,20 +473,17 @@
     writeDailyReports,
     flushWatcherLogs,
     flushWatcherTrace,
-    enqueueParsedCandidates,
     queueableCandidatesFromList,
-    consumeQueuedCandidates,
-    sourceDetailAttemptBudget,
-    shouldSkipBackedOffPage,
-    stateWithQueueRefillCursor,
+    processCandidateBatch,
     auditParsedListCandidates,
-    auditEnqueueResult,
     listUrlWithAuditPage,
     normalizeParsedListCandidateContext,
     buildCurrentListScan,
     describeCurrentListScan,
     clearCurrentListScan,
-    initCurrentPageData
+    initCurrentPageData,
+    pruneWatcherState,
+    emergencyStorageTrim
   });
 
   const { initAutoWatcher } = createWatcherEntryApi({

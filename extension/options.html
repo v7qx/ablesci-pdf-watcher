@@ -368,7 +368,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>列表 URL</strong>
-          <span id="watcherListUrlsDesc">每行一个 Ablesci 求助列表链接。追加 <code>&amp;page_min=1&amp;page_max=5&amp;order=desc</code> 可按页码倒序依次扫描。</span>
+          <span id="watcherListUrlsDesc">每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；如需限制范围可追加 <code>&amp;page_min=1&amp;page_max=5</code>。</span>
         </div>
         <div class="setting-control setting-control-wide">
           <textarea id="watcherListUrls" spellcheck="false"></textarea>
@@ -557,21 +557,20 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>本地记录维护</strong>
-          <span>仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理 ScienceDirect 无权限期刊缓存。</span>
+          <span>仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理期刊权限缓存。</span>
         </div>
         <div class="setting-control">
           <button id="clearAutoWatcherState" class="secondary" type="button">清除已处理</button>
-          <button id="clearAutoWatcherQueue" class="secondary" type="button">清空队列/页游标</button>
           <button id="clearAutoWatcherLogs" class="secondary" type="button">清除日志/Trace</button>
         </div>
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>ScienceDirect 无权限期刊缓存</strong>
-          <span id="journalAccessCacheSummary">记录明确无订阅权限的期刊短名，用于列表页标注和自动值守预过滤。</span>
+          <strong>期刊权限缓存</strong>
+          <span id="journalAccessCacheSummary">记录明确有权限/无权限的出版社期刊短名；默认仅用无权限记录进行列表页标注和自动值守预过滤。</span>
         </div>
         <div class="setting-control">
-          <label class="toggle-option" title="在求助列表页隐藏命中本地无权限缓存的 ScienceDirect 求助">
+          <label class="toggle-option" title="在求助列表页隐藏命中本地无权限缓存的求助">
             <span class="toggle"><input id="hideScienceDirectNoAccessRows" type="checkbox"><span></span></span>
             <span class="toggle-text">隐藏列表命中项</span>
           </label>
