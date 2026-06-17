@@ -109,6 +109,55 @@
     return /:\/\/(?:journals\.)?sagepub\.com\//i.test(String(url || ''));
   }
 
+  function isSageKnowledgeUrl(rawUrl) {
+    try {
+      const u = new URL(String(rawUrl || ''));
+      return u.hostname === 'sk.sagepub.com';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function classifySageKnowledgeUrl(rawUrl) {
+    let u;
+    try {
+      u = new URL(String(rawUrl || ''));
+    } catch (_) {
+      return null;
+    }
+    if (u.hostname !== 'sk.sagepub.com') return null;
+    const p = u.pathname;
+
+    if (/^\/hnbk\/edvol\//.test(p) && /\/chpt\//.test(p)) {
+      return {
+        skip: true,
+        type: 'sage_knowledge_handbook_chapter',
+        reason: 'SAGE Knowledge handbook chapter, not a journal article'
+      };
+    }
+    if (/^\/ency\/edvol\//.test(p) && /\/chpt\//.test(p)) {
+      return {
+        skip: true,
+        type: 'sage_knowledge_encyclopedia_entry',
+        reason: 'SAGE Knowledge encyclopedia entry, not a journal article'
+      };
+    }
+    if (/^\/(reference|book|books)\/.+\/chpt\//.test(p)) {
+      return {
+        skip: true,
+        type: 'sage_knowledge_book_chapter',
+        reason: 'SAGE Knowledge book/reference chapter, not a journal article'
+      };
+    }
+
+    // SAGE Knowledge 域名下的其他内容也先保守跳过
+    return {
+      skip: true,
+      type: 'sage_knowledge_unsupported',
+      reason: 'SAGE Knowledge content is outside current journal article resolver scope'
+    };
+  }
+
   function sageArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
     const match = s.match(/^https?:\/\/journals\.sagepub\.com\/doi\/(?:pdf|epub)\/(10\.[^?#]+)(?:[?#].*)?$/i);
@@ -401,6 +450,8 @@
     isIeeeUrl,
     isOxfordUrl,
     isSageUrl,
+    isSageKnowledgeUrl,
+    classifySageKnowledgeUrl,
     sageArticleUrlFromPdfUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,

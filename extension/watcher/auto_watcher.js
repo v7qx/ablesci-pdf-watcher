@@ -56,6 +56,7 @@
     normalizeText,
     normalizeListUrls,
     getListUrlKey,
+    pageRangeMetaFromUrl,
     randomizeAssistListUrlWithMeta,
     randomizeAssistListUrl,
     listUrlsForRun
@@ -460,6 +461,7 @@
     dailyDownloadedFromState,
     saveWatcherStateSafe: saveWatcherState,
     listUrlsForRun,
+    pageRangeMetaFromUrl,
     randomizeAssistListUrlWithMeta,
     incrementDaily,
     parseListUrl,

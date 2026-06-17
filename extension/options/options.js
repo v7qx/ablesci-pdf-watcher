@@ -131,8 +131,7 @@ const TEXT_MAP = {
   "未复制": "Not Copied",
   "已清除 watcher 已处理记录。": "Watcher processed records cleared.",
   "已清除 watcher 日志、trace 和候选审计。": "Watcher logs, traces, and candidate audit cleared.",
-  "已清空 watcher 候选队列。": "Watcher candidate queue cleared.",
-  "已清空 watcher 候选队列和列表页游标。": "Watcher candidate queue and list-page cursor cleared.",
+
   "清除失败：": "Clear failed: ",
   "未知错误": "Unknown error",
   "暂无诊断信息。": "No diagnostic info available.",
@@ -231,8 +230,6 @@ const TEXT_MAP = {
   "仅清理本机保存的已处理记录、watcher 日志和 trace。": "Clears local processed records, watcher logs, and traces.",
   "仅清理本机保存的已处理记录、watcher 日志和 trace；不会清理期刊权限缓存。": "Clears local processed records, watcher logs, and traces; does not clear the journal access cache.",
   "清除已处理": "Clear Processed Cache",
-  "清空候选队列": "Clear Candidate Queue",
-  "清空队列/页游标": "Clear Queue/Cursor",
   "清除日志/Trace": "Clear Logs & Traces",
   "期刊权限缓存": "Journal Access Cache",
   "记录明确有权限/无权限的出版社期刊短名；默认仅用无权限记录进行列表页标注和自动值守预过滤。": "Records publisher journal short names with confirmed access/no-access. By default, only no-access records are used for list-page marking and auto-watcher prefiltering.",
@@ -620,7 +617,6 @@ const {
   testWatcherNotification,
   clearAutoWatcherState,
   clearAutoWatcherLogs,
-  clearAutoWatcherQueue,
   refreshJournalAccessCacheSummary,
   exportJournalAccessCache,
   importJournalAccessCache,
@@ -694,7 +690,6 @@ el('runAutoWatcherNow')?.addEventListener('click', runAutoWatcherNow);
 el('testWatcherNotification')?.addEventListener('click', testWatcherNotification);
 el('copyAutoWatcherConfig')?.addEventListener('click', copyAutoWatcherConfig);
 el('clearAutoWatcherState')?.addEventListener('click', clearAutoWatcherState);
-el('clearAutoWatcherQueue')?.addEventListener('click', clearAutoWatcherQueue);
 el('clearAutoWatcherLogs')?.addEventListener('click', clearAutoWatcherLogs);
 el('exportJournalAccessCache')?.addEventListener('click', exportJournalAccessCache);
 el('importJournalAccessCache')?.addEventListener('click', importJournalAccessCache);

@@ -16,6 +16,8 @@
       isDoiUrl,
       isNatureUrl,
       isCnpeUrl,
+      isSageUrl,
+      isSageKnowledgeUrl,
       isSpringerUrl,
       isRscDirectPdfUrl,
       isRscUrl,
@@ -33,8 +35,15 @@
       unregisterPublisherTab,
       makeDownloadFilename,
       isHtmlDownloadItem,
-      appendDiagnosticTrace
+      appendDiagnosticTrace,
+      postDebugLog
     } = deps;
+
+    // 本地 debugLog，转发到 publisher tab 的 F12 + 本地 console
+    function debugLog(msg) {
+      if (postDebugLog) postDebugLog(msg);
+      console.log('[Ablesci PDF Watcher]', msg);
+    }
 
     function ensureHttpUrl(rawUrl, label = 'URL') {
       try {
@@ -505,6 +514,16 @@
           }
           chromeApi.downloads.onCreated.addListener(onCreated);
           tracePublisherStep('publisher-tab-open', { active, revealAfterMs, downloadArmed, expectedHost, captureId });
+
+          // SAGE Knowledge 非期刊论文页面跳过（handbook/encyclopedia/book chapter）
+          if (isSageKnowledgeUrl?.(articleUrl)) {
+            tracePublisherStep('sage_knowledge_pre_open_detected', {
+              articleUrl: traceUrl(articleUrl),
+              captureId
+            });
+            throw new Error(`unsupported_reference_work: SAGE Knowledge content is not a journal article — ${articleUrl}`);
+          }
+
           const tab = await chromeApi.tabs.create({ url: articleUrl, active });
           tabId = tab.id;
           if (chromeApi.tabs.onRemoved) {
@@ -515,6 +534,8 @@
             };
             chromeApi.tabs.onRemoved.addListener(tabRemovedListener);
           }
+          const pubResolved = publisherForUrl(articleUrl);
+          debugLog(`publisherTab created: tabId=${tab.id} publisher=${pubResolved} articleUrl=${articleUrl} pdfUrl=${pdfUrl}`);
           pendingPublisherTabs.set(tabId, {
             pdfUrl,
             articleUrl,
@@ -525,7 +546,7 @@
             revealPublisherTab,
 
             payloadSummary,
-            publisher: publisherForUrl(articleUrl),
+            publisher: pubResolved,
             lastNativePdfUrl: '',
             extendNoDownloadTimeout(timeoutMs, message) {
               armNoDownloadTimer(timeoutMs, message);
@@ -589,7 +610,9 @@
         downloadTimeoutMs,
         signal
       };
-      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl) || isCnpeUrl(pdfUrl);
+      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl) || isCnpeUrl(pdfUrl) || isSageUrl(pdfUrl);
+
+      debugLog(`downloadPdf url=${pdfUrl} isSage=${isSageUrl(pdfUrl)} isPdfUrl=${looksLikePdfDownloadUrl(pdfUrl)} mode=${mode} canFallback=${canUsePublisherPageFallback}`);
 
       function isUnsupportedSpringerBookPdfUrl(url) {
         const s = String(url || '');
@@ -657,6 +680,16 @@
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', `IOP 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
+        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
+      }
+
+      if (isSageUrl(pdfUrl) && !looksLikePdfDownloadUrl(pdfUrl)) {
+        debugLog(`SAGE route HIT: opening interactive publisher tab for ${pdfUrl}`);
+        if (mode === 'publisher_tab') {
+          post(port, 'progress', 'SAGE 使用可见文章页原生 PDF 下载模式。');
+          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
+        }
+        post(port, 'progress', `SAGE 使用后台文章页原生 PDF 下载模式；如 ${Math.round(revealAfterMs / 1000)} 秒内未触发下载，会自动切到前台。`);
         return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 

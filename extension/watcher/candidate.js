@@ -261,8 +261,16 @@
       return labels[code] ? `${code} - ${labels[code]}` : code;
     }
 
+    // All candidates passing the allow-list filters are equally eligible.
+    // Random shuffle ensures each run doesn't always hit the same candidate first.
     function orderCandidatesForRun(candidates, state, opts = {}, count = 1) {
-      return Array.isArray(candidates) ? candidates.slice() : [];
+      if (!Array.isArray(candidates)) return [];
+      const shuffled = candidates.slice();
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
     }
 
     function parseAssistListPage() {
@@ -722,6 +730,10 @@
       return true;
     }
 
+    function isLikelySageKnowledgeChapterDoi(doi) {
+      return /^10\.4135\/97[89]\d{10}\.(n|ch)\d+/i.test(String(doi || '').trim());
+    }
+
     function isDetailAllowedForWatcher(payload, opts, blacklistedIds = []) {
       if (!payload?.assistId) return { ok: false, reason: 'missing_assist_id' };
       const flags = payload.riskFlags || {};
@@ -736,6 +748,11 @@
       if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement)) return { ok: false, reason: 'detail_supplement' };
       if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
       if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
+
+      // SAGE Knowledge 书章/百科词条 DOI 预检：10.4135/978...nxxx / 10.4135/978...chxxx
+      if (isLikelySageKnowledgeChapterDoi(payload.doi || payload.pdfUrl || '')) {
+        return { ok: false, reason: 'detail_sage_knowledge_chapter' };
+      }
       if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
       if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
       if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };

@@ -179,7 +179,11 @@
               if (st) {
                 st.processed = {};
                 st.daily = {};
-                st.journalAccessStats = {};
+                if (st.journalAccessStats && typeof st.journalAccessStats === 'object') {
+                  const entries = Object.entries(st.journalAccessStats);
+                  entries.sort((a, b) => Date.parse(b[1]?.expiresAt || '') - Date.parse(a[1]?.expiresAt || ''));
+                  st.journalAccessStats = Object.fromEntries(entries.slice(0, 100));
+                }
               }
               await chromeApi.storage.local.set(obj);
             } else {

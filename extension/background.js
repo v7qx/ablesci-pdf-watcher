@@ -66,6 +66,9 @@ const {
   isScienceDirectAssetPdfUrl,
   natureArticleUrlFromPdfUrl,
   isCnpeUrl,
+  isSageUrl,
+  isSageKnowledgeUrl,
+  classifySageKnowledgeUrl,
   springerArticleUrlFromPdfUrl,
   rscArticleUrlFromPdfUrl,
   wileyArticleUrlFromPdfUrl,
@@ -209,6 +212,38 @@ const {
   publisherForUrl,
   urlHostPath
 });
+const {
+  handlePublisherTabUpdated,
+  handlePublisherRuntimeMessage,
+  postDebugLog
+} = createBackgroundPublisherMessagesApi({
+  chromeApi: chrome,
+  pendingPublisherTabs,
+  post,
+  hostnameOf,
+  isScienceDirectUrl,
+  extractScienceDirectPii,
+  extractAllScienceDirectPiis,
+  isDoiHost,
+  isNatureUrl,
+  isCnpeUrl,
+  isSageUrl,
+  isSageKnowledgeUrl,
+  classifySageKnowledgeUrl,
+  isSpringerUrl,
+  isRscUrl,
+  isAipUrl,
+  isWileyUrl,
+  isAcsUrl,
+  isIeeeUrl,
+  isOxfordUrl,
+  isIopUrl,
+  isScienceDirectAssetPdfUrl,
+  publisherForUrl,
+  isExpectedPublisherPage,
+  recordPublisherCfChallenge,
+  appendDiagnosticTrace
+});
 const { downloadPdf } = createBackgroundDownloadAgentApi({
   chromeApi: chrome,
   pendingPublisherTabs,
@@ -222,6 +257,8 @@ const { downloadPdf } = createBackgroundDownloadAgentApi({
   isDoiUrl,
   isNatureUrl,
   isCnpeUrl,
+  isSageUrl,
+  isSageKnowledgeUrl,
   isSpringerUrl,
   isRscDirectPdfUrl,
   isRscUrl,
@@ -239,35 +276,8 @@ const { downloadPdf } = createBackgroundDownloadAgentApi({
   unregisterPublisherTab,
   makeDownloadFilename,
   isHtmlDownloadItem,
-  appendDiagnosticTrace
-});
-const {
-  handlePublisherTabUpdated,
-  handlePublisherRuntimeMessage
-} = createBackgroundPublisherMessagesApi({
-  chromeApi: chrome,
-  pendingPublisherTabs,
-  post,
-  hostnameOf,
-  isScienceDirectUrl,
-  extractScienceDirectPii,
-  extractAllScienceDirectPiis,
-  isDoiHost,
-  isNatureUrl,
-  isCnpeUrl,
-  isSpringerUrl,
-  isRscUrl,
-  isAipUrl,
-  isWileyUrl,
-  isAcsUrl,
-  isIeeeUrl,
-  isOxfordUrl,
-  isIopUrl,
-  isScienceDirectAssetPdfUrl,
-  publisherForUrl,
-  isExpectedPublisherPage,
-  recordPublisherCfChallenge,
-  appendDiagnosticTrace
+  appendDiagnosticTrace,
+  postDebugLog
 });
 const {
   enqueueUpload,
@@ -334,7 +344,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/candidate_audit.js', 'watcher/list_scan_status.js', 'watcher/candidate_processor.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
+  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report_i18n.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/candidate_audit.js', 'watcher/list_scan_status.js', 'watcher/candidate_processor.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

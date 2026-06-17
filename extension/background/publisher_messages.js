@@ -14,6 +14,9 @@
       isDoiHost,
       isNatureUrl,
       isCnpeUrl,
+      isSageUrl,
+      isSageKnowledgeUrl,
+      classifySageKnowledgeUrl,
       isSpringerUrl,
       isRscUrl,
       isAipUrl,
@@ -28,6 +31,15 @@
       recordPublisherCfChallenge,
       appendDiagnosticTrace
     } = deps;
+
+    // 调试日志：转发到 publisher tab 的 content script，使其出现在页面 F12 中
+    function postDebugLog(text) {
+      if (typeof text !== 'string' || !text) return;
+      const message = { type: 'ablesciBackgroundLog', text };
+      for (const [tabId] of pendingPublisherTabs) {
+        chromeApi.tabs.sendMessage(tabId, message).catch(() => { /* tab may not be ready */ });
+      }
+    }
 
     function shortUrl(url) {
       return String(url || '').replace(/^https?:\/\//i, '');
@@ -113,6 +125,26 @@
       if (!pending) return;
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
+
+      // SAGE Knowledge 非期刊论文页面跳过：handbook / encyclopedia / reference / book chapter
+      if (isSageKnowledgeUrl?.(url)) {
+        const classification = classifySageKnowledgeUrl?.(url) || {
+          type: 'sage_knowledge_unsupported',
+          reason: 'SAGE Knowledge content is outside current journal article resolver scope'
+        };
+        const err = new Error(`unsupported_reference_work: ${classification.type} — ${classification.reason}`);
+        err.failureReason = 'unsupported_reference_work';
+        err.sourceType = classification.type;
+        tracePublisherStep(pending, 'sage_knowledge_detected', {
+          publisher: 'sage',
+          articleUrl: pending.articleUrl || '',
+          currentUrl: shortUrl(url),
+          sourceType: classification.type
+        });
+        pending.finishError?.(err);
+        return;
+      }
+
       if (changeInfo.url) {
         tracePublisherStep(pending, 'publisher-tab-url-changed', {
           publisher: pending.publisher || '',
@@ -148,7 +180,7 @@
       }
 
       const expectedHost = hostnameOf(pending.articleUrl || pending.pdfUrl || '');
-      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isCnpeUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
+      if (isDoiHost(expectedHost) && (isScienceDirectUrl(url) || isNatureUrl(url) || isCnpeUrl(url) || isSageUrl(url) || isSpringerUrl(url) || isRscUrl(url) || isWileyUrl(url) || isAipUrl(url) || isAcsUrl(url) || isIeeeUrl(url) || isOxfordUrl(url) || isIopUrl(url))) {
         pending.articleUrl = url;
         pending.publisher = publisherForUrl?.(url) || pending.publisher || '';
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
@@ -184,10 +216,18 @@
       const pending = tabId != null ? pendingPublisherTabs.get(tabId) : null;
 
       if (msg?.type === 'ablesciPublisherCanControl') {
+        postDebugLog(`ablesciPublisherCanControl: tabId=${tabId} msg.publisher=${msg.publisher} pending=${!!pending} pending.publisher=${pending?.publisher || '(none)'} pageUrl=${shortUrl(msg.pageUrl)}`);
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
-        if (msg.publisher && pending.publisher && msg.publisher !== pending.publisher) return sendResponse({ ok: false, reason: 'publisher mismatch' });
+        if (msg.publisher && pending.publisher && msg.publisher !== pending.publisher) {
+          postDebugLog(`ablesciPublisherCanControl REJECTED: publisher mismatch (msg=${msg.publisher} pending=${pending.publisher})`);
+          return sendResponse({ ok: false, reason: 'publisher mismatch' });
+        }
         const trusted = validateTrustedPublisherSender(pending, sender, msg);
-        if (!trusted.ok) return sendResponse({ ok: false, reason: trusted.reason });
+        if (!trusted.ok) {
+          postDebugLog(`ablesciPublisherCanControl REJECTED: ${trusted.reason} (pageUrl=${shortUrl(trusted.pageUrl)})`);
+          return sendResponse({ ok: false, reason: trusted.reason });
+        }
+        postDebugLog(`ablesciPublisherCanControl OK: tabId=${tabId} publisher=${pending.publisher}`);
         return sendResponse({ ok: true });
       }
 
@@ -516,7 +556,8 @@
 
     return {
       handlePublisherTabUpdated,
-      handlePublisherRuntimeMessage
+      handlePublisherRuntimeMessage,
+      postDebugLog
     };
   }
 

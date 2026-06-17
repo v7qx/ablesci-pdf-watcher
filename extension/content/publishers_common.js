@@ -135,6 +135,13 @@
     });
   }
 
+  // 接收后台转发的调试日志，输出到页面 F12 控制台
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === 'ablesciBackgroundLog') {
+      console.log('[Background]', String(msg.text || ''));
+    }
+  });
+
   window.AblesciPublisherCommon = {
     isScienceDirect,
     isNature,

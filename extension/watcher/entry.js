@@ -140,6 +140,7 @@
               delete state.processed;
               delete state.doiFailures;
               delete state.recentProcessed;
+              delete state.assistCandidateQueue;
               state._version = Number(state._version || 0) + 1;
               state.processedClearedAt = new Date().toISOString();
               return chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
@@ -150,28 +151,6 @@
         if (msg?.type === 'ablesciClearAutoWatcherLogs') {
           Promise.all([clearBufferedWatcherLogs(), clearBufferedWatcherTrace()])
             .then(() => chromeApi.storage.local.remove([autoWatcherLogKey, autoWatcherTraceKey, 'autoWatcherCandidateAudit', 'autoWatcherCandidateAuditIndex']))
-            .then(() => sendResponse({ ok: true }));
-          return true;
-        }
-        if (msg?.type === 'ablesciClearAutoWatcherQueue') {
-          chromeApi.storage.local.get(autoWatcherStateKey)
-            .then(stored => {
-              const state = stored[autoWatcherStateKey] && typeof stored[autoWatcherStateKey] === 'object'
-                ? stored[autoWatcherStateKey]
-                : {};
-              delete state.assistCandidateQueue;
-              delete state.lastVisitedPages;
-              delete state.detectedMaxPages;
-              delete state.lastPickedListUrl;
-              delete state.lastPickedPage;
-              delete state.lastPickedPageMax;
-              delete state.lastPickedPublisher;
-              delete state.lastPickedPageOrder;
-              delete state.lastPickedUrlKey;
-              state.candidateQueueClearedAt = new Date().toISOString();
-              state._version = Number(state._version || 0) + 1;
-              return chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
-            })
             .then(() => sendResponse({ ok: true }));
           return true;
         }
