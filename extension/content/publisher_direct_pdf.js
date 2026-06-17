@@ -145,18 +145,30 @@
     );
     if (hasPaywallDom) return true;
 
-    // 2. 外站无权限页常保留隐藏 Download PDF 链接，不能再依赖“无 PDF 候选”才能判定
+    // 2. 文本匹配：SAGE 无权限页的通用文案
     const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
     const hasPurchaseOptions = /Get full access to this article|Purchase Instant Access|Buy PDF|Subscribe to this journal|Get Access/i.test(text);
     const hasAccessRestricted = /You do not have access to this content|You currently have no access to this content|Restricted access|View all access and purchase options|Visit the access options page to authenticate|View access options/i.test(text);
     if (hasPurchaseOptions || hasAccessRestricted) {
       return true;
     }
+
     return false;
   }
 
   function isPdfHref(href) {
-    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdfdirect\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\//i.test(href || '');
+    const s = String(href || '');
+    // 仅检查 URL 的 pathname，避免查询参数中的路径模式被误匹配。
+    // 例如 Google Scholar CASA 链接: scholar.google.com/scholar_url?url=...doi/pdf/...
+    let test = s;
+    try {
+      if (/^https?:\/\//i.test(s)) {
+        test = new URL(s).pathname;
+      }
+    } catch (_) {
+      // 非完整 URL 时保持原值
+    }
+    return /\.pdf(?:[?#]|$)|\/content\/pdf\/|\/doi\/pdfdirect\/|\/doi\/pdf\/|\/doi\/epdf\/|\/article-pdf\/|\/articlepdf\//i.test(test);
   }
 
   function directPdfSelectors() {
@@ -192,7 +204,15 @@
         return { el, href, marker, visible, score: hrefScore + textScore + publisherScore, supplementary };
       });
     const candidates = allCandidates
-      .filter(item => item.href && item.visible && item.score > 0 && !item.supplementary);
+      .filter(item => {
+        if (!item.href || !item.visible || item.score === 0 || item.supplementary) return false;
+        // 排除 Google Scholar CASA 等中间跳转链接（host 非目标出版社）
+        try {
+          const host = new URL(item.href).hostname;
+          if (host === 'scholar.google.com' || host === 'scholar.google.com.hk') return false;
+        } catch (_) {}
+        return true;
+      });
     candidates.sort((left, right) => right.score - left.score);
     const selected = candidates[0] || null;
     const sample = allCandidates.slice(0, 6).map(item => ({
