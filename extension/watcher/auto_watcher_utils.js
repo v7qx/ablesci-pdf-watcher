@@ -133,11 +133,10 @@
 
       const customMinRaw = u.searchParams.get('page_min');
       const customMaxRaw = u.searchParams.get('page_max');
-      // 空字符串（如 ?page_min&page_max）等同于未设置
-      const customMin = (customMinRaw !== null && customMinRaw !== '') ? customMinRaw : null;
-      const customMax = (customMaxRaw !== null && customMaxRaw !== '') ? customMaxRaw : null;
-      const hasExplicitPageMin = customMin !== null;
-      const hasExplicitPageMax = customMax !== null;
+      // page_min：只要参数存在就视为已设置，空值默认 page 1
+      const hasExplicitPageMin = customMinRaw !== null;
+      // page_max：参数存在且有非空值才算已设置，空值触发自动检测最大页码
+      const hasExplicitPageMax = customMaxRaw !== null && customMaxRaw !== '';
 
       // Neither page_min nor page_max → use URL as-is (no random page).
       if (!hasExplicitPageMin && !hasExplicitPageMax) return null;
@@ -147,11 +146,11 @@
       const needsMaxDetection = !hasExplicitPageMax;
 
       if (hasExplicitPageMin) {
-        const parsedMin = parseInt(customMin, 10);
+        const parsedMin = parseInt(customMinRaw, 10);
         pageMin = clampInt(Number.isInteger(parsedMin) ? parsedMin : 1, 1, 9999);
       }
       if (hasExplicitPageMax) {
-        const parsedMax = parseInt(customMax, 10);
+        const parsedMax = parseInt(customMaxRaw, 10);
         pageMax = clampInt(Number.isInteger(parsedMax) ? parsedMax : pageMin, pageMin, 9999);
       }
 
