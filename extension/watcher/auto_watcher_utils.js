@@ -10,18 +10,6 @@
         return Math.min(max, Math.max(min, n));
       });
 
-  const ASSIST_RANDOM_PAGE_RANGES = {
-    elsevier: {
-      min: 3,
-      max: 250,
-      curve: 'mixed_backlog_power',
-      frontProbability: 0.20,
-      frontMin: 3,
-      frontMax: 50,
-      alpha: 1.2
-    }
-  };
-
   function formatBeijingDateTime(value, dateOnly = false) {
     const date = value ? new Date(value) : new Date();
     if (Number.isNaN(date.getTime())) return String(value || '');
@@ -143,46 +131,35 @@
       }
       const publisher = String(u.searchParams.get('publisher') || '').toLowerCase();
 
-      // Respect explicit page_min / page_max from the URL, falling back to
-      // the built-in publisher curve.
-      const customMin = u.searchParams.get('page_min');
-      const customMax = u.searchParams.get('page_max');
+      const customMinRaw = u.searchParams.get('page_min');
+      const customMaxRaw = u.searchParams.get('page_max');
+      // 空字符串（如 ?page_min&page_max）等同于未设置
+      const customMin = (customMinRaw !== null && customMinRaw !== '') ? customMinRaw : null;
+      const customMax = (customMaxRaw !== null && customMaxRaw !== '') ? customMaxRaw : null;
       const hasExplicitPageMin = customMin !== null;
       const hasExplicitPageMax = customMax !== null;
-      const parsedConfiguredPage = parseInt(u.searchParams.get('page') || '', 10);
-      const hasConfiguredPage = Number.isInteger(parsedConfiguredPage) && parsedConfiguredPage > 0;
-      const configuredPage = hasConfiguredPage ? parsedConfiguredPage : 0;
-      const hasRange = !!ASSIST_RANDOM_PAGE_RANGES[publisher];
-      // Deprecated: order/page_order used to enable sequential reverse/forward scans.
-      // The watcher now only supports a low-frequency single random page per run.
-      const pageOrder = 'random';
 
-      let min = 1;
-      let max = 1;
-      let curve = 'uniform';
+      // Neither page_min nor page_max → use URL as-is (no random page).
+      if (!hasExplicitPageMin && !hasExplicitPageMax) return null;
 
-      if (hasExplicitPageMin || hasExplicitPageMax) {
+      let pageMin = 1;
+      let pageMax = Number.MAX_SAFE_INTEGER; // sentinel: real max from pagination
+      const needsMaxDetection = !hasExplicitPageMax;
+
+      if (hasExplicitPageMin) {
         const parsedMin = parseInt(customMin, 10);
-        min = clampInt(Number.isInteger(parsedMin) ? parsedMin : 1, 1, 9999);
+        pageMin = clampInt(Number.isInteger(parsedMin) ? parsedMin : 1, 1, 9999);
+      }
+      if (hasExplicitPageMax) {
         const parsedMax = parseInt(customMax, 10);
-        max = clampInt(Number.isInteger(parsedMax) ? parsedMax : min, min, 9999);
-      } else {
-        const range = ASSIST_RANDOM_PAGE_RANGES[publisher];
-        if (range) {
-          min = clampInt(range.min ?? 1, 1, 9999);
-          max = clampInt(range.max ?? min, min, 9999);
-          curve = range.curve || 'uniform';
-        } else {
-          min = 1;
-          max = clampInt(hasConfiguredPage ? configuredPage : 1, min, 9999);
-          curve = 'uniform';
-        }
+        pageMax = clampInt(Number.isInteger(parsedMax) ? parsedMax : pageMin, pageMin, 9999);
       }
 
       return {
         publisher: publisher || 'custom',
-        range: { min, max, curve },
-        pageOrder,
+        pageMin,
+        pageMax,
+        needsMaxDetection,
         hasExplicitPageMin,
         hasExplicitPageMax
       };
@@ -191,49 +168,7 @@
     }
   }
 
-  function pickAssistPage(range) {
-    const min = clampInt(range?.min ?? 1, 1, 9999);
-    const max = clampInt(range?.max ?? min, min, 9999);
-    const curve = String(range?.curve || 'uniform').trim().toLowerCase();
-    if (max <= min) {
-      return {
-        pickedPage: min,
-        pageCurve: curve || 'uniform',
-        pageMin: min,
-        pageMax: max,
-        frontHit: false,
-        alpha: ''
-      };
-    }
-    if (curve !== 'mixed_backlog_power') {
-      return {
-        pickedPage: randomIntInclusive(min, max),
-        pageCurve: 'uniform',
-        pageMin: min,
-        pageMax: max,
-        frontHit: false,
-        alpha: ''
-      };
-    }
-    const frontProbability = clampNumber(range?.frontProbability, 0.20, 0, 1);
-    const frontMin = clampInt(range?.frontMin ?? min, min, max);
-    const frontMax = clampInt(range?.frontMax ?? frontMin, frontMin, max);
-    const alpha = clampNumber(range?.alpha, 1.2, 0, 4);
-    const frontHit = Math.random() < frontProbability;
-    const pickedPage = frontHit
-      ? randomIntInclusive(frontMin, frontMax)
-      : clampInt(min + Math.round(Math.pow(Math.random(), 1 / (alpha + 1)) * (max - min)), min, max);
-    return {
-      pickedPage,
-      pageCurve: 'mixed_backlog_power',
-      pageMin: min,
-      pageMax: max,
-      frontHit,
-      alpha
-    };
-  }
-
-  function randomizeAssistListUrlWithMeta(url) {
+  function randomizeAssistListUrlWithMeta(url, knownMaxPage = null) {
     const meta = {
       configuredUrl: url,
       pickedListUrl: url,
@@ -255,17 +190,21 @@
       if (!pageMeta) return meta;
 
       const urlKey = getListUrlKey(url);
-      if (u.searchParams.get('page_min') === 'half') {
-        pageMeta.range.min = Math.max(1, Math.floor(pageMeta.range.max / 2));
-      }
       meta.urlKey = urlKey;
-      meta.pageOrder = pageMeta.pageOrder;
+      meta.pageOrder = 'random';
       meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;
       meta.hasExplicitPageMax = pageMeta.hasExplicitPageMax === true;
 
-      const picked = pickAssistPage(pageMeta.range);
+      // Resolve max page: explicit page_max wins; otherwise use detected max from pagination.
+      const effectiveMax = pageMeta.needsMaxDetection && knownMaxPage !== null
+        ? clampInt(knownMaxPage, pageMeta.pageMin, pageMeta.pageMax)
+        : pageMeta.pageMax;
+      const effectiveMin = pageMeta.pageMin;
+      const pickedPage = effectiveMax > effectiveMin
+        ? randomIntInclusive(effectiveMin, effectiveMax)
+        : effectiveMin;
 
-      u.searchParams.set('page', String(picked.pickedPage));
+      u.searchParams.set('page', String(pickedPage));
       u.searchParams.delete('order');
       u.searchParams.delete('page_order');
       u.searchParams.delete('page_min');
@@ -273,7 +212,10 @@
 
       return {
         ...meta,
-        ...picked,
+        pickedPage,
+        pageCurve: 'uniform',
+        pageMin: effectiveMin,
+        pageMax: effectiveMax,
         publisher: pageMeta.publisher,
         pickedListUrl: u.toString()
       };
@@ -302,7 +244,6 @@
   }
 
   globalThis.AblesciAutoWatcherUtils = {
-    ASSIST_RANDOM_PAGE_RANGES,
     formatBeijingDateTime,
     formatBeijingTimeOnly,
     formatBeijingDateOnly,
@@ -318,7 +259,6 @@
     clampInt,
     getListUrlKey,
     pageRangeMetaFromUrl,
-    pickAssistPage,
     randomizeAssistListUrlWithMeta,
     randomizeAssistListUrl,
     listUrlsForRun
