@@ -580,7 +580,7 @@
       pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
       const filenameRel = makeDownloadFilename('', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
-      const revealAfterMs = 60000;
+      const revealAfterMs = 50000;
       let noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);
       noDownloadTimeoutMs = Math.max(noDownloadTimeoutMs, revealAfterMs + 30000);
       const downloadTimeoutMs = Math.max(1000, Number(opts.watcherDownloadTimeoutMinutes || defaultOptions.watcherDownloadTimeoutMinutes) * 60 * 1000);
