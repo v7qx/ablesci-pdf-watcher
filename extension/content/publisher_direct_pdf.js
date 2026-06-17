@@ -393,6 +393,23 @@
     const result = findPdfLink();
     const found = result.selected;
     if (!found) {
+      // SAGE 文章着陆页通常没有直接 PDF 链接，只有折叠面板中的 "View PDF/EPUB" 按钮；
+      // 该按钮指向 reader 页，reader 页上才有真正的 PDF 下载链接。
+      if (publisher === 'sage') {
+        const readerEl = document.querySelector('a.btn--pdf[href*="/doi/reader/"]');
+        const readerHref = readerEl ? normalize(readerEl.getAttribute('href') || readerEl.href || '') : '';
+        if (readerHref) {
+          pdfTriggered = true;
+          common.sendPublisherMessage(publisher, {
+            articleUrl: location.href,
+            pdfUrl: readerHref,
+            source: `${publisher}_reader_page_link`,
+            diagnostics: result.diagnostics
+          });
+          stopObserver();
+          return;
+        }
+      }
       const now = Date.now();
       if (now - lastNoCandidateDiagnosticAt > 5000) {
         lastNoCandidateDiagnosticAt = now;
