@@ -67,11 +67,9 @@
     return Number(parts.hour) * 60 + Number(parts.minute);
   }
 
-  function isInWorkSchedule(workdays, workWindows, date = new Date()) {
-    if (!(workdays instanceof Set) || !Array.isArray(workWindows)) return false;
-    if (!workdays.has(weekdayNumber(date))) return false;
-    const minute = beijingMinutesNow(date);
-    return workWindows.some(win => minute >= win.start && minute < win.end);
+  function isInWorkSchedule() {
+    // Work-time (weekday / hour-window) gating removed; always in-schedule.
+    return true;
   }
 
   globalThis.AblesciWatcherWorktime = {

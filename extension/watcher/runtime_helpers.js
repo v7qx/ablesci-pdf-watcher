@@ -42,28 +42,15 @@
       };
     }
 
-    function isInWorkSchedule(opts, date = new Date()) {
-      if (opts?.watcherUseCalendarProgress) return true;
-      if (!opts.watcherQuantSchedulerEnabled) return true;
-      return isInWorkScheduleBySet(opts.watcherWorkdays, opts.watcherWorkWindows, date);
+    function isInWorkSchedule() {
+      // Work-time (weekday / hour-window) gating was removed: the watcher runs on
+      // its random interval whenever the browser is up. Always "in schedule".
+      return true;
     }
 
-    function nextWorkDelayMinutes(opts, date = new Date()) {
-      if (opts?.watcherUseCalendarProgress) return null;
-      if (!opts.watcherQuantSchedulerEnabled || isInWorkSchedule(opts, date)) return null;
-      const nowMinute = beijingMinutesNow(date);
-      const todayStart = opts.watcherWorkWindows.map(w => w.start).filter(start => start > nowMinute).sort((a, b) => a - b)[0];
-      if (opts.watcherWorkdays.has(weekdayNumber(date)) && todayStart !== undefined) {
-        return Math.max(1, todayStart - nowMinute + Math.random() * 5);
-      }
-      for (let d = 1; d <= 7; d += 1) {
-        const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
-        if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;
-        const firstStart = opts.watcherWorkWindows.map(w => w.start).sort((a, b) => a - b)[0];
-        const minutesUntilMidnight = 24 * 60 - nowMinute;
-        return minutesUntilMidnight + (d - 1) * 24 * 60 + firstStart + Math.random() * 10;
-      }
-      return 60;
+    function nextWorkDelayMinutes() {
+      // Work-time gating removed — never delay to a work window.
+      return null;
     }
 
     function logNormalMinutes(median, min, max) {

@@ -111,18 +111,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
-          <strong>按钮显示位置</strong>
-          <span>没有快捷应助区域时，回退到 DOI 区域最后。</span>
-        </div>
-        <div class="setting-control">
-          <select id="buttonPosition">
-            <option value="end">现有快捷应助按钮之后</option>
-            <option value="start">现有快捷应助按钮之前</option>
-          </select>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
           <strong>显示语言</strong>
           <span>设置插件配置页和应助按钮的显示语言。</span>
         </div>
@@ -147,18 +135,6 @@
         </div>
       </div>
 
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>求助链接当前窗口打开</strong>
-          <span>开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。</span>
-        </div>
-        <div class="setting-control">
-          <label class="toggle" title="求助链接当前窗口打开">
-            <input id="openAssistLinksInCurrentTab" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-      </div>
       <div class="setting-row" style="display:none">
         <div class="setting-copy">
           <strong>ScienceDirect 打开模式</strong>
@@ -403,85 +379,6 @@
         </div>
         <div class="setting-control setting-control-compact">
           <input id="watcherMinNonSdSeekingCount" class="compact-number" type="number" min="0" max="100000" step="1" value="200">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>候选筛选</strong>
-          <span>控制哪些求助在列表页和详情页被跳过。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <label class="toggle-option" title="只处理有 DOI 的求助">
-            <span class="toggle"><input id="watcherRequireDoi" type="checkbox"><span></span></span>
-            <span class="toggle-text">有 DOI</span>
-          </label>
-          <label class="toggle-option" title="跳过举报">
-            <span class="toggle"><input id="watcherSkipReported" type="checkbox"><span></span></span>
-            <span class="toggle-text">举报</span>
-          </label>
-          <label class="toggle-option" title="跳过驳回">
-            <span class="toggle"><input id="watcherSkipRejected" type="checkbox"><span></span></span>
-            <span class="toggle-text">驳回</span>
-          </label>
-          <label class="toggle-option" title="跳过补充材料">
-            <span class="toggle"><input id="watcherSkipSupplement" type="checkbox"><span></span></span>
-            <span class="toggle-text">补充材料</span>
-          </label>
-          <label class="toggle-option" title="跳过存在备注的求助">
-            <span class="toggle"><input id="watcherSkipRemark" type="checkbox"><span></span></span>
-            <span class="toggle-text">备注</span>
-          </label>
-          <label class="toggle-option" title="跳过书籍章节">
-            <span class="toggle"><input id="watcherSkipBookChapter" type="checkbox"><span></span></span>
-            <span class="toggle-text">书籍章节</span>
-          </label>
-          <label class="toggle-option" title="跳过专利或报告类">
-            <span class="toggle"><input id="watcherSkipPatentReport" type="checkbox"><span></span></span>
-            <span class="toggle-text">专利/报告</span>
-          </label>
-          <label class="toggle-option" title="跳过异常文本">
-            <span class="toggle"><input id="watcherSkipRiskText" type="checkbox"><span></span></span>
-            <span class="toggle-text">异常文本</span>
-          </label>
-          <label class="toggle-option" title="跳过更正类求助">
-            <span class="toggle"><input id="watcherSkipCorrigendum" type="checkbox"><span></span></span>
-            <span class="toggle-text">更正/Corrigendum</span>
-          </label>
-          <label class="toggle-option" title="启用求助人黑名单">
-            <span class="toggle"><input id="watcherEnableBlacklist" type="checkbox"><span></span></span>
-            <span class="toggle-text">求助人黑名单</span>
-          </label>
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>黑名单文件路径</strong>
-          <span>可选。开启黑名单后，留空会读取并自动生成 Helper 本地目录下的 blacklist.txt；填写路径时若 .txt 不存在也会自动创建。读取失败时本次会跳过黑名单检查，不阻断应助。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <input id="watcherBlacklistPath" type="text" placeholder="例如：D:\path\to\blacklist.txt">
-        </div>
-      </div>
-      <div class="setting-row">
-        <div class="setting-copy">
-          <strong>任务超时</strong>
-          <span>区分未触发下载、下载中超时和任务最长时间；超时会取消当前任务并释放队列。</span>
-        </div>
-        <div class="setting-control setting-control-wide">
-          <div class="metric-grid">
-            <div class="metric-field">
-              <label for="watcherNoDownloadTimeoutMinutes">未触发下载</label>
-              <input id="watcherNoDownloadTimeoutMinutes" class="compact-number" type="number" min="0.25" max="60" step="0.25" value="1.5" aria-label="未触发下载超时分钟">
-            </div>
-            <div class="metric-field">
-              <label for="watcherDownloadTimeoutMinutes">下载中</label>
-              <input id="watcherDownloadTimeoutMinutes" class="compact-number" type="number" min="1" max="120" step="1" value="4" aria-label="下载中超时分钟">
-            </div>
-            <div class="metric-field">
-              <label for="watcherTaskTimeoutMinutes">单任务最长</label>
-              <input id="watcherTaskTimeoutMinutes" class="compact-number" type="number" min="1" max="180" step="1" value="7" aria-label="单任务最长超时分钟">
-            </div>
-          </div>
         </div>
       </div>
       </details>
