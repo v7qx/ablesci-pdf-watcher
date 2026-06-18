@@ -273,6 +273,15 @@
       return shuffled;
     }
 
+    // Injected into the Ablesci list page via chrome.scripting.executeScript, so it
+    // must stay fully self-contained (no outer-scope references) and produce the
+    // SAME candidate field shape as the background parser in
+    // watcher/list_fetcher.js -> parseAssistListHtml. The two cannot share runtime
+    // code across the injection boundary; keep their candidate fields in sync:
+    // assistId, detailUrl, listUrl, title, rowText, doi, hasDoi, publisherName,
+    // journalShortName, reported, rejected, supplement, documentType,
+    // documentTypeText, statusText, assistTimeText, assistAgeSeconds, requesterId,
+    // sticky, index.
     function parseAssistListPage() {
       function normalizeTextLocal(value) {
         return String(value || '').replace(/\s+/g, ' ').trim();

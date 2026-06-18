@@ -196,6 +196,11 @@
       };
     }
 
+    // Background string/regex parse of the list HTML. Must produce the SAME
+    // candidate field shape as the injected DOM parser in
+    // watcher/candidate.js -> parseAssistListPage (which cannot reuse this code
+    // because it runs inside the page via executeScript). Keep their candidate
+    // fields in sync whenever either side changes.
     function parseAssistListHtml(html, url) {
       const bodyText = stripTags(html);
       const title = stripTags(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
