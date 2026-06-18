@@ -62,6 +62,32 @@
     return true;
   }
 
+  function hasAcsBookPage() {
+    if (common.currentPublisher() !== 'acs') return false;
+    // ACS 整本书 / In Focus 电子书总览页：/doi/book/... 只提供预览样章，无法整本自动应助。
+    if (/\/doi\/book\//i.test(location.pathname || '')) return true;
+    const ogType = document.querySelector('meta[property="og:type"]')?.getAttribute('content') || '';
+    if (/^\s*book\s*$/i.test(ogType)) return true;
+    // In Focus 预览样章控件只在整本书总览页出现。
+    if (document.querySelector('.preview-container #previewIF, .preview-container .preview__access a')) return true;
+    return false;
+  }
+
+  function isAcsPreviewLink(el, href) {
+    if (common.currentPublisher() !== 'acs') return false;
+    const h = String(href || '');
+    // 预览样章 PDF：/pb-assets/in-focus/preview/preview-YYYY-....pdf，并非完整正文，绝不下载。
+    if (/\/pb-assets\/in-focus\/preview\//i.test(h)) return true;
+    if (/\/preview-\d/i.test(h)) return true;
+    const id = String(el?.id || '');
+    const cls = String(el?.className || '');
+    if (id === 'previewIF' || /\bpreview_button\b/i.test(cls)) return true;
+    try {
+      if (el?.closest?.('.preview-container, .preview__access')) return true;
+    } catch (_) {}
+    return false;
+  }
+
   function extractWileyPdfDirectUrl(value) {
     const match = String(value || '').match(/(\/doi\/pdfdirect\/10\.\d{4,9}\/[^"'\s]+)/i);
     return match ? normalize(match[1]) : null;
@@ -206,6 +232,8 @@
     const candidates = allCandidates
       .filter(item => {
         if (!item.href || !item.visible || item.score === 0 || item.supplementary) return false;
+        // 排除 ACS 整本书的预览样章 PDF（#previewIF / preview_button / /pb-assets/in-focus/preview/）
+        if (isAcsPreviewLink(item.el, item.href)) return false;
         // 排除 Google Scholar CASA 等中间跳转链接（host 非目标出版社）
         try {
           const host = new URL(item.href).hostname;
@@ -254,6 +282,17 @@
       return;
     }
     if (rejectUnsupportedSpringerPage()) return;
+    if (publisher === 'acs' && hasAcsBookPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('acs', {
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'ACS 整本书（In Focus / 电子书）页面暂不支持自动应助，仅提供预览样章。',
+        source: 'acs_book_page'
+      });
+      stopObserver();
+      return;
+    }
     if (publisher === 'wiley' && hasWileyAccessDeniedPage()) {
       pdfTriggered = true;
       common.sendPublisherMessage('wiley', {

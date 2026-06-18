@@ -22,6 +22,7 @@
       isAipUrl,
       isWileyUrl,
       isAcsUrl,
+      isAcsBookUrl,
       isIeeeUrl,
       isOxfordUrl,
       isIopUrl,
@@ -140,6 +141,19 @@
           articleUrl: pending.articleUrl || '',
           currentUrl: shortUrl(url),
           sourceType: classification.type
+        });
+        pending.finishError?.(err);
+        return;
+      }
+
+      // ACS 整本书 / In Focus 电子书总览页（/doi/book/...）只提供预览样章，无法整本自动应助，安全跳过。
+      if (isAcsBookUrl?.(url)) {
+        const err = new Error(`ACS 整本书页面暂不支持自动应助（仅提供预览样章）：${url}`);
+        err.failureReason = 'publisher_unsupported';
+        tracePublisherStep(pending, 'acs_book_detected', {
+          publisher: 'acs',
+          articleUrl: pending.articleUrl || '',
+          currentUrl: shortUrl(url)
         });
         pending.finishError?.(err);
         return;

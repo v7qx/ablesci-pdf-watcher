@@ -97,6 +97,11 @@
     return /:\/\/pubs\.acs\.org\//i.test(String(url || ''));
   }
 
+  function isAcsBookUrl(url) {
+    // ACS 整本书 / In Focus 电子书的总览页：/doi/book/10.1021/...，只提供预览样章，无法整本自动应助。
+    return /:\/\/pubs\.acs\.org\/doi\/book\//i.test(String(url || ''));
+  }
+
   function isIeeeUrl(url) {
     return /:\/\/ieeexplore\.ieee\.org\//i.test(String(url || ''));
   }
@@ -447,6 +452,7 @@
     isIopUrl,
     iopArticleUrlFromPdfUrl,
     isAcsUrl,
+    isAcsBookUrl,
     isIeeeUrl,
     isOxfordUrl,
     isSageUrl,
