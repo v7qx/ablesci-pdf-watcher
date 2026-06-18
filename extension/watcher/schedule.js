@@ -40,10 +40,6 @@
       return null;
     }
 
-    function assistGuardMinutes(opts) {
-      return clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
-    }
-
     function clampAssistDelayMinutes(opts, minutes) {
       const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
       const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
@@ -51,36 +47,19 @@
     }
 
     function sampleAssistDelayMinutes(opts, speedMode, state = {}) {
-      if (opts?.watcherSpeedMode === 'adaptive') {
-        const baseMedian = 3.0;
-        const lag = Number(state.targetError ?? state.lag ?? 0);
-        const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
-        const thresholds = lagThresholds ? lagThresholds(monthlyTarget) : { severe: 20 };
-        const fLag = 1.0 - Math.max(-0.5, Math.min(0.5, lag / Math.max(1, thresholds.severe)));
-        const cfStreak = Number(state.cfChallengeStreak || 0);
-        const fRisk = 1.0 + cfStreak * 1.5;
-        const dynamicMedian = baseMedian * fLag * fRisk;
-        const median = Math.min(15.0, Math.max(2.0, dynamicMedian));
-        const min = Math.max(1.0, median * 0.5);
-        const max = Math.min(30.0, median * 2.5);
-        return logNormalMinutes(median, min, max);
-      }
-
-      const modeName = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
-      const mode = sessionModes[modeName] || sessionModes.normal;
-      const min = clampNumber(opts.watcherMinIntervalMinutes, 4, 1, 1440);
+      // Transparent random interval: the speed mode sets a median (fast 2 /
+      // normal 4 / slow 6 minutes) and the delay is uniform in
+      // [median*0.5, median*1.5], clamped to the configured min/max. No adaptive
+      // lognormal / monthly-target / risk model drives the interval anymore.
+      const medians = { fast: 2, normal: 4, slow: 6 };
+      const mode = ['slow', 'normal', 'fast'].includes(speedMode) ? speedMode : 'normal';
+      const median = medians[mode] || medians.normal;
+      const min = clampNumber(opts.watcherMinIntervalMinutes, 1, 1, 1440);
       const max = clampNumber(opts.watcherMaxIntervalMinutes, 30, min, 1440);
-      if (max <= min) return min;
-      const modeMin = Math.max(min, Number(mode.min || min));
-      const modeMax = Math.min(max, Number(mode.max || max));
-      if (modeMax > modeMin && Number(mode.median || 0) >= modeMin && Number(mode.median || 0) <= modeMax) {
-        return logNormalMinutes(Number(mode.median), modeMin, modeMax);
-      }
-
-      const span = max - min;
-      const medianRatio = modeName === 'fast' ? 0.45 : 0.6;
-      const median = min + span * medianRatio;
-      return logNormalMinutes(median, min, max);
+      const low = Math.max(min, median * 0.5);
+      const high = Math.min(max, median * 1.5);
+      if (high <= low) return Math.min(max, Math.max(min, median));
+      return low + Math.random() * (high - low);
     }
 
     function effectiveAssistSpeedMode(opts, state = {}) {
@@ -89,72 +68,36 @@
       return ['slow', 'normal', 'fast'].includes(state?.speedMode) ? state.speedMode : 'normal';
     }
 
-    function applySoftAssistGuard(modelDelay, guardMinutes) {
-      const model = Math.max(0, Number(modelDelay) || 0);
-      const guard = Math.max(0, Number(guardMinutes) || 0);
-      if (guard <= 0 || model >= guard) {
-        return {
-          minutes: model,
-          guardApplied: false,
-          guardLiftMinutes: 0,
-          guardWeight: 0,
-          hardFloorMinutes: 0,
-          guardMode: 'none'
-        };
-      }
-
-      const ratio = Math.max(0, Math.min(1, model / guard));
-      const guardWeight = Math.max(0.25, Math.min(0.8, 0.25 + 0.55 * (1 - ratio)));
-      const blended = model + (guard - model) * guardWeight;
-      const hardFloor = Math.max(1, guard * 0.5);
-      const minutes = Math.max(hardFloor, blended);
-      return {
-        minutes,
-        guardApplied: true,
-        guardLiftMinutes: minutes - model,
-        guardWeight,
-        hardFloorMinutes: hardFloor,
-        guardMode: 'soft_blend'
-      };
-    }
-
     function targetDrivenAssistPlan(opts, state = {}, reason = 'target_model') {
       const hold = quotaHoldPlan(opts, state);
       if (hold) return hold;
-      const guardMinutes = assistGuardMinutes(opts);
       const speedMode = effectiveAssistSpeedMode(opts, state);
-      const rawModelDelay = sampleAssistDelayMinutes(opts, speedMode, state);
-      const targetError = Number(state.targetError ?? state.lag ?? 0);
-      const monthlyTarget = Math.max(1, Number(opts.watcherMonthlyTarget || 0));
-      const thresholds = lagThresholds(monthlyTarget);
-      const severeLag = targetError >= thresholds.severe;
-      const mediumLag = targetError >= thresholds.medium;
-      const modelDelay = rawModelDelay;
-      const guarded = applySoftAssistGuard(modelDelay, guardMinutes);
-      guarded.minutes = clampAssistDelayMinutes(opts, guarded.minutes);
+      const modelDelay = sampleAssistDelayMinutes(opts, speedMode, state);
+      let minutes = clampAssistDelayMinutes(opts, modelDelay);
 
+      // CF backoff: after consecutive verification pages, exponentially lengthen
+      // the interval (capped at 3 hours) to avoid hammering the site.
       const cfStreak = Number(state.cfChallengeStreak || 0);
       let cfBackoffApplied = false;
       if (cfStreak > 0) {
-        const multiplier = Math.pow(2, cfStreak - 1);
-        const backoffMinutes = guarded.minutes * multiplier;
-        const maxBackoff = 180; // 最大退避 3 小时
-        guarded.minutes = Math.min(maxBackoff, backoffMinutes);
+        minutes = Math.min(180, minutes * Math.pow(2, cfStreak - 1));
         cfBackoffApplied = true;
       }
 
       return {
-        minutes: guarded.minutes,
+        minutes,
         modelDelayMinutes: modelDelay,
-        rawModelDelayMinutes: rawModelDelay,
-        guardMinutes,
-        ...guarded,
+        rawModelDelayMinutes: modelDelay,
+        guardMinutes: 0,
+        guardApplied: false,
+        guardLiftMinutes: 0,
+        guardWeight: 0,
+        guardMode: 'none',
+        hardFloorMinutes: 0,
         reason: cfBackoffApplied ? `${reason}_cf_backoff_${cfStreak}` : reason,
-        strategy: 'calendar_target_lognormal',
+        strategy: 'random_interval',
         speedMode,
-        targetError,
-        severeLag,
-        mediumLag
+        targetError: Number(state.targetError ?? state.lag ?? 0)
       };
     }
 
