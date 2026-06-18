@@ -83,7 +83,7 @@
     pdfCleanerOnError: 'upload_original',
     pdfCleanerPreserveOriginal: false,
     watcherSkipCorrigendum: true,
-    watcherEnableBlacklist: false,
+    watcherEnableBlacklist: true,
     watcherBlacklistPath: ''
   };
 
@@ -227,7 +227,7 @@
       pdfCleanerOnError: ['upload_original', 'stop_upload'].includes(opts.pdfCleanerOnError) ? opts.pdfCleanerOnError : 'upload_original',
       pdfCleanerPreserveOriginal: false,
       watcherSkipCorrigendum: true,
-      watcherEnableBlacklist: false,
+      watcherEnableBlacklist: true,
       watcherBlacklistPath: String(opts.watcherBlacklistPath !== undefined ? opts.watcherBlacklistPath : DEFAULT_OPTIONS.watcherBlacklistPath).trim()
     };
   }

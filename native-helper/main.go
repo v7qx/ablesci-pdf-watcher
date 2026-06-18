@@ -541,10 +541,9 @@ func handleReadTextFile(req Request) error {
 		if err := os.MkdirAll(filepath.Dir(resolved), 0755); err != nil {
 			return err
 		}
-		template := `# 示例求助人 ID 黑名单文件
-# 每行一个用户 ID，也可在 ID 后使用 # 或 // 添加拉黑备注说明
-# 
-AAAAAAA # 示例用户，拉黑原因备注，例如：2026-06-04 临时测试使用
+		template := `# 求助人 ID 黑名单：每行一个用户 ID，可在 ID 后用 # 或 // 添加备注。
+# 示例（去掉行首 # 即生效）：
+# AAAAAAA  不再应助此人
 `
 		if err := os.WriteFile(resolved, []byte(template), 0644); err != nil {
 			return err
