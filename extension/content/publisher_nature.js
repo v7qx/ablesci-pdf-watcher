@@ -75,6 +75,18 @@
     return hasAccessProvider || hasPaywallContainer || hasAccessOptionsHeader || hasPaywallText;
   }
 
+  function isNatureNonArticlePage() {
+    // Nature "d4XXXX" IDs (e.g. d41586 = Nature news, d41573 = Nature Reviews
+    // news/business) are magazine/news/editorial content with no research PDF,
+    // unlike research articles whose IDs start with "s" (s41586-...). These pages
+    // load with full access but have no PDF button, so they must be skipped as
+    // unsupported rather than hang and be mistaken for a no-access page.
+    if (/\/articles\/d\d{4,}-/i.test(location.pathname)) return true;
+    const doiMeta = document.querySelector('meta[name="DOI"], meta[name="citation_doi"], meta[name="dc.identifier"]');
+    const doi = ((doiMeta && doiMeta.getAttribute('content')) || '').replace(/^doi:/i, '').trim();
+    return /^10\.1038\/d\d{4,}-/i.test(doi);
+  }
+
   async function notifyReady() {
     if (!common.isNature() || pdfTriggered) return;
     if (!(await common.canControlCurrentPublisherPage())) {
@@ -91,6 +103,17 @@
           source: 'nature_challenge_page'
         });
       }
+      return;
+    }
+    if (isNatureNonArticlePage()) {
+      pdfTriggered = true;
+      sendNatureMessage({
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'Nature 新闻/评论类页面（非研究论文），无正文 PDF，已跳过。',
+        source: 'nature_non_article_page'
+      });
+      stopObserver();
       return;
     }
     if (hasNatureNoSubscriptionAccess()) {

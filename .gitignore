@@ -26,6 +26,7 @@ Thumbs.db
 .env
 .env.*
 AGENTS.md
+.claude/
 .codebuddy/
 
 # local watcher config
