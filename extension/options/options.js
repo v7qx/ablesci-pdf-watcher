@@ -114,7 +114,7 @@ const TEXT_MAP = {
   "求助链接当前窗口打开": "Open Links in Current Tab",
   "开启后，求助列表和上传成功后的推荐链接会在当前窗口打开；Ctrl、Command 和中键点击仍保留浏览器默认行为。": "Open helper list and recommended links in the current tab; Ctrl/Cmd/middle click still use browser default behavior.",
   "ScienceDirect 打开模式": "ScienceDirect Tab Mode",
-  "可见模式最接近手动点击；半可见为后台静默 60 秒后切前台；静默模式不会主动切前台。": "Visible is closest to manual use; semi-visible waits in the background for 60 seconds before foregrounding; silent never foregrounds automatically.",
+  "可见模式最接近手动点击；半可见为后台静默 50 秒后切前台；静默模式不会主动切前台。": "Visible is closest to manual use; semi-visible waits in the background for 50 seconds before foregrounding; silent never foregrounds automatically.",
   "立即可见": "Visible",
   "后台后可见": "Semi-visible",
   "一直后台": "Silent",

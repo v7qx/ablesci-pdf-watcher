@@ -28,7 +28,15 @@
     const { translateStep, translateReason, translateCandidateAuditPhase } = globalThis.AblesciWatcherReportI18n;
 
     function csvEscape(value) {
-      return '"' + String(value ?? '').replace(/"/g, '""') + '"';
+      let str = String(value ?? '');
+      // Neutralize spreadsheet formula injection: a leading =, +, -, @, Tab or CR
+      // makes Excel/WPS/Sheets evaluate the cell as a formula (e.g. =HYPERLINK / DDE).
+      // Quote-wrapping does NOT prevent this (the app strips quotes first), so prefix
+      // a single quote to force the value to be shown literally.
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
+      return '"' + str.replace(/"/g, '""') + '"';
     }
 
     function makeCsv(rows) {

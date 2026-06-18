@@ -27,6 +27,12 @@ import (
 
 const createNoWindow = 0x08000000
 
+// maxDebugLogBytes bounds the size of the optional debug/diagnostic logs
+// (ablesci_notify.log, ablesci_cleaner_debug.log). When a log grows past this,
+// rotateLogIfTooLarge rolls it to a single ".old" generation and starts fresh,
+// so disk use is bounded at ~2x this value.
+const maxDebugLogBytes = 256 * 1024
+
 type Request struct {
 	Action     string            `json:"action"`
 	Path       string            `json:"path"`
@@ -269,8 +275,10 @@ func handleDeleteFile(req Request) error {
 func handleCopyPDF(req Request) error {
 	// 调试日志：确认是否被拉起复制文件
 	if isCleanerDebugEnabled(req) {
+		debugLogPath := filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log")
+		rotateLogIfTooLarge(debugLogPath, maxDebugLogBytes)
 		copyLog := fmt.Sprintf("CopyPDF Called: Path=%s Suffix=%s MoveToDir=%s Filename=%s\n", req.Path, req.Extra["suffix"], req.MoveToDir, req.Filename)
-		f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if f != nil {
 			_, _ = f.WriteString(copyLog)
 			f.Close()
@@ -380,9 +388,12 @@ func handleNotifyUser(req Request) error {
 	title := limitText(firstNonEmpty(req.Title, brand), 80)
 	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
 	if runtime.GOOS == "windows" {
-		// Escape single quotes for PowerShell single-quoted strings (double them)
-		escapedTitle := strings.ReplaceAll(title, "'", "''")
-		escapedMsg := strings.ReplaceAll(message, "'", "''")
+		debug := isCleanerDebugEnabled(req)
+		// Title/message may contain semi-trusted, web-derived text (publisher /
+		// journal / assist-help title). They are passed to PowerShell via
+		// environment variables (cmd.Env below) and read with $env:..., never
+		// concatenated into the script body — so there is no string assembly to
+		// escape and no script-injection surface.
 
 		// Set AppUserModelID so Windows Notification Center shows the brand name
 		// instead of "Windows PowerShell". Must be called before any WinForms objects are created.
@@ -398,10 +409,6 @@ func handleNotifyUser(req Request) error {
 			`Add-Type -TypeDefinition $setAppIDSrc;` +
 			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPDFWatcher")`
 
-		// Build script with diagnostic log header
-		logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
-		logEnd := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
-
 		// Windows Toast Notification. Windows still reserves the source icon area;
 		// without a custom shortcut icon it uses the default app icon.
 		// Sound is handled by the Toast XML <audio> element; do NOT call SystemSounds.Play() to avoid double beep.
@@ -416,8 +423,19 @@ func handleNotifyUser(req Request) error {
 			`$toast = New-Object Windows.UI.Notifications.ToastNotification($xml); ` +
 			`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appID).Show($toast)`
 
-		scriptBody := logStart + "; " + setAppID + "; " + toastNotify + "; " + logEnd
-		fullScript := "$title = '" + escapedTitle + "'; $msg = '" + escapedMsg + "'; $brand = '" + brand + "';\n" + scriptBody
+		// Read the notification text from the environment (set on cmd.Env below)
+		// instead of interpolating user-derived text into the script.
+		readEnv := `$title = $env:ABLESCI_NOTIFY_TITLE; $msg = $env:ABLESCI_NOTIFY_MSG;`
+		scriptBody := readEnv + " " + setAppID + "; " + toastNotify
+		if debug {
+			// Diagnostic log only when debug is enabled; the file is size-capped
+			// (rotateLogIfTooLarge) so it cannot grow without bound.
+			rotateLogIfTooLarge(filepath.Join(os.TempDir(), "ablesci_notify.log"), maxDebugLogBytes)
+			logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {};`
+			logEnd := `; try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
+			scriptBody = logStart + " " + scriptBody + logEnd
+		}
+		fullScript := scriptBody
 
 		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
 		if err != nil {
@@ -448,6 +466,10 @@ func handleNotifyUser(req Request) error {
 			HideWindow:    true,
 			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
 		}
+		cmd.Env = append(os.Environ(),
+			"ABLESCI_NOTIFY_TITLE="+title,
+			"ABLESCI_NOTIFY_MSG="+message,
+		)
 		cmd.Stdin = strings.NewReader("")
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
@@ -508,8 +530,14 @@ func handleReadTextFile(req Request) error {
 		return errors.New("text file path is outside allowed helper/configured path")
 	}
 
-	// 自动创建黑名单文件（如果不存在）。空路径使用 Helper 本地目录，显式路径使用用户配置的位置。
-	if _, err := os.Stat(resolved); os.IsNotExist(err) {
+	// Auto-create only the Helper's own default blacklist file (empty request
+	// path → helperDir/blacklist.txt). For an explicit, caller-supplied path we do
+	// NOT create the file — auto-creating at an arbitrary path is effectively a
+	// fixed-content write to any location, so it must already exist.
+	if _, statErr := os.Stat(resolved); os.IsNotExist(statErr) {
+		if p != "" {
+			return fmt.Errorf("text file does not exist: %s", filepath.Base(resolved))
+		}
 		if err := os.MkdirAll(filepath.Dir(resolved), 0755); err != nil {
 			return err
 		}
@@ -558,6 +586,87 @@ func isAllowedTextReadPath(path string, helperDir string, allowedPath string) bo
 	return sameFilePath(filepath.Clean(path), filepath.Clean(abs))
 }
 
+// allowedTextDirs returns directories the Helper itself trusts for report/text
+// files, independent of any request-supplied path: the Helper install dir plus
+// the PDF dirs (Downloads tree, OS temp, and the install-marker download dir).
+func allowedTextDirs() []string {
+	dirs := []string{}
+	if helperDir, err := nativeHelperDir(); err == nil && helperDir != "" {
+		dirs = append(dirs, helperDir)
+	}
+	dirs = append(dirs, allowedPDFDirs()...)
+	seen := map[string]bool{}
+	out := []string{}
+	for _, dir := range dirs {
+		cleaned := cleanOptionalDir(dir)
+		if cleaned == "" || seen[strings.ToLower(cleaned)] {
+			continue
+		}
+		seen[strings.ToLower(cleaned)] = true
+		out = append(out, cleaned)
+	}
+	return out
+}
+
+func isInsideAllowedTextDir(path string) bool {
+	for _, dir := range allowedTextDirs() {
+		if isPathInsideDir(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// sensitiveSystemDirs lists locations where dropping a text file is a
+// persistence/landing risk (autostart) or a protected system area. Used to deny
+// custom report dirs pointing at these even though they are absolute paths.
+func sensitiveSystemDirs() []string {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	dirs := []string{}
+	add := func(p string) {
+		if strings.TrimSpace(p) != "" {
+			dirs = append(dirs, filepath.Clean(p))
+		}
+	}
+	if v := os.Getenv("SystemRoot"); v != "" {
+		add(v)
+	} else {
+		add(os.Getenv("windir"))
+	}
+	add(os.Getenv("ProgramFiles"))
+	add(os.Getenv("ProgramFiles(x86)"))
+	add(os.Getenv("ProgramData"))
+	if v := os.Getenv("AppData"); v != "" {
+		add(filepath.Join(v, `Microsoft\Windows\Start Menu\Programs\Startup`))
+	}
+	return dirs
+}
+
+func isSensitiveSystemDir(path string) bool {
+	for _, dir := range sensitiveSystemDirs() {
+		if isPathInsideDir(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureAllowedTextWriteDir applies defense-in-depth to report/text writes:
+// Helper-known dirs are always allowed; any other absolute dir is also allowed
+// (users may configure a custom report dir) EXCEPT sensitive system locations
+// such as the autostart folder or Windows/Program Files, which are refused.
+func ensureAllowedTextWriteDir(dir string) error {
+	if isInsideAllowedTextDir(dir) {
+		return nil
+	}
+	if isSensitiveSystemDir(dir) {
+		return errors.New("refuse to write text file into a sensitive system directory")
+	}
+	return nil
+}
+
 func handleWriteTextFile(req Request) error {
 	filename := sanitizeReportFilename(req.Filename)
 	if filename == "" {
@@ -565,6 +674,9 @@ func handleWriteTextFile(req Request) error {
 	}
 	dir, err := reportDir(req.Dir)
 	if err != nil {
+		return err
+	}
+	if err := ensureAllowedTextWriteDir(dir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -587,6 +699,9 @@ func handleAppendTextFile(req Request) error {
 	}
 	dir, err := reportDir(req.Dir)
 	if err != nil {
+		return err
+	}
+	if err := ensureAllowedTextWriteDir(dir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -780,6 +895,12 @@ func allowedPDFDirs() []string {
 	if temp := os.TempDir(); temp != "" {
 		dirs = append(dirs, temp)
 	}
+	// The browser may be configured with a custom download directory at install
+	// time; the installer records it in the marker so uploads from that dir are
+	// not rejected. Falls back to Downloads/temp only when no marker dir is set.
+	if marker := markerDownloadDir(); marker != "" {
+		dirs = append(dirs, marker)
+	}
 	seen := map[string]bool{}
 	out := []string{}
 	for _, dir := range dirs {
@@ -791,6 +912,30 @@ func allowedPDFDirs() []string {
 		out = append(out, cleaned)
 	}
 	return out
+}
+
+// installMarkerFileName must match $MarkerFileName in native-host/install_host.ps1.
+const installMarkerFileName = ".ablesci_pdf_watcher.install.json"
+
+// markerDownloadDir reads the download directory recorded by the installer in the
+// Helper's install marker (next to the exe). Returns "" if the marker is missing,
+// unreadable, or has no usable download_dir.
+func markerDownloadDir() string {
+	helperDir, err := nativeHelperDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(helperDir, installMarkerFileName))
+	if err != nil {
+		return ""
+	}
+	var marker struct {
+		DownloadDir string `json:"download_dir"`
+	}
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return ""
+	}
+	return cleanOptionalDir(marker.DownloadDir)
 }
 
 func cleanOptionalDir(dir string) string {
@@ -1234,7 +1379,9 @@ func handleCleanPDF(req Request) error {
 			filesAfter,
 			summaryLog,
 		)
-		f, _ := os.OpenFile(filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		debugLogPath := filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log")
+		rotateLogIfTooLarge(debugLogPath, maxDebugLogBytes)
+		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if f != nil {
 			_, _ = f.WriteString(debugLog)
 			f.Close()
@@ -1475,4 +1622,19 @@ func isCleanerDebugEnabled(req Request) bool {
 		return true
 	}
 	return false
+}
+
+// rotateLogIfTooLarge keeps an append-mode debug log from growing without bound.
+// When the file exceeds maxBytes it is moved to "<path>.old" (single generation)
+// so the next write starts a fresh file. Best-effort: all errors are ignored.
+func rotateLogIfTooLarge(path string, maxBytes int64) {
+	if maxBytes <= 0 {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= maxBytes {
+		return
+	}
+	_ = os.Remove(path + ".old")
+	_ = os.Rename(path, path+".old")
 }

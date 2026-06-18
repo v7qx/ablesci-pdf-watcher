@@ -67,7 +67,7 @@
         return;
       }
       try {
-        const res = await fetch('https://www.ablesci.com/my/home');
+        const res = await fetch('https://www.ablesci.com/my/home', { credentials: 'include' });
         if (!res.ok) {
           await appendWatcherTrace('sync_web_assist_count_failed', {
             reason: 'http_not_ok',
@@ -543,6 +543,10 @@
       const run = createRunContext(trigger);
       const { attempt } = run;
       const finish = result => finishRun(run, result);
+      // Declared at function scope so the catch block can still read the last
+      // scanned page if runAutoWatcherOnce throws; otherwise a ReferenceError
+      // here would mask the original failure and skip the failed-run log entry.
+      let lastScan = { url: '', publisher: '', page: '' };
       try {
         await appendWatcherTrace('run_start', { reason: 'watcher_triggered', phase: 'run_start', trigger, runId: run.runId });
         await appendPerfCheckpoint(run, 'run_start');
@@ -621,7 +625,6 @@
 
         const singleHandledCountRef = { value: 0 };
         const singleLastHandledReasonRef = { value: '' };
-        let lastScan = { url: '', publisher: '', page: '' };
 
         // Shuffle URLs so retry doesn't always hit the same order
         const shuffledUrls = [...singleRunListUrls];
@@ -802,7 +805,6 @@
                 setHandledCount: value => { singleHandledCountRef.value = value; },
                 setLastHandledReason: value => { singleLastHandledReasonRef.value = value; },
                 pagePick,
-                fromQueue: false,
                 maxDetailAttempts: 1
               });
 

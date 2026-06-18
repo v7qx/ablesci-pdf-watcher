@@ -255,18 +255,25 @@ if (Test-Path $PrebuiltExe) {
 $ManifestPath = Join-Path $InstallDir "$HostName.json"
 $ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
 $AllowedOrigin = "chrome-extension://$ExtensionId/"
-$ExistingOrigins = @()
+# Overwrite allowed_origins with only the current extension Origin instead of
+# merge-accumulating. Merging kept stale extension IDs registered forever across
+# reinstalls; a single Origin is the least-privilege default. Warn if we drop any.
+$PreviousOrigins = @()
 if (Test-Path $ManifestPath) {
   try {
     $ExistingManifest = Get-Content -Raw $ManifestPath | ConvertFrom-Json
     if ($ExistingManifest.allowed_origins) {
-      $ExistingOrigins = @($ExistingManifest.allowed_origins)
+      $PreviousOrigins = @($ExistingManifest.allowed_origins)
     }
   } catch {
-    $ExistingOrigins = @()
+    $PreviousOrigins = @()
   }
 }
-$AllowedOrigins = @($ExistingOrigins + $AllowedOrigin | Where-Object { $_ } | Sort-Object -Unique)
+$DroppedOrigins = @($PreviousOrigins | Where-Object { $_ -and ($_ -ne $AllowedOrigin) })
+if ($DroppedOrigins.Count -gt 0) {
+  Write-Warning "Replacing previously registered allowed_origins with the current extension only. Dropped: $($DroppedOrigins -join ', ')"
+}
+$AllowedOrigins = @($AllowedOrigin)
 
 $manifest = [ordered]@{
   name = $HostName
@@ -279,11 +286,13 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
 
 $MarkerPath = Join-Path $InstallDir $MarkerFileName
+$ResolvedDownloadDir = if ([string]::IsNullOrWhiteSpace($DownloadDir)) { "" } else { [System.IO.Path]::GetFullPath($DownloadDir) }
 $Marker = [ordered]@{
   host_name = $HostName
   install_dir = $InstallDir
   helper_exe = [System.IO.Path]::GetFileName($TargetExe)
   manifest = [System.IO.Path]::GetFileName($ManifestPath)
+  download_dir = $ResolvedDownloadDir
   installed_at = (Get-Date).ToString("s")
 }
 $Marker | ConvertTo-Json -Depth 4 | Set-Content -Path $MarkerPath -Encoding UTF8

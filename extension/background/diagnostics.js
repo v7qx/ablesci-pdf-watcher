@@ -29,7 +29,7 @@
         pickedUrl: urlHostPath(payload?.pdfUrl || ''),
         source: payload?.pdfUrlSource || '',
         downloadMode: opts?.downloadMode || 'auto',
-        requesterId: payload?.requesterId || '',
+        requesterId: maskId(payload?.requesterId),
         watcherBlacklistPath: opts?.watcherBlacklistPath || ''
       };
     }

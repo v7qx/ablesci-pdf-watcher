@@ -194,9 +194,14 @@
       meta.hasExplicitPageMin = pageMeta.hasExplicitPageMin === true;
       meta.hasExplicitPageMax = pageMeta.hasExplicitPageMax === true;
 
-      // Resolve max page: explicit page_max wins; otherwise use detected max from pagination.
-      const effectiveMax = pageMeta.needsMaxDetection && knownMaxPage !== null
-        ? clampInt(knownMaxPage, pageMeta.pageMin, pageMeta.pageMax)
+      // Resolve max page: explicit page_max wins. When page_max must be detected
+      // from pagination but detection failed (knownMaxPage == null), fall back to
+      // pageMin instead of the MAX_SAFE_INTEGER sentinel — otherwise the random
+      // page would be an astronomical number and the whole run scans empty pages.
+      const effectiveMax = pageMeta.needsMaxDetection
+        ? (knownMaxPage !== null
+            ? clampInt(knownMaxPage, pageMeta.pageMin, pageMeta.pageMax)
+            : pageMeta.pageMin)
         : pageMeta.pageMax;
       const effectiveMin = pageMeta.pageMin;
       const pickedPage = effectiveMax > effectiveMin

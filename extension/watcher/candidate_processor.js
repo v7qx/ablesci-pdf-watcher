@@ -151,7 +151,6 @@
         getHandledCount,
         setHandledCount,
         pagePick = {},
-        fromQueue = false,
         maxDetailAttempts = 0,
         setLastHandledReason
       } = context;
@@ -177,7 +176,7 @@
             assistTimeText: candidate.assistTimeText || '',
             assistAgeSeconds: candidate.assistAgeSeconds ?? '',
             journalAccess: listAllowed.journalAccess || null,
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           });
           if (candidateKey) {
             await updateProcessed(candidateKey, 'skipped', listAllowed.reason, processedMeta(candidate, null, pagePick, candidatePage));
@@ -197,7 +196,7 @@
             pageMax: pagePick.pageMax,
             urlKey: pagePick.urlKey,
             publisher: pagePick.publisher,
-            source: fromQueue ? 'candidate_queue' : 'list_page',
+            source: 'list_page',
             details: {
               reasonText: describeWatcherReason(listAllowed.reason),
               journalAccess: listAllowed.journalAccess || null
@@ -213,7 +212,7 @@
             trigger,
             detailUrl: candidate.detailUrl,
             assistId: candidate.assistId || '',
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           });
           await appendCandidateAuditEntries([buildCandidateAuditEntry('processed_skip', candidate, {
             status: 'skipped',
@@ -224,7 +223,7 @@
             pageMax: pagePick.pageMax,
             urlKey: pagePick.urlKey,
             publisher: pagePick.publisher,
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           })]);
           await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
           await removeQueuedCandidate(candidate, 'processed_before');
@@ -237,7 +236,7 @@
             trigger,
             maxDetailAttempts,
             sourceKey: sourceKeyFromCandidate(candidate, pagePick),
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           });
           await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_budget_exhausted', candidate, {
             status: 'pending',
@@ -248,7 +247,7 @@
             pageMax: pagePick.pageMax,
             urlKey: pagePick.urlKey,
             publisher: pagePick.publisher,
-            source: fromQueue ? 'candidate_queue' : 'list_page',
+            source: 'list_page',
             details: { maxDetailAttempts }
           })]);
           break;
@@ -259,7 +258,7 @@
           trigger,
           detailUrl: candidate.detailUrl,
           assistId: candidate.assistId || '',
-          source: fromQueue ? 'candidate_queue' : 'list_page'
+          source: 'list_page'
         });
         await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_start', candidate, {
           status: 'processing',
@@ -270,7 +269,7 @@
           pageMax: pagePick.pageMax,
           urlKey: pagePick.urlKey,
           publisher: pagePick.publisher,
-          source: fromQueue ? 'candidate_queue' : 'list_page'
+          source: 'list_page'
         })]);
         await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
         const detailStartedAt = Date.now();
@@ -280,7 +279,7 @@
           trigger,
           durationMs: Date.now() - detailStartedAt,
           assistId: candidate.assistId || '',
-          source: fromQueue ? 'candidate_queue' : 'list_page',
+          source: 'list_page',
           detailReason: detail.reason || ''
         });
         if (!detail.ok) {
@@ -305,7 +304,7 @@
             pageMax: pagePick.pageMax,
             urlKey: pagePick.urlKey,
             publisher: pagePick.publisher,
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           })]);
           await removeQueuedCandidate(candidate, detail.reason);
           continue;
@@ -324,7 +323,7 @@
             detailUrl: candidate.detailUrl,
             tabId: detail.tabId,
             assistId: key,
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           });
           await closeTabQuietly(detail.tabId, 'detail_filter_skipped');
           await updateProcessed(key, 'skipped', detailAllowed.reason, processedMeta(candidate, payload, pagePick, candidatePage));
@@ -340,7 +339,7 @@
             urlKey: pagePick.urlKey,
             publisher: pagePick.publisher,
             tabId: detail.tabId,
-            source: fromQueue ? 'candidate_queue' : 'list_page',
+            source: 'list_page',
             details: { reasonText: describeWatcherReason(detailAllowed.reason) }
           })]);
           await removeQueuedCandidate(candidate, detailAllowed.reason);
@@ -356,7 +355,7 @@
           assistId: key,
           handled: typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true,
           stopRun: handledResult?.stopRun === true,
-          source: fromQueue ? 'candidate_queue' : 'list_page'
+          source: 'list_page'
         });
         const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
         if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
@@ -370,7 +369,7 @@
           urlKey: pagePick.urlKey,
           publisher: pagePick.publisher,
           tabId: detail.tabId,
-          source: fromQueue ? 'candidate_queue' : 'list_page',
+          source: 'list_page',
           details: {
             stopRun: handledResult?.stopRun === true,
             removeQueue: handledResult?.removeQueue === true
@@ -402,7 +401,7 @@
             targetSessionSize,
             stopRun: handledResult?.stopRun === true,
             paused: handledResult?.paused === true,
-            source: fromQueue ? 'candidate_queue' : 'list_page'
+            source: 'list_page'
           });
           if (handledResult?.stopRun === true) {
             await appendJournalBlockedSummary(journalBlockedSummary, trigger);
