@@ -17,43 +17,6 @@
       nativeNotifyTimeoutMs
     } = config;
 
-    let creatingOffscreenDocument = null;
-
-    async function ensureOffscreenAudioDocument() {
-      if (!chromeApi.offscreen?.createDocument || !chromeApi.runtime?.getContexts) return false;
-      const offscreenUrl = chromeApi.runtime.getURL('offscreen_audio.html');
-      const contexts = await chromeApi.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [offscreenUrl]
-      });
-      if (Array.isArray(contexts) && contexts.length) return true;
-      if (!creatingOffscreenDocument) {
-        creatingOffscreenDocument = chromeApi.offscreen.createDocument({
-          url: 'offscreen_audio.html',
-          reasons: ['AUDIO_PLAYBACK'],
-          justification: 'Play watcher notification sounds without relying on native helper.'
-        }).finally(() => {
-          creatingOffscreenDocument = null;
-        });
-      }
-      await creatingOffscreenDocument;
-      return true;
-    }
-
-    async function playBrowserNotificationSound(kind = 'default') {
-      try {
-        const ok = await ensureOffscreenAudioDocument();
-        if (!ok) return { ok: false, reason: 'offscreen_unavailable' };
-        const response = await chromeApi.runtime.sendMessage({
-          type: 'ablesciPlayNotificationSound',
-          kind
-        });
-        return response?.ok ? { ok: true } : { ok: false, reason: response?.reason || 'sound_failed' };
-      } catch (err) {
-        return { ok: false, reason: err?.message || String(err) };
-      }
-    }
-
     async function sendBrowserNotification(message, opts = {}) {
       await chromeApi.notifications.create({
         type: 'basic',
@@ -63,9 +26,6 @@
         priority: opts.priority || 1,
         requireInteraction: opts.requireInteraction === true
       });
-      if (opts.playSound !== false) {
-        await playBrowserNotificationSound(opts.soundKind === 'urgent' ? 'urgent' : 'default');
-      }
       return { ok: true, mode: 'browser' };
     }
 

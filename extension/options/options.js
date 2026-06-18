@@ -204,7 +204,36 @@ async function load() {
     }
   }
 
+  syncPublisherChecksFromUrls();
   await renderAdvancedWatcherStatus();
+}
+
+const WATCHER_PUBLISHER_LIST_BASE = 'https://www.ablesci.com/assist/index?status=waiting&publisher=';
+
+// Publisher quick-pick: convenience that writes editable list URLs (one per
+// checked publisher) into the watcherListUrls textarea. The textarea stays the
+// source of truth; advanced users can edit page ranges or fix a slug by hand.
+function generateListUrlsFromPublishers() {
+  const slugs = Array.from(document.querySelectorAll('.watcher-publisher'))
+    .filter(box => box.checked)
+    .map(box => (box.getAttribute('data-slug') || '').trim())
+    .filter(Boolean);
+  if (!slugs.length) return;
+  const textarea = el('watcherListUrls');
+  if (textarea) textarea.value = slugs.map(slug => WATCHER_PUBLISHER_LIST_BASE + slug).join('\n');
+}
+
+function syncPublisherChecksFromUrls() {
+  const textarea = el('watcherListUrls');
+  if (!textarea) return;
+  const slugs = new Set();
+  for (const match of String(textarea.value || '').matchAll(/[?&]publisher=([a-z0-9_-]+)/ig)) {
+    slugs.add(match[1].toLowerCase());
+  }
+  document.querySelectorAll('.watcher-publisher').forEach(box => {
+    const slug = (box.getAttribute('data-slug') || '').toLowerCase();
+    box.checked = !!slug && slugs.has(slug);
+  });
 }
 
 function setText(id, value) {
@@ -413,3 +442,4 @@ el('exportJournalAccessCache')?.addEventListener('click', exportJournalAccessCac
 el('importJournalAccessCache')?.addEventListener('click', importJournalAccessCache);
 el('clearJournalAccessCache')?.addEventListener('click', clearJournalAccessCache);
 el('btnDebugSimulate')?.addEventListener('click', simulateAssist);
+el('watcherPublisherGenerate')?.addEventListener('click', generateListUrlsFromPublishers);

@@ -35,9 +35,12 @@
 
       chromeApi.alarms.onAlarm.addListener(alarm => {
         if (alarm.name === alarmName) runAutoWatcherOnce('alarm');
-        if (alarm.name === badgeRefreshAlarmName) updateActionBadge().catch(() => {});
       });
-      chromeApi.alarms.create(badgeRefreshAlarmName, { periodInMinutes: 1 });
+      // Badge no longer uses a periodic alarm (which woke the service worker every
+      // minute even when idle). The badge is refreshed event-driven instead:
+      // on storage changes, after each run, and by the in-memory loop while the
+      // worker is alive. Clear any periodic alarm left by older installs.
+      chromeApi.alarms.clear(badgeRefreshAlarmName).catch(() => {});
 
       chromeApi.runtime.onStartup.addListener(() => {
         recoverStaleWatcherState('runtime_startup').catch(() => {});

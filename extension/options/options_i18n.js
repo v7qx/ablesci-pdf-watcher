@@ -106,6 +106,9 @@
   "按本月时间进度估算当前应完成量，用于自适应模式下计算调度间隔。": "Target used to compute dynamic scheduling interval based on monthly progress.",
 
   "候选筛选": "Candidate Filter",
+  "出版社快捷选择": "Quick Publisher Select",
+  "勾选要值守的出版社后点\"生成\"，会写入下方列表 URL（每个出版社一行，运行时随机翻页）。若某出版社在科研通的 slug 不同，可直接编辑下方 URL。": "Tick the publishers to watch, then click Generate to fill the list URLs below (one per publisher, random page each run). If a publisher's Ablesci slug differs, edit the URL below directly.",
+  "生成到列表 URL": "Generate List URLs",
   "列表 URL": "List URLs",
   "每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；如需限制范围可追加 <code>&amp;page_min=1&amp;page_max=5</code>。": "One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Add <code>&amp;page_min=1&amp;page_max=5</code> to limit the page range.",
   "非 SD 最低求助量": "Min Non-SD Requests",

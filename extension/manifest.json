@@ -14,7 +14,6 @@
     "downloads",
     "nativeMessaging",
     "notifications",
-    "offscreen",
     "scripting",
     "storage",
     "tabs"
