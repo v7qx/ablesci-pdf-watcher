@@ -23,10 +23,22 @@
     buttonTextColor: '#ffffff',
     buttonPosition: 'start',
     watcherEnabled: false,
+    // LOCKED: scheduler identity is force-set in normalizeOptions; kept here only
+    // so storage has a value. The name 'quant' is historical. The interval itself
+    // is now a uniform random sample around a speed-tier median (watcher/
+    // schedule.js sampleAssistDelayMinutes), not the old lognormal model — but the
+    // *tier* can still be chosen adaptively from monthly-target lag (see
+    // watcherSpeedMode + watcher/target.js determineSpeedMode).
     watcherSchedulerMode: 'quant',
     watcherIntervalMinutes: 10,
     watcherMinIntervalMinutes: 1,
     watcherMaxIntervalMinutes: 30,
+    // Speed mode: 'adaptive' (default) lets watcher/target.js pick fast/normal
+    // from monthly-target lag + daily progress; fast/normal/slow pin a fixed tier.
+    // The chosen tier sets the random interval median. NOTE: the options UI only
+    // exposes fast/normal/slow, so the 'adaptive' default has no matching control —
+    // collapsing this to an explicit tier is a scheduler-behaviour change deferred
+    // to a browser-tested branch, not a no-op rename.
     watcherSpeedMode: 'adaptive',
     watcherMaxCandidatesPerRun: 1,
     watcherMinNonSdSeekingCount: 200,
@@ -154,6 +166,13 @@
       : value => (value === 'start' ? 'start' : 'end');
 
     const speedMode = ['adaptive', 'slow', 'normal', 'fast'].includes(raw.watcherSpeedMode) ? raw.watcherSpeedMode : 'adaptive';
+    // LOCKED defaults: the fields force-assigned below are intentionally not
+    // user-configurable. The product is "one random assist per run inside work
+    // hours", so download/upload flow, the single-candidate/single-session caps,
+    // the skip rules, fixed timeouts and the (vestigially named) quant scheduler
+    // flag are pinned to safe values regardless of stored input. They are kept in
+    // DEFAULT_OPTIONS for storage shape only and are deliberately absent from the
+    // options UI. Do not re-expose them without re-checking watcher/schedule.js.
     return {
       ...opts,
       nativeHostName: opts.nativeHostName === 'com.ablesci.pdf_uploader' ? DEFAULT_OPTIONS.nativeHostName : String(opts.nativeHostName || DEFAULT_OPTIONS.nativeHostName).trim(),

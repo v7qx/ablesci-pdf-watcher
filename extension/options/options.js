@@ -2,11 +2,6 @@
 
 const {
   DEFAULT_OPTIONS,
-  WATCHER_DAILY_LIMIT_MAX,
-  normalizeSizeUnit,
-  clampNumber,
-  normalizeSchedulerMode,
-  normalizeWatcherIntervals,
   normalizeWatcherListUrls,
   normalizeOptions,
   sanitizePathPart,
@@ -255,53 +250,10 @@ async function save(saveOptions = {}) {
     opts[id] = node.type === 'checkbox' ? node.checked : node.value.trim();
   }
 
-  opts.downloadMode = 'auto';
-  opts.scienceDirectTabMode = ['visible', 'silent_then_visible', 'silent'].includes(opts.scienceDirectTabMode)
-    ? opts.scienceDirectTabMode
-    : DEFAULT_OPTIONS.scienceDirectTabMode;
-  const minVal = Number(opts.minAutoUploadMB);
-  opts.minAutoUploadMB = isNaN(minVal) || minVal < 0 ? DEFAULT_OPTIONS.minAutoUploadMB : minVal;
-  opts.minAutoUploadUnit = normalizeSizeUnit(opts.minAutoUploadUnit);
-  opts.maxAutoUploadMB = 150;
-  opts.maxAutoUploadUnit = 'MB';
-  opts.buttonLabel = normalizeButtonLabel(opts.buttonLabel);
-  opts.buttonColor = normalizeHexColor(opts.buttonColor, DEFAULT_OPTIONS.buttonColor);
-  opts.buttonTextColor = normalizeHexColor(opts.buttonTextColor, DEFAULT_OPTIONS.buttonTextColor);
-  opts.buttonPosition = normalizeButtonPosition(opts.buttonPosition);
-  opts.watcherSchedulerMode = normalizeSchedulerMode(opts);
-  Object.assign(opts, normalizeWatcherIntervals(opts));
-  opts.watcherMaxCandidatesPerRun = 1;
-  opts.watcherOpenDetail = true;
-  opts.watcherAutoDownload = true;
-  opts.watcherAutoUpload = true;
-  opts.watcherUploadConfirmRequired = false;
-  opts.watcherMinNonSdSeekingCount = clampNumber(opts.watcherMinNonSdSeekingCount, DEFAULT_OPTIONS.watcherMinNonSdSeekingCount, 0, 100000);
-  opts.watcherListUrls = normalizeWatcherListUrls(opts.watcherListUrls);
-  opts.watcherUploadCountdownSeconds = clampNumber(opts.watcherUploadCountdownSeconds, DEFAULT_OPTIONS.watcherUploadCountdownSeconds, 0, 120);
-  opts.watcherDailyLimit = clampNumber(opts.watcherDailyLimit, DEFAULT_OPTIONS.watcherDailyLimit, 0, WATCHER_DAILY_LIMIT_MAX);
-  opts.watcherDailyReportEnabled = opts.watcherDailyReportEnabled === true;
-  opts.watcherBadgeCountdownEnabled = opts.watcherBadgeCountdownEnabled !== false;
-  opts.watcherNotificationEnabled = opts.watcherNotificationEnabled !== false;
-  // PRIVATE_WATCHER_ONLY: Add compact trace level
-  opts.watcherTraceLevel = ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel;
-  opts.watcherPerfTraceEnabled = opts.watcherPerfTraceEnabled === true;
-  opts.watcherPerfFileEnabled = opts.watcherPerfFileEnabled === true;
-  opts.watcherReportDir = String(opts.watcherReportDir || '').trim();
-  opts.watcherNoDownloadTimeoutMinutes = clampNumber(opts.watcherNoDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherNoDownloadTimeoutMinutes, 0.25, 60);
-  opts.watcherDownloadTimeoutMinutes = clampNumber(opts.watcherDownloadTimeoutMinutes, DEFAULT_OPTIONS.watcherDownloadTimeoutMinutes, 1, 120);
-  opts.watcherTaskTimeoutMinutes = clampNumber(opts.watcherTaskTimeoutMinutes, DEFAULT_OPTIONS.watcherTaskTimeoutMinutes, 1, 180);
-  opts.watcherNotifyMode = opts.watcherNotifyMode === 'native' ? 'native' : 'browser';
-  opts.watcherCfPauseThreshold = clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10);
-  opts.watcherQuantSchedulerEnabled = opts.watcherSchedulerMode !== 'fixed';
-  opts.watcherRiskBudgetLimit = clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100);
-  opts.watcherWorkdays = String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim();
-  opts.watcherWorkWindows = String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim();
-  opts.watcherMonthlyTarget = clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000);
-  opts.watcherMinDailyTarget = 0;
-  opts.watcherMaxDailyTarget = WATCHER_DAILY_LIMIT_MAX;
-  opts.watcherMaxPerSession = 1;
-  opts.watcherAllowZeroSession = opts.watcherAllowZeroSession === true;
-  opts.watcherUseCalendarProgress = opts.watcherUseCalendarProgress !== false;
+  // normalizeOptions (common/common_config.js) is the single source of truth for
+  // defaults, clamping, and LOCKED force-overrides. It runs over the DOM-collected
+  // values and fully determines the persisted shape, so individual fields are not
+  // pre-forced here (that duplication previously drifted out of sync).
   Object.assign(opts, normalizeOptions(opts, { normalizeButtonLabel, normalizeHexColor, normalizeButtonPosition }));
 
   try {

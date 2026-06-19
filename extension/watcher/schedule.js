@@ -196,21 +196,15 @@
     }
 
     function randomIntervalMinutes(opts, state = null) {
-      const hold = quotaHoldPlan(opts, state || {});
-      if (hold && !opts.watcherQuantSchedulerEnabled) return Math.max(1, hold.minutes);
-      if (opts.watcherQuantSchedulerEnabled) {
-        const outsideDelay = nextWorkDelayMinutes(opts);
-        if (outsideDelay !== null) return Math.max(1, outsideDelay);
-        const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
-        return Math.max(1, Number(assistPlan?.minutes || Number.POSITIVE_INFINITY));
-      }
-      const base = clampNumber(opts.watcherIntervalMinutes, 30, 1, 1440);
-      const min = clampNumber(opts.watcherMinIntervalMinutes, 10, 1, 1440);
-      const max = clampNumber(opts.watcherMaxIntervalMinutes, 60, min, 1440);
-      const jitter = Math.max(1, Math.round(base * 0.2));
-      const low = Math.max(min, base - jitter);
-      const high = Math.min(max, base + jitter);
-      return low + Math.random() * Math.max(1, high - low);
+      // watcherQuantSchedulerEnabled is LOCKED true (common_config.js), so the
+      // random-interval planner always drives scheduling. The legacy
+      // fixed-interval fallback (watcherIntervalMinutes base ± jitter) was
+      // unreachable and has been removed; quota holds are applied inside
+      // ensureNextAssistSchedule -> targetDrivenAssistPlan.
+      const outsideDelay = nextWorkDelayMinutes(opts);
+      if (outsideDelay !== null) return Math.max(1, outsideDelay);
+      const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
+      return Math.max(1, Number(assistPlan?.minutes || Number.POSITIVE_INFINITY));
     }
 
     async function refreshAutoWatcherAlarm(clearExisting = true, reason = 'refresh') {
