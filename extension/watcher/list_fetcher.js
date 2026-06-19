@@ -52,6 +52,52 @@
       return '';
     }
 
+    function documentTypeTextFromLi(liHtml) {
+      const values = [];
+      const blockRe = /<(?:span|i)\b[^>]*(?:title\s*=\s*["']文献类型["']|class\s*=\s*["'][^"']*\b(?:paper-type|title-hint)\b[^"']*["'])[^>]*>[\s\S]*?<\/(?:span|i)>/gi;
+      let blockMatch;
+      while ((blockMatch = blockRe.exec(liHtml))) {
+        values.push(stripTags(blockMatch[0]));
+      }
+      const tagRe = /<(?:span|i)\b[^>]*>/gi;
+      let tagMatch;
+      while ((tagMatch = tagRe.exec(liHtml))) {
+        const tag = tagMatch[0];
+        const cls = attrValue(tag, 'class');
+        const title = attrValue(tag, 'title');
+        if (
+          /文献类型|Book|Chapter|Supplement|Patent|Report/i.test(title) ||
+          /\b(?:paper-type|title-hint)\b/i.test(cls)
+        ) {
+          values.push(
+            title,
+            attrValue(tag, 'aria-label'),
+            attrValue(tag, 'data-ablesci-original-title')
+          );
+        }
+      }
+      return normalizeText(values.filter(Boolean).join(' '));
+    }
+
+    function markerTextFromLi(liHtml) {
+      const values = [];
+      const tagRe = /<(?:span|i|a|img)\b[^>]*>/gi;
+      let tagMatch;
+      while ((tagMatch = tagRe.exec(liHtml))) {
+        const tag = tagMatch[0];
+        const cls = attrValue(tag, 'class');
+        const title = attrValue(tag, 'title');
+        const aria = attrValue(tag, 'aria-label');
+        if (
+          /举报|违规|驳回|拒绝|涉嫌|补充材料|文献类型/i.test(`${title} ${aria}`) ||
+          /\b(?:paper-type|title-hint|assist-badge|icon-ex-jubao)\b/i.test(cls)
+        ) {
+          values.push(title, aria, attrValue(tag, 'data-ablesci-original-title'));
+        }
+      }
+      return normalizeText(values.filter(Boolean).join(' '));
+    }
+
     function doiFrom(value) {
       const match = String(value || '').match(/10\.\d{4,9}\/[^\s"']+/i);
       if (!match) return '';
@@ -98,8 +144,13 @@
     }
 
     function requesterIdFromLi(liHtml, baseUrl) {
-      const href = attrValue(liHtml.match(/<a\b[^>]*class\s*=\s*"[^"]*\bassist-list-nickname\b[^"]*"[^>]*href\s*=\s*"[^"]*\/user\/home\?id=[^"]*"[^>]*>/i)?.[0] || '', 'href') ||
-        attrValue(liHtml.match(/<a\b[^>]*href\s*=\s*"[^"]*\/user\/home\?id=[^"]*"[^>]*>/i)?.[0] || '', 'href');
+      const nicknameTag =
+        liHtml.match(/<a\b(?=[^>]*\bclass\s*=\s*["'][^"']*\bassist-list-nickname\b)(?=[^>]*\bhref\s*=\s*["'][^"']*\/user\/home\?id=)[^>]*>/i)?.[0] ||
+        liHtml.match(/<a\b[^>]*href\s*=\s*["'][^"']*\/user\/home\?id=[^"']*["'][^>]*>/i)?.[0] ||
+        '';
+      const dataId = attrValue(nicknameTag, 'data-id');
+      if (dataId) return dataId;
+      const href = attrValue(nicknameTag, 'href');
       if (!href) return '';
       try {
         return new URL(href, baseUrl).searchParams.get('id') || '';
@@ -222,7 +273,8 @@
           attrValue(li.match(/<a\b[^>]*href\s*=\s*"[^"]*\/assist\/detail\?id=[^"]*"[^>]*>/i)?.[0] || '', 'href');
         const detailUrl = absUrl(detailHref, url);
         const rowText = stripTags(li);
-        const typeText = stripTags(li.match(/<(?:span|i)\b[^>]*(?:title\s*=\s*"文献类型"|class\s*=\s*"[^"]*\bpaper-type\b[^"]*")[^>]*>[\s\S]*?<\/(?:span|i)>/i)?.[0] || '');
+        const markerText = markerTextFromLi(li);
+        const typeText = documentTypeTextFromLi(li);
         const documentType = normalizeDocumentType(typeText);
         const classText = `${attrValue(li, 'class')} ${attrValue(li.match(/<a\b[^>]*title\s*=\s*"查看详情"[^>]*>/i)?.[0] || '', 'class')}`;
         const statusText = stripTags(li.match(/<span\b[^>]*class\s*=\s*"[^"]*\bassist-badge\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] || '');
@@ -239,8 +291,8 @@
           hasDoi: !!doi,
           publisherName,
           journalShortName: extractJournalShortName(li),
-          reported: /举报|被举报|涉嫌违规/.test(rowText),
-          rejected: /驳回|已驳回/.test(rowText),
+          reported: /举报|被举报|涉嫌违规/.test(`${rowText} ${markerText}`),
+          rejected: /驳回|已驳回|拒绝/.test(`${rowText} ${markerText}`),
           supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
           documentType,
           documentTypeText: normalizeText(typeText),

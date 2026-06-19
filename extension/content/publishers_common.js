@@ -123,6 +123,94 @@
     return hasChallengeDom || titleLooksLikeChallenge || bodyLooksLikeChallenge;
   }
 
+  function metaContent(selector) {
+    return document.querySelector(selector)?.getAttribute('content') || '';
+  }
+
+  function pathHasSupplementSegment(rawUrl) {
+    let url;
+    try {
+      url = new URL(String(rawUrl || ''), location.href);
+    } catch (_) {
+      return false;
+    }
+    return url.pathname
+      .split('/')
+      .map(part => {
+        try {
+          return decodeURIComponent(part).toLowerCase();
+        } catch (_) {
+          return String(part || '').toLowerCase();
+        }
+      })
+      .filter(Boolean)
+      .some(part => /^(?:supplement|supplements|supp|suppl)(?:[-_]\w+)?$/i.test(part));
+  }
+
+  function metaUrlHasSupplementSegment(selector) {
+    const value = document.querySelector(selector)?.getAttribute('href') ||
+      document.querySelector(selector)?.getAttribute('content') || '';
+    return value && pathHasSupplementSegment(value);
+  }
+
+  function sciencedirectPageDataHasSupplement() {
+    try {
+      const contents = Array.isArray(window.pageData?.content) ? window.pageData.content : [];
+      return contents.some(item => {
+        const suppl = String(item?.suppl || '').trim();
+        return /^S$/i.test(suppl) || /^(?:supp|suppl|supplement|supplements)$/i.test(suppl);
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function publicationMetadataHasSupplement() {
+    const containers = Array.from(document.querySelectorAll([
+      '.Publication .publication-volume',
+      '.publication-volume',
+      '[class*="publication-volume"]',
+      '[data-testid*="publication"]',
+      '[data-test-id*="publication"]'
+    ].join(',')));
+    return containers.some(container => {
+      const text = String(container.innerText || container.textContent || '').replace(/\s+/g, ' ').trim();
+      const links = Array.from(container.querySelectorAll('a[href], a[title]'));
+      const linkSignal = links.some(link => {
+        const href = link.getAttribute('href') || link.href || '';
+        const title = link.getAttribute('title') || '';
+        const hrefSupplementIssue = /\/issue\/[^/]+\/(?:suppl|supp|supplement|supplements)\/S(?:\/|$)/i.test(href) ||
+          /\/(?:suppl|supp|supplement|supplements)\/S(?:\/|$)/i.test(href) && /\bSupplement\b/i.test(text);
+        return hrefSupplementIssue ||
+          /table of contents for this volume\/issue/i.test(title) && /\bSupplement\b/i.test(text);
+      });
+      const textSignal = /(?:Volume|Vol\.?)\s+\d+[^,;]{0,60}(?:Issue|No\.?)\s+\d+[^,;]{0,60}\bSupplement\b/i.test(text) &&
+        /Pages?\s+S\d+/i.test(text);
+      return linkSignal || textSignal;
+    });
+  }
+
+  function hasPrimarySupplementArticlePage() {
+    if (hasPublisherChallengePage()) return false;
+    if (pathHasSupplementSegment(location.href)) return true;
+
+    const citationIssue = metaContent('meta[name="citation_issue"], meta[property="citation_issue"]');
+    if (/\b(?:supplement|supplements|suppl|supp)(?:[-_\s]?\w+)?\b/i.test(citationIssue)) return true;
+
+    const citationFirstPage = metaContent('meta[name="citation_firstpage"], meta[property="citation_firstpage"]');
+    const citationLastPage = metaContent('meta[name="citation_lastpage"], meta[property="citation_lastpage"]');
+    if (isScienceDirect() && /^S\d+[A-Z]?$/i.test(citationFirstPage) && /^S\d+[A-Z]?$/i.test(citationLastPage || citationFirstPage)) return true;
+
+    if (metaUrlHasSupplementSegment('link[rel="canonical"][href]')) return true;
+    if (metaUrlHasSupplementSegment('meta[name="citation_pdf_url"], meta[property="citation_pdf_url"]')) return true;
+    if (metaUrlHasSupplementSegment('meta[property="og:url"], meta[name="dc.identifier"][content]')) return true;
+
+    if (isScienceDirect() && sciencedirectPageDataHasSupplement()) return true;
+    if (publicationMetadataHasSupplement()) return true;
+
+    return false;
+  }
+
   function sendPublisherMessage(publisher, payload) {
     chrome.runtime.sendMessage({
       type: 'ablesciPublisherArticleReady',
@@ -161,6 +249,7 @@
     normalizeUrl,
     isVisible,
     hasPublisherChallengePage,
+    hasPrimarySupplementArticlePage,
     sendPublisherMessage
   };
 })();

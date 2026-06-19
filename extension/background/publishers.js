@@ -163,6 +163,90 @@
     };
   }
 
+  function hasSupplementPathSegment(rawUrl) {
+    let u;
+    try {
+      u = new URL(String(rawUrl || ''));
+    } catch (_) {
+      return false;
+    }
+    const segments = u.pathname
+      .split('/')
+      .map(part => {
+        try {
+          return decodeURIComponent(part).toLowerCase();
+        } catch (_) {
+          return String(part || '').toLowerCase();
+        }
+      })
+      .filter(Boolean);
+    return segments.some(part =>
+      /^(?:supplement|supplements|supp|suppl)(?:[-_]\w+)?$/i.test(part)
+    );
+  }
+
+  function classifyUnsupportedPublisherContentUrl(rawUrl) {
+    let u;
+    try {
+      u = new URL(String(rawUrl || ''));
+    } catch (_) {
+      return null;
+    }
+    if (!/^https?:$/i.test(u.protocol) || isDoiHost(u.hostname)) return null;
+
+    const sage = classifySageKnowledgeUrl(u.href);
+    if (sage?.skip) return sage;
+
+    if (hasSupplementPathSegment(u.href)) {
+      return {
+        skip: true,
+        type: 'publisher_supplement_url',
+        reason: 'Publisher URL path points to a supplement issue/page, not a regular journal article'
+      };
+    }
+
+    if (isAcsBookUrl(u.href)) {
+      return {
+        skip: true,
+        type: 'acs_book_overview',
+        reason: 'ACS book overview page is outside current journal article resolver scope'
+      };
+    }
+
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    const segments = u.pathname
+      .split('/')
+      .map(part => {
+        try {
+          return decodeURIComponent(part).toLowerCase();
+        } catch (_) {
+          return String(part || '').toLowerCase();
+        }
+      })
+      .filter(Boolean);
+    const first = segments[0] || '';
+    const bookSegment = segments.find(part => /^(?:book|books|chapter|chapters)$/.test(part));
+    if (!bookSegment) return null;
+
+    if (host === 'taylorfrancis.com' && /^(?:book|books|chapter|chapters)$/.test(first)) {
+      return {
+        skip: true,
+        type: 'taylorfrancis_book_chapter',
+        reason: 'Taylor & Francis book/chapter page is outside current journal article resolver scope'
+      };
+    }
+
+    if (!publisherForUrl(u.href)) {
+      return {
+        skip: true,
+        type: 'unsupported_book_chapter_url',
+        reason: 'Unsupported publisher URL points to a book/chapter path, not a journal article'
+      };
+    }
+
+    return null;
+  }
+
   function sageArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
     const match = s.match(/^https?:\/\/journals\.sagepub\.com\/doi\/(?:pdf|epub)\/(10\.[^?#]+)(?:[?#].*)?$/i);
@@ -458,6 +542,7 @@
     isSageUrl,
     isSageKnowledgeUrl,
     classifySageKnowledgeUrl,
+    classifyUnsupportedPublisherContentUrl,
     sageArticleUrlFromPdfUrl,
     publisherForUrl,
     isScienceDirectPdfUrl,

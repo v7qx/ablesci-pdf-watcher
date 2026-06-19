@@ -4,8 +4,6 @@
   const BTN_ID = 'ablesci-native-oneclick-pdf-btn';
   const LOG_ID = 'ablesci-native-oneclick-pdf-log';
   const DEFAULT_PAGE_OPTIONS = {
-    smartRecommendPush: true,
-    openAssistLinksInCurrentTab: false,
     buttonLabel: '上传PDF',
     buttonColor: '#FF5722',
     buttonTextColor: '#ffffff',
@@ -192,8 +190,6 @@
 
   function normalizeUiOptions(opts) {
     return {
-      smartRecommendPush: opts?.smartRecommendPush !== false,
-      openAssistLinksInCurrentTab: opts?.openAssistLinksInCurrentTab === true,
       buttonLabel: normalizeButtonLabel(opts?.buttonLabel),
       buttonColor: isSafeHexColor(opts?.buttonColor) ? opts.buttonColor : DEFAULT_PAGE_OPTIONS.buttonColor,
       buttonTextColor: isSafeHexColor(opts?.buttonTextColor) ? opts.buttonTextColor : DEFAULT_PAGE_OPTIONS.buttonTextColor,
@@ -322,154 +318,24 @@
     }
   }
 
-  function safeDisplayHref(rawHref) {
-    try {
-      const url = new URL(rawHref, location.href);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
-      return url.href;
-    } catch (_) {
-      return '';
-    }
-  }
-
-  function appendSanitizedHtmlNode(target, source) {
-    if (!source) return;
-    if (source.nodeType === Node.TEXT_NODE) {
-      target.appendChild(document.createTextNode(source.textContent || ''));
-      return;
-    }
-    if (source.nodeType !== Node.ELEMENT_NODE) return;
-
-    const tag = source.tagName.toLowerCase();
-    if (['script', 'style', 'template', 'iframe', 'object', 'embed', 'svg', 'math'].includes(tag)) return;
-    const inlineTags = new Set(['span', 'strong', 'b', 'em', 'i']);
-    const blockTags = new Set(['br', 'p', 'div', 'ul', 'ol', 'li']);
-    let nextTarget = target;
-
-    if (tag === 'a') {
-      const href = safeDisplayHref(source.getAttribute('href') || '');
-      if (href) {
-        const anchor = document.createElement('a');
-        anchor.href = href;
-        anchor.rel = 'noopener noreferrer';
-        anchor.target = '_blank';
-        target.appendChild(anchor);
-        nextTarget = anchor;
-      }
-    } else if (inlineTags.has(tag) || blockTags.has(tag)) {
-      const el = document.createElement(tag);
-      target.appendChild(el);
-      nextTarget = el;
-    }
-
-    for (const child of Array.from(source.childNodes || [])) {
-      appendSanitizedHtmlNode(nextTarget, child);
-    }
-  }
-
-  function setSanitizedHtml(target, html) {
-    target.textContent = '';
-    try {
-      const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-      for (const child of Array.from(doc.body?.childNodes || [])) {
-        appendSanitizedHtmlNode(target, child);
-      }
-    } catch (_) {
-      target.textContent = stripHtml(html);
-    }
-  }
-
   function reloadPageSoon(delay = 0) {
     setTimeout(() => {
       try { location.reload(); } catch (_) {}
     }, delay);
   }
 
-  function isAssistDetailUrl(rawUrl) {
-    try {
-      const url = new URL(rawUrl, location.href);
-      return (url.hostname === 'ablesci.com' || url.hostname === 'www.ablesci.com') &&
-        url.pathname.startsWith('/assist/detail');
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function shouldKeepDefaultClick(event) {
-    return event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;
-  }
-
-  function attachCurrentTabAssistLinkBehavior(root) {
-    if (!root || root.dataset.ablesciCurrentTabAssistBound === '1') return;
-    root.dataset.ablesciCurrentTabAssistBound = '1';
-
-    const anchors = Array.from(root.querySelectorAll('a[href]'));
-    for (const anchor of anchors) {
-      const href = anchor.href || anchor.getAttribute('href');
-      if (!isAssistDetailUrl(href)) continue;
-      anchor.removeAttribute('target');
-      anchor.rel = 'noopener noreferrer';
-    }
-
-    root.addEventListener('click', event => {
-      if (!pageOptions.openAssistLinksInCurrentTab) return;
-      if (shouldKeepDefaultClick(event)) return;
-      const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
-      if (!anchor) return;
-      const href = anchor.href || anchor.getAttribute('href');
-      if (!isAssistDetailUrl(href)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      location.assign(new URL(href, location.href).href);
-    }, true);
-  }
-
   function showSiteLikeCompletion(msg) {
     const rawHtml = msg.html || msg.message || '上传成功';
     const plain = stripHtml(rawHtml) || '上传成功';
-    const hasRecommend = msg.recomend === true || msg.recomend === 1 || msg.recomend === '1' || msg.recommend === true || msg.recommend === 1 || msg.recommend === '1';
     const shouldReload = msg.reload !== false;
 
     document.querySelectorAll('.ablesci-native-layer-shade,.ablesci-native-layer,.ablesci-native-toast').forEach(n => n.remove());
 
-    if (!hasRecommend) {
-      const toast = document.createElement('div');
-      toast.className = 'ablesci-native-toast';
-      toast.textContent = plain;
-      document.body.appendChild(toast);
-      if (shouldReload) reloadPageSoon(1500);
-      return;
-    }
-
-    const shade = document.createElement('div');
-    shade.className = 'ablesci-native-layer-shade';
-
-    const box = document.createElement('div');
-    box.className = 'ablesci-native-layer layui-layer layui-layer-dialog layui-layer-msg';
-
-    const content = document.createElement('div');
-    content.className = 'ablesci-native-layer-content layui-layer-content';
-    setSanitizedHtml(content, rawHtml);
-    attachCurrentTabAssistLinkBehavior(content);
-
-    const btnBar = document.createElement('div');
-    btnBar.className = 'ablesci-native-layer-btn';
-
-    const ok = document.createElement('button');
-    ok.type = 'button';
-    ok.textContent = '确定';
-    ok.addEventListener('click', () => {
-      shade.remove();
-      box.remove();
-      if (shouldReload) reloadPageSoon(0);
-    });
-
-    btnBar.appendChild(ok);
-    box.appendChild(content);
-    box.appendChild(btnBar);
-    document.body.appendChild(shade);
-    document.body.appendChild(box);
+    const toast = document.createElement('div');
+    toast.className = 'ablesci-native-toast';
+    toast.textContent = plain;
+    document.body.appendChild(toast);
+    if (shouldReload) reloadPageSoon(1500);
   }
 
   function normalizeText(s) {
@@ -485,6 +351,56 @@
     return normalizeText(el.innerText || el.textContent || '');
   }
 
+  function cleanRemarkText(value) {
+    return normalizeText(value)
+      .replace(/该求助存在备注，如果存在信息冲突，请以备注为准/g, '')
+      .replace(/该求助存在备注/g, '')
+      .replace(/如果存在信息冲突，请以备注为准/g, '')
+      .replace(/以备注为准/g, '')
+      .replace(/^[：:]+/, '')
+      .trim();
+  }
+
+  function extractRemarkInfo() {
+    const remarks = [];
+    Array.from(document.querySelectorAll('.assist-detail tr')).forEach(tr => {
+      const cells = Array.from(tr.children || []);
+      const label = visibleText(cells[0]);
+      if (!/^备注$/.test(label)) return;
+      const value = cleanRemarkText(cells.slice(1).map(visibleText).join(' '));
+      if (value) remarks.push(value);
+    });
+
+    Array.from(document.querySelectorAll('.assist-detail .layui-row, .assist-detail [class*="assist-"], .assist-detail > div')).forEach(row => {
+      const children = Array.from(row.children || []);
+      if (children.length < 2) return;
+      const labelIndex = children.findIndex(child => /^备注$/.test(visibleText(child)));
+      if (labelIndex < 0) return;
+      const value = cleanRemarkText(children.slice(labelIndex + 1).map(visibleText).join(' '));
+      if (value) remarks.push(value);
+    });
+
+    Array.from(document.querySelectorAll('.assist-detail td, .assist-detail div, .assist-detail span')).forEach(el => {
+      const text = visibleText(el);
+      if (!/^备注(?:\s|[:：]|$)/.test(text)) return;
+      const inlineValue = cleanRemarkText(text.replace(/^备注\s*[:：]?/, ''));
+      if (inlineValue) {
+        remarks.push(inlineValue);
+        return;
+      }
+      const parentValue = cleanRemarkText(visibleText(el.parentElement).replace(/^备注\s*[:：]?/, ''));
+      if (parentValue && !/^备注$/.test(parentValue)) remarks.push(parentValue);
+    });
+
+    const detailText = visibleText(document.querySelector('.assist-detail'));
+    const notice = /该求助存在备注|以备注为准/.test(detailText);
+    const uniqueRemarks = Array.from(new Set(remarks.filter(Boolean)));
+    return {
+      hasRemark: uniqueRemarks.length > 0 || notice,
+      text: uniqueRemarks.join('；')
+    };
+  }
+
   function detectPageRisk() {
     const reasons = [];
     const flags = {
@@ -493,6 +409,7 @@
       reportedWarning: false,
       systemRisk: false,
       systemPromptSupplementDoi: false,
+      systemPromptAbnormalAssist: false,
       remark: false
     };
     const titleText = visibleText($('.assist-title'));
@@ -525,25 +442,24 @@
       .map(visibleText)
       .filter(t => /系统提示|提醒：由于doi是数字文件的唯一标识/i.test(t))
       .filter(t => /Supplementary|补充材料|并非全文|不是全文|该doi的文献可能是补充材料/i.test(t));
-    if (systemWarnings.length > 0) {
+    const abnormalSystemWarnings = Array.from(document.querySelectorAll('.special-assist-alert, .assist-detail .alert-warning, .assist-detail .layui-alert, .assist-detail .layui-card-body'))
+      .map(visibleText)
+      .filter(t => /系统提示|提醒：由于doi是数字文件的唯一标识/i.test(t))
+      .filter(t => /索引库|类似于搜索引擎|准确性不能保证|建议填写原始官方链接|无全文|没有全文|并非全文|不是全文/i.test(t));
+    if (systemWarnings.length > 0 || abnormalSystemWarnings.length > 0) {
       flags.systemRisk = true;
-      flags.systemPromptSupplementDoi = true;
-      reasons.push('网站系统提示该 DOI 可能对应补充材料或并非全文，已按异常情况跳过。');
+      if (systemWarnings.length > 0) {
+        flags.systemPromptSupplementDoi = true;
+        reasons.push('网站系统提示该 DOI 可能对应补充材料或并非全文，已按异常情况跳过。');
+      }
+      if (abnormalSystemWarnings.length > 0) {
+        flags.systemPromptAbnormalAssist = true;
+        reasons.push('网站系统提示该求助可能是索引库链接、无全文或信息不准确，已按异常情况跳过。');
+      }
     }
 
-    const remarkRows = Array.from(document.querySelectorAll('.assist-detail tr'))
-      .map(tr => {
-        const cells = Array.from(tr.children || []);
-        return {
-          label: visibleText(cells[0]),
-          value: visibleText(cells[1])
-        };
-      })
-      .filter(row => /^备注$/.test(row.label) && row.value);
-    const remarkNotice = Array.from(document.querySelectorAll('.assist-detail td, .assist-detail div, .assist-detail span'))
-      .map(visibleText)
-      .some(t => /该求助存在备注|以备注为准/.test(t));
-    if (remarkRows.length > 0 || remarkNotice) {
+    const remarkInfo = extractRemarkInfo();
+    if (remarkInfo.hasRemark) {
       flags.remark = true;
       reasons.push('当前求助存在备注，可能要求特定版本或附加条件，需以备注为准人工核对。');
     }
@@ -552,7 +468,7 @@
       downloadOnly: reasons.length > 0,
       reasons,
       flags,
-      remarkText: remarkRows.map(row => row.value).filter(Boolean).join('；')
+      remarkText: remarkInfo.text
     };
   }
 
@@ -711,8 +627,8 @@
       if (msg.type === 'progress') setStatus(translateBackgroundMessage(msg.message), 'busy');
       if (msg.type === 'done') {
         const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
-        const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush && !msg.pdfCleanerResult)
-          ? { ...msg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
+        const completionMsg = !msg.downloadOnly
+          ? { ...msg, message: msg.pdfCleanerResult ? msg.message : defaultSuccess, html: msg.pdfCleanerResult ? msg.html : defaultSuccess, recomend: false, recommend: false }
           : msg;
 
         completionMsg.message = translateBackgroundMessage(completionMsg.message);
@@ -814,8 +730,8 @@
         setStatus(translateBackgroundMessage(innerMsg.message), 'busy');
       } else if (innerMsg.type === 'done') {
         const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
-        const completionMsg = (!innerMsg.downloadOnly && !pageOptions.smartRecommendPush && !innerMsg.pdfCleanerResult)
-          ? { ...innerMsg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
+        const completionMsg = !innerMsg.downloadOnly
+          ? { ...innerMsg, message: innerMsg.pdfCleanerResult ? innerMsg.message : defaultSuccess, html: innerMsg.pdfCleanerResult ? innerMsg.html : defaultSuccess, recomend: false, recommend: false }
           : innerMsg;
 
         completionMsg.message = translateBackgroundMessage(completionMsg.message);

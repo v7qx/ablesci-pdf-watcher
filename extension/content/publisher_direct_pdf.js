@@ -282,6 +282,17 @@
       return;
     }
     if (rejectUnsupportedSpringerPage()) return;
+    if (common.hasPrimarySupplementArticlePage?.()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage(publisher, {
+        articleUrl: location.href,
+        unsupported: true,
+        error: '出版商页面识别为 Supplement / supplement issue 文献，已按异常附录求助跳过。',
+        source: `${publisher}_supplement_article_page`
+      });
+      stopObserver();
+      return;
+    }
     if (publisher === 'acs' && hasAcsBookPage()) {
       pdfTriggered = true;
       common.sendPublisherMessage('acs', {

@@ -17,6 +17,7 @@
       isSageUrl,
       isSageKnowledgeUrl,
       classifySageKnowledgeUrl,
+      classifyUnsupportedPublisherContentUrl,
       isSpringerUrl,
       isRscUrl,
       isAipUrl,
@@ -127,33 +128,18 @@
       const url = changeInfo.url || tab?.url || '';
       if (!url) return;
 
-      // SAGE Knowledge 非期刊论文页面跳过：handbook / encyclopedia / reference / book chapter
-      if (isSageKnowledgeUrl?.(url)) {
-        const classification = classifySageKnowledgeUrl?.(url) || {
-          type: 'sage_knowledge_unsupported',
-          reason: 'SAGE Knowledge content is outside current journal article resolver scope'
-        };
-        const err = new Error(`unsupported_reference_work: ${classification.type} — ${classification.reason}`);
-        err.failureReason = 'unsupported_reference_work';
-        err.sourceType = classification.type;
-        tracePublisherStep(pending, 'sage_knowledge_detected', {
-          publisher: 'sage',
+      // 非期刊论文页面跳过：handbook / encyclopedia / reference / book chapter。
+      // 只按 URL 域名和独立路径段判断，避免标题里的 book/chapter 文本误伤。
+      const unsupportedContent = classifyUnsupportedPublisherContentUrl?.(url);
+      if (unsupportedContent?.skip) {
+        const err = new Error(`当前出版商页面类型不支持：${unsupportedContent.reason || unsupportedContent.type}`);
+        err.failureReason = 'publisher_unsupported';
+        err.sourceType = unsupportedContent.type || '';
+        tracePublisherStep(pending, 'unsupported_publisher_content_detected', {
+          publisher: publisherForUrl(url) || pending.publisher || '',
           articleUrl: pending.articleUrl || '',
           currentUrl: shortUrl(url),
-          sourceType: classification.type
-        });
-        pending.finishError?.(err);
-        return;
-      }
-
-      // ACS 整本书 / In Focus 电子书总览页（/doi/book/...）只提供预览样章，无法整本自动应助，安全跳过。
-      if (isAcsBookUrl?.(url)) {
-        const err = new Error(`ACS 整本书页面暂不支持自动应助（仅提供预览样章）：${url}`);
-        err.failureReason = 'publisher_unsupported';
-        tracePublisherStep(pending, 'acs_book_detected', {
-          publisher: 'acs',
-          articleUrl: pending.articleUrl || '',
-          currentUrl: shortUrl(url)
+          sourceType: unsupportedContent.type || ''
         });
         pending.finishError?.(err);
         return;

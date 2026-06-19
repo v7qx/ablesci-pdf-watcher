@@ -202,6 +202,17 @@
       return;
     }
 
+    if (common.hasPrimarySupplementArticlePage?.()) {
+      sendScienceDirectMessage({
+        articleUrl: makeScienceDirectArticleUrl() || location.href,
+        unsupported: true,
+        error: 'ScienceDirect 页面识别为 Supplement / supplement issue 文献，已按异常附录求助跳过。',
+        source: 'sciencedirect_supplement_article_page'
+      });
+      stopObserver();
+      return;
+    }
+
     if (isScienceDirectPdfLandingPage()) {
       if (common.hasPublisherChallengePage()) {
         if (!challengePrompted) {

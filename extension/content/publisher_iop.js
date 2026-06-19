@@ -8,6 +8,7 @@
   let observer = null;
   let stopTimer = null;
   let challengePrompted = false;
+  let unsupportedReported = false;
 
   function findIopArticlePdfLink() {
     const links = Array.from(document.querySelectorAll('a[href*="/pdf"]'))
@@ -50,7 +51,7 @@
   }
 
   async function notifyReady() {
-    if (!common.isIop() || pdfTriggered) return;
+    if (!common.isIop() || pdfTriggered || unsupportedReported) return;
     if (!(await common.canControlCurrentPublisherPage())) {
       console.debug('[Ablesci PDF Watcher] publisher page ignored: no pending IOP task');
       stopObserver();
@@ -79,13 +80,32 @@
     stopObserver();
   }
 
+  async function reportUnsupportedNoPdf() {
+    if (!common.isIop() || pdfTriggered || unsupportedReported) return;
+    if (!(await common.canControlCurrentPublisherPage())) {
+      stopObserver();
+      return;
+    }
+    if (common.hasPublisherChallengePage()) return;
+    unsupportedReported = true;
+    sendIopMessage({
+      articleUrl: location.href,
+      unsupported: true,
+      error: 'IOP 文章页没有正文 PDF 按钮，已跳过。',
+      source: 'iop_no_pdf_button'
+    });
+    stopObserver();
+  }
+
   function waitForPdf(timeoutMs = 30000) {
     if (!common.isIop()) return;
     const startedAt = Date.now();
     const tick = () => {
-      notifyReady();
-      if (Date.now() - startedAt < timeoutMs && !pdfTriggered) {
+      notifyReady().catch(() => {});
+      if (Date.now() - startedAt < timeoutMs && !pdfTriggered && !unsupportedReported) {
         setTimeout(tick, 1000);
+      } else if (!pdfTriggered && !unsupportedReported) {
+        reportUnsupportedNoPdf().catch(() => stopObserver());
       }
     };
     tick();
@@ -96,7 +116,9 @@
     waitForPdf(timeoutMs);
     observer = new MutationObserver(() => notifyReady());
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    stopTimer = setTimeout(stopObserver, timeoutMs);
+    stopTimer = setTimeout(() => {
+      reportUnsupportedNoPdf().catch(() => stopObserver());
+    }, timeoutMs + 1000);
   }
 
   window.AblesciIopPublisher = { start };

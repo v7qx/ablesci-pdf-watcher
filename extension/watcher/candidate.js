@@ -224,6 +224,17 @@
       return /rsc|royal society of chemistry/i.test(haystack);
     }
 
+    function isLikelyBookChapterCandidate(candidate = {}) {
+      const doi = String(candidate.doi || '').trim();
+      const rowText = String(candidate.rowText || '');
+      const listUrl = String(candidate.listUrl || '');
+      if (/^10\.1016\/b97[89][0-9-]+/i.test(doi)) return true;
+      if (/^10\.(?:1039|4135)\/97[89]\d{6,}/i.test(doi)) return true;
+      if (/^10\.\d{4,9}\/97[89]\d{6,}/i.test(doi) && /\bISBN\b|books\.rsc\.org|电子书|图书|书籍|Book Chapter/i.test(rowText)) return true;
+      if (/https?:\/\/books\.rsc\.org\/books(?:\/|$)/i.test(rowText + ' ' + listUrl)) return true;
+      return false;
+    }
+
     function describeWatcherReason(reason) {
       const code = normalizeText(reason);
       const labels = {
@@ -246,6 +257,7 @@
         detail_reported_warning: '详情页存在举报/违规提示，已跳过',
         detail_system_risk: '详情页存在系统风险提示，已跳过',
         detail_system_prompt_si: '详情页系统提示 DOI 可能是补充材料或并非全文，已跳过',
+        detail_system_prompt_abnormal: '详情页系统提示该求助可能是索引库链接、无全文或信息不准确，已跳过',
         detail_remark: '详情页存在备注，已按设置跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
         list_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (列表页)',
@@ -320,6 +332,31 @@
         if (/书籍|图书|book|chapter/i.test(textValue)) return 'book_chapter';
         if (/专利、报告等|专利|patent|report/i.test(textValue)) return 'patent_report';
         return '';
+      }
+      function documentTypeTextFromRow(row) {
+        const nodes = Array.from(row.querySelectorAll([
+          '.layui-badge[title="文献类型"]',
+          '.paper-type',
+          '.title-hint[title="Book"]',
+          '.title-hint[title="Book Chapter"]',
+          '.title-hint[title="Supplement"]'
+        ].join(', ')));
+        return nodes.map(node => [
+          text(node),
+          node.getAttribute('title') || '',
+          node.getAttribute('aria-label') || '',
+          node.getAttribute('data-ablesci-original-title') || ''
+        ].join(' ')).join(' ');
+      }
+      function markerTextFromRow(row) {
+        return Array.from(row.querySelectorAll('span[title], i[title], a[title], img[title], [aria-label]'))
+          .map(node => [
+            node.getAttribute('title') || '',
+            node.getAttribute('aria-label') || '',
+            node.getAttribute('data-ablesci-original-title') || ''
+          ].join(' '))
+          .filter(value => /举报|违规|驳回|拒绝|涉嫌|补充材料|文献类型/i.test(value))
+          .join(' ');
       }
       function text(el) {
         return String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
@@ -443,20 +480,22 @@
           title = '未知文献';
         }
         const rowText = text(row);
+        const markerText = markerTextFromRow(row);
         const detailUrl = absUrl(detailAnchor?.getAttribute('href') || detailAnchor?.href || '');
         const assistId = row.querySelector('.assist-id-val')?.value || new URLSearchParams(detailUrl.split('?')[1] || '').get('id') || '';
         const classText = [detailAnchor?.className || '', row.className || ''].join(' ');
         const statusText = text(row.querySelector('.assist-badge')) || text(handleAnchor);
         const assistTimeText = text(row.querySelector('span[title="求助时间"]'));
         const assistAgeSeconds = assistAgeSecondsFrom(assistTimeText);
-        const requesterHref = row.querySelector('a.assist-list-nickname[href*="/user/home"]')?.getAttribute('href') || '';
+        const requesterAnchor = row.querySelector('a.assist-list-nickname[href*="/user/home"]');
+        const requesterHref = requesterAnchor?.getAttribute('href') || '';
         let requesterId = '';
         try {
-          requesterId = new URL(requesterHref, location.href).searchParams.get('id') || '';
+          requesterId = requesterAnchor?.getAttribute('data-id') || new URL(requesterHref, location.href).searchParams.get('id') || '';
         } catch (_) {}
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
         const journalShortName = extractJournalShortNameFromAnchor(detailAnchor);
-        const typeText = text(row.querySelector('.layui-badge[title="文献类型"], .paper-type, .title-hint[title="Book Chapter"]'));
+        const typeText = documentTypeTextFromRow(row);
         const documentType = normalizeDocumentTypeLocal(typeText);
         const doi = doiFrom(rowText);
         return {
@@ -469,8 +508,8 @@
           hasDoi: !!doi,
           publisherName,
           journalShortName,
-          reported: /举报|被举报|涉嫌违规/.test(rowText),
-          rejected: /驳回|已驳回/.test(rowText),
+          reported: /举报|被举报|涉嫌违规/.test(`${rowText} ${markerText}`),
+          rejected: /驳回|已驳回|拒绝/.test(`${rowText} ${markerText}`),
           supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
           documentType,
           documentTypeText: normalizeTextLocal(typeText),
@@ -614,7 +653,7 @@
       if (opts.watcherSkipSupplement && (candidate.documentType === 'supplement' || candidate.supplement)) {
         return { ok: false, reason: 'list_supplement' };
       }
-      if (opts.watcherSkipBookChapter && candidate.documentType === 'book_chapter') {
+      if (opts.watcherSkipBookChapter && (candidate.documentType === 'book_chapter' || isLikelyBookChapterCandidate(candidate))) {
         return { ok: false, reason: 'list_book_chapter' };
       }
       if (opts.watcherSkipPatentReport && candidate.documentType === 'patent_report') {
@@ -783,6 +822,9 @@
       }
       if (opts.watcherSkipRiskText && flags.systemPromptSupplementDoi) {
         return { ok: false, reason: 'detail_system_prompt_si' };
+      }
+      if (opts.watcherSkipRiskText && flags.systemPromptAbnormalAssist) {
+        return { ok: false, reason: 'detail_system_prompt_abnormal' };
       }
       if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
         return { ok: false, reason: 'detail_risk_text' };

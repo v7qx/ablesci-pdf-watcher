@@ -21,8 +21,6 @@
   "host_permissions": [
     "https://www.ablesci.com/*",
     "https://ablesci.com/*",
-    "https://*.oss-cn-shanghai.aliyuncs.com/*",
-    "https://*.aliyuncs.com/*",
     "https://doi.org/*",
     "https://dx.doi.org/*",
     "https://www.sciencedirect.com/*",

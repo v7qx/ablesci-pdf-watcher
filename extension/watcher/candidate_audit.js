@@ -9,8 +9,8 @@
 
     const CANDIDATE_AUDIT_KEY = 'autoWatcherCandidateAudit';
     const CANDIDATE_AUDIT_INDEX_KEY = 'autoWatcherCandidateAuditIndex';
-    const CANDIDATE_AUDIT_LIMIT = 20000;
-    const CANDIDATE_AUDIT_INDEX_LIMIT = 10000;
+    const CANDIDATE_AUDIT_LIMIT = 5000;
+    const CANDIDATE_AUDIT_INDEX_LIMIT = 2000;
     const CANDIDATE_AUDIT_RECENT_EVENTS_LIMIT = 8;
 
     function safeAuditText(value, limit = 500) {
