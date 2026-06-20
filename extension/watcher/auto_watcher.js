@@ -76,7 +76,6 @@
   const { createWatcherLoggingApi } = globalThis.AblesciWatcherLoggingModule;
   const { createWatcherRuntimeHelpersApi } = globalThis.AblesciWatcherRuntimeHelpersModule;
   const { createWatcherBootstrapApi } = globalThis.AblesciWatcherBootstrapModule;
-  const { createWatcherCandidateAuditApi } = globalThis.AblesciWatcherCandidateAuditModule;
   const { createWatcherListScanStatusApi } = globalThis.AblesciWatcherListScanStatusModule;
   const { createWatcherCandidateProcessorApi } = globalThis.AblesciWatcherCandidateProcessorModule;
   const { createWatcherOrchestratorApi } = globalThis.AblesciWatcherOrchestratorModule;
@@ -388,25 +387,17 @@
     riskSnapshot
   });
   const {
-    buildCandidateAuditEntry,
-    appendCandidateAuditEntries,
-    auditParsedListCandidates,
-    listUrlWithAuditPage
-  } = createWatcherCandidateAuditApi({
-    chromeApi: globalThis.chrome
-  });
-  const {
     normalizeParsedListCandidateContext,
     buildCurrentListScan,
     describeCurrentListScan,
     clearCurrentListScan,
+    setCurrentListScan,
     initCurrentPageData,
     updateCurrentPageCandidateStatus
   } = createWatcherListScanStatusApi({
     chromeApi: globalThis.chrome,
     getWatcherState,
-    saveWatcherStateSafe: saveWatcherState,
-    listUrlWithAuditPage
+    saveWatcherStateSafe: saveWatcherState
   });
   const {
     queueableCandidatesFromList,
@@ -429,8 +420,6 @@
     isDetailAllowedForWatcher,
     handleAllowedPayload,
     removeQueuedCandidate,
-    buildCandidateAuditEntry,
-    appendCandidateAuditEntries,
     updateCurrentPageCandidateStatus
   });
   const { runAutoWatcherOnce } = createWatcherOrchestratorApi({
@@ -477,12 +466,11 @@
     flushWatcherTrace,
     queueableCandidatesFromList,
     processCandidateBatch,
-    auditParsedListCandidates,
-    listUrlWithAuditPage,
     normalizeParsedListCandidateContext,
     buildCurrentListScan,
     describeCurrentListScan,
     clearCurrentListScan,
+    setCurrentListScan,
     initCurrentPageData,
     pruneWatcherState,
     emergencyStorageTrim

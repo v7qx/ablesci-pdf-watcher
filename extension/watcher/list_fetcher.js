@@ -253,19 +253,32 @@
     // because it runs inside the page via executeScript). Keep their candidate
     // fields in sync whenever either side changes.
     function parseAssistListHtml(html, url) {
+      const parseStartedAt = Date.now();
+      const stripStartedAt = Date.now();
       const bodyText = stripTags(html);
+      const stripBodyMs = Date.now() - stripStartedAt;
+      const titleStartedAt = Date.now();
       const title = stripTags(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');
+      const titleMs = Date.now() - titleStartedAt;
+      const basePerf = () => ({
+        totalParseMs: Date.now() - parseStartedAt,
+        stripBodyMs,
+        titleMs
+      });
       const isErrorPage =
         /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(`${title} ${bodyText}`) ||
         /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(`${title} ${bodyText}`);
       if (isErrorPage) {
-        return { isErrorPage: true, errorTitle: title || 'error_page', candidates: [], debug: { title, bodyLength: bodyText.length } };
+        return { isErrorPage: true, errorTitle: title || 'error_page', candidates: [], perf: basePerf(), debug: { title, bodyLength: bodyText.length } };
       }
       if (/Cloudflare|Just a moment|请完成验证|验证你是真人|人机验证|安全检查/i.test(bodyText)) {
-        return { cfChallenge: true, candidates: [], debug: { title, bodyLength: bodyText.length } };
+        return { cfChallenge: true, candidates: [], perf: basePerf(), debug: { title, bodyLength: bodyText.length } };
       }
 
+      const extractItemsStartedAt = Date.now();
       const items = extractListItems(html);
+      const extractItemsMs = Date.now() - extractItemsStartedAt;
+      const mapCandidatesStartedAt = Date.now();
       const candidates = items.map((item, index) => {
         const li = item.html;
         const detailHref =
@@ -304,11 +317,23 @@
           index
         };
       }).filter(candidate => candidate.detailUrl);
+      const mapCandidatesMs = Date.now() - mapCandidatesStartedAt;
+      const extractStatsStartedAt = Date.now();
+      const listStats = extractStats(html, url);
+      const extractStatsMs = Date.now() - extractStatsStartedAt;
 
       return {
         cfChallenge: false,
         candidates,
-        listStats: extractStats(html, url),
+        listStats,
+        perf: {
+          totalParseMs: Date.now() - parseStartedAt,
+          stripBodyMs,
+          titleMs,
+          extractItemsMs,
+          mapCandidatesMs,
+          extractStatsMs
+        },
         debug: {
           title,
           rowCount: items.length,
@@ -322,7 +347,7 @@
       };
     }
 
-    async function fetchListUrl(url) {
+    async function fetchListUrl(url, traceContext = {}) {
       const started = Date.now();
       try {
         const response = await fetch(url, {
@@ -330,18 +355,50 @@
           cache: 'no-store',
           redirect: 'follow'
         });
+        const headersAt = Date.now();
         const finalUrl = response.url || url;
         const contentType = response.headers?.get?.('content-type') || '';
         const html = await response.text();
+        const textAt = Date.now();
         const parsed = parseAssistListHtml(html, finalUrl);
-        await appendWatcherTrace('list_fetch_result', {
-          reason: 'background_fetch',
+        const parseDoneAt = Date.now();
+        const perf = {
+          totalMs: parseDoneAt - started,
+          fetchHeadersMs: headersAt - started,
+          readTextMs: textAt - headersAt,
+          parseMs: parseDoneAt - textAt,
+          ...(parsed.perf || {})
+        };
+        await appendWatcherTrace('perf_list_fetch_detail', {
+          reason: 'background_fetch_detail',
+          trigger: traceContext.trigger || '',
+          publisher: traceContext.publisher || '',
+          pickedPage: traceContext.pickedPage || '',
           url,
           finalUrl,
           ok: response.ok,
           status: response.status,
           contentType,
-          elapsedMs: Date.now() - started,
+          candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+          currentPage: parsed.listStats?.currentPage || '',
+          maxPage: parsed.listStats?.maxPage || '',
+          ...perf
+        });
+        await appendWatcherTrace('list_fetch_result', {
+          reason: 'background_fetch',
+          trigger: traceContext.trigger || '',
+          publisher: traceContext.publisher || '',
+          pickedPage: traceContext.pickedPage || '',
+          url,
+          finalUrl,
+          ok: response.ok,
+          status: response.status,
+          contentType,
+          elapsedMs: perf.totalMs,
+          fetchHeadersMs: perf.fetchHeadersMs,
+          readTextMs: perf.readTextMs,
+          parseMs: perf.parseMs,
+          totalParseMs: perf.totalParseMs,
           candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
           currentPage: parsed.listStats?.currentPage || '',
           maxPage: parsed.listStats?.maxPage || '',
@@ -358,6 +415,9 @@
       } catch (err) {
         await appendWatcherTrace('list_fetch_failed', {
           reason: 'background_fetch_failed',
+          trigger: traceContext.trigger || '',
+          publisher: traceContext.publisher || '',
+          pickedPage: traceContext.pickedPage || '',
           url,
           elapsedMs: Date.now() - started,
           error: err?.message || String(err)

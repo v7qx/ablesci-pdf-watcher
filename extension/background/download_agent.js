@@ -29,6 +29,8 @@
       isOxfordUrl,
       isIopUrl,
       publisherForUrl,
+      publisherForDoi,
+      validatePublisherLanding,
       publisherArticleUrlFromPdfUrl,
       looksLikePdfDownloadUrl,
       isLikelyTargetDownload,
@@ -243,6 +245,7 @@
         let sourceUrlForMatching = pdfUrl;
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
+        let directDownloadInProgress = false;
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
         const captureId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         const pollTimeouts = new Set();
@@ -256,6 +259,7 @@
           pdfUrl: options.payload?.pdfUrl || pdfUrl,
           pdfUrlSource: options.payload?.pdfUrlSource || ''
         };
+        const expectedPublisher = publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || publisherForDoi?.(payloadSummary.doi || pdfUrl) || '';
         const startedAfter = new Date(Date.now() - 2000).toISOString();
         const seenIds = new Set();
         const seenIgnoredIds = new Set();
@@ -277,10 +281,18 @@
           appendDiagnosticTrace?.(payloadSummary, {
             ...details,
             step,
-            publisher: publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || '',
+            publisher: expectedPublisher || publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || '',
             articleUrl: traceUrl(articleUrl),
             pdfUrl: traceUrl(pdfUrl)
           });
+        }
+
+        function makeLandingError(landingCheck) {
+          const platform = landingCheck.platform ? ` (${landingCheck.platform})` : '';
+          const err = new Error(`DOI 跳转落地域名暂不支持${platform}：${landingCheck.host || 'unknown'}，已跳过。`);
+          err.failureReason = landingCheck.reason || 'unsupported_landing_host';
+          err.landingCheck = landingCheck;
+          return err;
         }
 
         function looksLikeChallengeUrl(url) {
@@ -472,12 +484,20 @@
             noDownloadTimer = null;
           }
           post(port, 'progress', '已取得出版社真实 PDF 地址，改用 chrome.downloads 直接下载，避免进入浏览器 PDF 预览页。');
-          const item = await downloadByDownloadsAPI(nextUrl, directDownloadFilenameRel, signal, { downloadTimeoutMs });
-          item._ablesciPublisherTabId = tabId;
-          item._ablesciMatchSource = source;
-          item._ablesciCaptureId = captureId;
-          finishOk(item);
-          return item;
+          directDownloadInProgress = true;
+          try {
+            const item = await downloadByDownloadsAPI(nextUrl, directDownloadFilenameRel, signal, { downloadTimeoutMs });
+            item._ablesciPublisherTabId = tabId;
+            item._ablesciMatchSource = source;
+            item._ablesciCaptureId = captureId;
+            finishOk(item);
+            return item;
+          } catch (err) {
+            finishError(err);
+            throw err;
+          } finally {
+            directDownloadInProgress = false;
+          }
         }
 
         async function pollDownloads() {
@@ -494,6 +514,38 @@
             pollTimeouts.delete(timeoutId);
             pollDownloads().catch(() => {});
           }, delayMs);
+          pollTimeouts.add(timeoutId);
+        }
+
+        function waitForDownloadAfterTabClosed() {
+          if (settled) return;
+          if (downloadId !== null || directDownloadInProgress) {
+            tracePublisherStep('publisher_tab_closed_after_download_started', {
+              tabId,
+              downloadId,
+              directDownloadInProgress,
+              captureId
+            });
+            return;
+          }
+          if (!downloadArmed) {
+            finishError(new Error('出版商标签页已关闭，已停止等待下载。'));
+            return;
+          }
+          post(port, 'progress', '出版商标签页已关闭；已触发下载监听，短暂检查浏览器下载记录后再判断。');
+          schedulePoll(0);
+          schedulePoll(500);
+          schedulePoll(1500);
+          const timeoutId = setTimeout(() => {
+            pollTimeouts.delete(timeoutId);
+            pollDownloads()
+              .catch(() => {})
+              .finally(() => {
+                if (settled || downloadId !== null || directDownloadInProgress) return;
+                tracePublisherStep('publisher_tab_closed_no_download_detected', { tabId, captureId });
+                finishError(new Error('出版商标签页已关闭，且未检测到浏览器下载。'));
+              });
+          }, 3000);
           pollTimeouts.add(timeoutId);
         }
 
@@ -520,17 +572,30 @@
             throw err;
           }
 
+          if (expectedPublisher && !isDoiUrl(articleUrl)) {
+            const landingCheck = validatePublisherLanding?.({
+              publisher: expectedPublisher,
+              doi: payloadSummary.doi || '',
+              finalUrl: articleUrl
+            });
+            if (landingCheck && !landingCheck.ok) {
+              tracePublisherStep('publisher_landing_rejected_pre_open', landingCheck);
+              console.warn('[doi-landing] skipped', landingCheck);
+              throw makeLandingError(landingCheck);
+            }
+          }
+
           const tab = await chromeApi.tabs.create({ url: articleUrl, active });
           tabId = tab.id;
           if (chromeApi.tabs.onRemoved) {
             tabRemovedListener = removedTabId => {
               if (removedTabId !== tabId || settled) return;
               tracePublisherStep('publisher_tab_closed', { tabId, captureId });
-              finishError(new Error('出版商标签页已关闭，已停止等待下载。'));
+              waitForDownloadAfterTabClosed();
             };
             chromeApi.tabs.onRemoved.addListener(tabRemovedListener);
           }
-          const pubResolved = publisherForUrl(articleUrl);
+          const pubResolved = publisherForUrl(articleUrl) || expectedPublisher;
           debugLog(`publisherTab created: tabId=${tab.id} publisher=${pubResolved} articleUrl=${articleUrl} pdfUrl=${pdfUrl}`);
           pendingPublisherTabs.set(tabId, {
             pdfUrl,

@@ -100,6 +100,19 @@ If auto-detection fails, manually specify the extension ID:
 .\native-host\install_host.ps1 -Browser Chrome -ExtensionId <your_extension_id>
 ```
 
+Download directory safety:
+
+- The helper only uploads PDF files from the default `Downloads` folder, `%TEMP%`, or directories recorded in `%LOCALAPPDATA%\AblesciPdfWatcher\.ablesci_pdf_watcher.install.json`.
+- If a Chrome / Edge profile uses a custom download directory, rerun the install script for that profile so the helper whitelist is refreshed.
+- `-ProfileDir` accepts either a user data root, such as a dedicated `BrowserProfile_Chrome`, or a concrete profile directory, such as `...\Google\Chrome\User Data\Profile 4`.
+- When `-DownloadDir` is omitted, the installer reads `Preferences -> download.default_directory` from the selected profile and records it. Pass `-DownloadDir` only when you want the installer to set and whitelist a specific directory.
+
+Example for an existing Chrome profile:
+
+```powershell
+.\native-host\install_host.ps1 -Browser Chrome -ProfileDir "$env:LOCALAPPDATA\Google\Chrome\User Data\Profile 4"
+```
+
 ---
 
 ### III. Verification and Testing

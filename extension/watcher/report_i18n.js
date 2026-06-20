@@ -6,6 +6,7 @@
     'skipped': '已跳过',
     'candidate_detail_start': '详情页评估开始',
     'candidate_skip_list_filter': '列表页过滤跳过',
+    'candidate_skip_list_filter_summary': '列表页过滤汇总',
     'candidate_skip_processed': '已处理过滤跳过',
     'candidate_queue_seen_skipped': '队列已见过跳过',
     'run_session_size': '会话大小计算',
@@ -41,6 +42,10 @@
     'perf_watcher_checkpoint': '性能检查点',
     'perf_watcher_run': '值守总耗时',
     'perf_list_parse': '列表解析耗时',
+    'perf_list_fetch_detail': '列表抓取拆分耗时',
+    'perf_list_pipeline': '列表处理流水线耗时',
+    'perf_list_filter': '列表候选过滤耗时',
+    'perf_list_to_detail_start': '列表到详情总耗时',
     'perf_list_scan_page': '列表页扫描耗时',
     'perf_detail_inspect': '详情页检查耗时',
     'perf_candidate_handle': '候选处理耗时',
@@ -52,6 +57,7 @@
     'skipped': 'Skipped',
     'candidate_detail_start': 'Detail Evaluation Start',
     'candidate_skip_list_filter': 'List Page Filter Skipped',
+    'candidate_skip_list_filter_summary': 'List Page Filter Summary',
     'candidate_skip_processed': 'Processed Filter Skipped',
     'candidate_queue_seen_skipped': 'Queue Seen Skipped',
     'run_session_size': 'Session Size Calculation',
@@ -87,6 +93,10 @@
     'perf_watcher_checkpoint': 'Performance Checkpoint',
     'perf_watcher_run': 'Watcher Run Duration',
     'perf_list_parse': 'List Parse Duration',
+    'perf_list_fetch_detail': 'List Fetch Breakdown',
+    'perf_list_pipeline': 'List Pipeline Duration',
+    'perf_list_filter': 'List Candidate Filter Duration',
+    'perf_list_to_detail_start': 'List To Detail Duration',
     'perf_list_scan_page': 'List Page Scan Duration',
     'perf_detail_inspect': 'Detail Inspect Duration',
     'perf_candidate_handle': 'Candidate Handle Duration',
@@ -95,6 +105,7 @@
 
   const REASON_TRANSLATIONS = {
     'candidate_passed_list_filter': '候选通过列表筛选',
+    'list_filter_summary': '列表页过滤汇总',
     'session_size_calculated': '会话大小已计算',
     'already running': '已有任务在运行中',
     'already_running': '已有任务在运行中',
@@ -119,6 +130,9 @@
     'reported': '已被举报/处理过',
     'rejected': '已被拒绝',
     'no_access': '无订阅访问权限',
+    'recognized_but_unsupported_landing_host': '已知但暂不支持的 DOI 落地域名',
+    'unsupported_landing_host': '暂不支持的 DOI 落地域名',
+    'invalid_landing_url': '无效 DOI 落地 URL',
     'journal_blocked_rule': '命中本地期刊规则',
     'journal_blocked_rule_summary': '本轮命中本地期刊规则，已聚合显示',
     'between_candidates': '候选任务间延迟等待',
@@ -130,6 +144,7 @@
 
   const REASON_TRANSLATIONS_EN = {
     'candidate_passed_list_filter': 'Candidate passed list filter',
+    'list_filter_summary': 'List page filter summary',
     'session_size_calculated': 'Session size calculated',
     'already running': 'Task already running',
     'already_running': 'Task already running',
@@ -154,6 +169,9 @@
     'reported': 'Already reported/handled',
     'rejected': 'Already rejected',
     'no_access': 'No subscription access',
+    'recognized_but_unsupported_landing_host': 'Recognized but unsupported DOI landing host',
+    'unsupported_landing_host': 'Unsupported DOI landing host',
+    'invalid_landing_url': 'Invalid DOI landing URL',
     'journal_blocked_rule': 'Local journal rule matched',
     'journal_blocked_rule_summary': 'Local journal rule matches grouped for this run',
     'between_candidates': 'Cooldown delay between candidates',
@@ -257,48 +275,8 @@
     return r;
   }
 
-  function translateCandidateAuditPhase(phase, isEn) {
-    const key = String(phase || '');
-    const zh = {
-      list_seen: '列表解析到',
-      list_queueable: '通过列表筛选',
-      list_skip: '列表页跳过',
-      queue_added: '加入队列',
-      queue_refreshed: '刷新队列',
-      queue_seen_skip: '队列已见过跳过',
-      queue_consume_seen: '本轮取出队列',
-      consume_list_skip: '消费前列表规则跳过',
-      processed_skip: '已处理记录跳过',
-      detail_budget_exhausted: '详情尝试预算用尽',
-      detail_start: '开始检查详情',
-      detail_skip: '详情页跳过',
-      detail_failed: '详情页失败',
-      handled: '已处理',
-      handle_not_done: '未处理完成'
-    };
-    const en = {
-      list_seen: 'List Seen',
-      list_queueable: 'List Queueable',
-      list_skip: 'List Skipped',
-      queue_added: 'Queue Added',
-      queue_refreshed: 'Queue Refreshed',
-      queue_seen_skip: 'Queue Seen Skipped',
-      queue_consume_seen: 'Queue Consumed',
-      consume_list_skip: 'Consumed List Skipped',
-      processed_skip: 'Processed Skipped',
-      detail_budget_exhausted: 'Detail Budget Exhausted',
-      detail_start: 'Detail Started',
-      detail_skip: 'Detail Skipped',
-      detail_failed: 'Detail Failed',
-      handled: 'Handled',
-      handle_not_done: 'Not Handled'
-    };
-    return (isEn ? en : zh)[key] || key;
-  }
-
   globalThis.AblesciWatcherReportI18n = {
     translateStep,
-    translateReason,
-    translateCandidateAuditPhase
+    translateReason
   };
 })();

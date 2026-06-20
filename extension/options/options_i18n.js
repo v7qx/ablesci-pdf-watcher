@@ -100,7 +100,7 @@
   "勾选要值守的出版社后点\"生成\"，会写入下方列表 URL（每个出版社一行，运行时随机翻页）。若某出版社在科研通的 slug 不同，可直接编辑下方 URL。": "Tick the publishers to watch, then click Generate to fill the list URLs below (one per publisher, random page each run). If a publisher's Ablesci slug differs, edit the URL below directly.",
   "生成到列表 URL": "Generate List URLs",
   "列表 URL": "List URLs",
-  "每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；如需限制范围可追加 <code>&amp;page_min=1&amp;page_max=5</code>。": "One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Add <code>&amp;page_min=1&amp;page_max=5</code> to limit the page range.",
+  "每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；快选默认生成 <code>&amp;page_min=1&amp;page_max=</code>，会自动检测最大页；如需限制范围可改成 <code>&amp;page_min=1&amp;page_max=5</code>。": "One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Quick-pick generates <code>&amp;page_min=1&amp;page_max=</code> to auto-detect the max page; set <code>&amp;page_min=1&amp;page_max=5</code> to limit the range.",
   "非 SD 最低求助量": "Min Non-SD Requests",
   "除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。": "Min waiting count required to parse non-SD pages. 0 to disable, defaults to 200.",
   "控制哪些求助在列表页和详情页被跳过。": "Control which requests are skipped on list and details pages.",

@@ -22,10 +22,7 @@
       alarmName
     } = config;
 
-    const CANDIDATE_AUDIT_KEY = 'autoWatcherCandidateAudit';
-    const CANDIDATE_AUDIT_INDEX_KEY = 'autoWatcherCandidateAuditIndex';
-
-    const { translateStep, translateReason, translateCandidateAuditPhase } = globalThis.AblesciWatcherReportI18n;
+    const { translateStep, translateReason } = globalThis.AblesciWatcherReportI18n;
 
     function csvEscape(value) {
       let str = String(value ?? '');
@@ -42,17 +39,6 @@
     function makeCsv(rows) {
       return '\uFEFF' + rows.map(row => row.map(csvEscape).join(',')).join('\n') + '\n';
     }
-
-    // Candidate audit / state CSV builders live in watcher/report_candidates.js
-    // (loaded before this module in background.js importScripts).
-    const { buildCandidateAuditCsv, buildCandidateStateCsv } = globalThis.AblesciWatcherCandidateReportModule.createWatcherCandidateReportApi({
-      makeCsv,
-      formatBeijingDateTime,
-      formatBeijingTimeOnly,
-      reportJson,
-      translateCandidateAuditPhase,
-      translateReason
-    });
 
     function dataUrl(content, mime) {
       return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
@@ -103,6 +89,18 @@
       if (details.currentExecutionModel) parts.push(`执行模式: ${details.currentExecutionModel}`);
       if (details.checkedDelta !== undefined) parts.push(`检查变化: ${details.checkedDelta}`);
       if (details.downloadedDelta !== undefined) parts.push(`下载变化: ${details.downloadedDelta}`);
+      if (details.candidateCount !== undefined) parts.push(`候选: ${details.candidateCount}`);
+      if (details.queueableCount !== undefined) parts.push(`可处理: ${details.queueableCount}`);
+      if (details.skippedCount !== undefined) parts.push(`跳过: ${details.skippedCount}`);
+      if (details.journalBlockedCount !== undefined) parts.push(`期刊规则: ${details.journalBlockedCount}`);
+      if (details.reasonCounts && typeof details.reasonCounts === 'object' && !Array.isArray(details.reasonCounts)) {
+        const reasonText = Object.entries(details.reasonCounts)
+          .filter(([, count]) => count !== undefined && count !== null && count !== '' && Number(count) !== 0)
+          .slice(0, 8)
+          .map(([reason, count]) => `${translateReason(reason, false)}=${count}`)
+          .join(', ');
+        if (reasonText) parts.push(reasonText);
+      }
       
       if (parts.length > 0) {
         return parts.join(' | ');
@@ -206,9 +204,7 @@
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
         autoWatcherLogKey,
-        autoWatcherTraceKey,
-        CANDIDATE_AUDIT_KEY,
-        CANDIDATE_AUDIT_INDEX_KEY
+        autoWatcherTraceKey
       ]);
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[date] || {};
@@ -222,11 +218,6 @@
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
-      const candidateAudit = (Array.isArray(stored[CANDIDATE_AUDIT_KEY]) ? stored[CANDIDATE_AUDIT_KEY] : [])
-        .filter(entry => formatBeijingDateTime(entry.time, true) === date);
-      const candidateAuditIndex = stored[CANDIDATE_AUDIT_INDEX_KEY] && typeof stored[CANDIDATE_AUDIT_INDEX_KEY] === 'object' && !Array.isArray(stored[CANDIDATE_AUDIT_INDEX_KEY])
-        ? Object.values(stored[CANDIDATE_AUDIT_INDEX_KEY])
-        : [];
       const journalAccessStats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
         ? Object.values(state.journalAccessStats)
         : [];
@@ -343,6 +334,58 @@
         }
         return detail;
       }
+      function formatDurationMs(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? `${Math.round(n)}ms` : '';
+      }
+      function formatListPerfDetail(trace) {
+        const details = trace?.details || {};
+        const fields = [];
+        const push = (label, key) => {
+          const text = formatDurationMs(details[key]);
+          if (text) fields.push(`${label} ${text}`);
+        };
+        if (trace?.step === 'perf_list_fetch_detail') {
+          push('fetch', 'fetchHeadersMs');
+          push('text', 'readTextMs');
+          push('parse', 'parseMs');
+          push('strip', 'stripBodyMs');
+          push('items', 'extractItemsMs');
+          push('map', 'mapCandidatesMs');
+          push('stats', 'extractStatsMs');
+          push('total', 'totalMs');
+        } else if (trace?.step === 'perf_list_filter') {
+          push('loop', 'filterLoopMs');
+          push('summary', 'appendSummaryMs');
+          push('total', 'totalMs');
+        } else if (trace?.step === 'perf_list_pipeline') {
+          push('normalize', 'normalizeMs');
+          push('pageData', 'initPageDataMs');
+          push('gate', 'sourceGateMs');
+          push('order', 'orderMs');
+          push('filter', 'listFilterMs');
+          push('total', 'totalMs');
+        } else if (trace?.step === 'perf_list_to_detail_start') {
+          push('run->detail', 'sinceRunStartMs');
+          push('parseStart->detail', 'sinceListParseStartMs');
+          push('parseDone->detail', 'sinceListParseDoneMs');
+        } else {
+          push('duration', 'durationMs');
+          push('total', 'totalMs');
+          push('elapsed', 'elapsedMs');
+        }
+        const counts = [];
+        if (details.candidateCount !== undefined && details.candidateCount !== '') counts.push(`candidates=${details.candidateCount}`);
+        if (details.parsedCount !== undefined && details.parsedCount !== '') counts.push(`parsed=${details.parsedCount}`);
+        if (details.queueableCount !== undefined && details.queueableCount !== '') counts.push(`queueable=${details.queueableCount}`);
+        if (details.skippedCount !== undefined && details.skippedCount !== '') counts.push(`skipped=${details.skippedCount}`);
+        if (details.journalBlockedCount !== undefined && details.journalBlockedCount !== '') counts.push(`journalBlocked=${details.journalBlockedCount}`);
+        return [...fields, ...counts].join(' | ');
+      }
+      const listPerfTraceRows = traces
+        .filter(trace => /^perf_list_/i.test(String(trace.step || '')))
+        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+        .slice(0, 30);
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -407,6 +450,24 @@
               details: reportJson(details)
             });
           }),
+        ...traces
+          .filter(trace => /^perf_list_/i.test(String(trace.step || '')))
+          .map(trace => {
+            const details = trace.details || {};
+            return reportRow('trace_perf', {
+              time: formatBeijingDateTime(trace.time),
+              sessionId: trace.sessionId || details.sessionId || '',
+              trigger: trace.trigger || details.trigger || '',
+              assistId: traceAssistIdValue(details),
+              detailUrl: traceDetailUrlValue(details, trace),
+              status: translateStep(trace.step || '', isEn),
+              reason: translateReason(trace.reason || details.reason || '', isEn),
+              publisher: details.publisher || '',
+              step: trace.step || '',
+              url: traceDetailUrlValue(details, trace),
+              details: reportJson(details)
+            });
+          }),
         ...journalAccessStats.map(entry => reportRow('journal_access_cache', {
           time: entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
           assistId: entry.lastAssistId || '',
@@ -421,8 +482,6 @@
         }))
       ];
       const csv = makeCsv(csvRows);
-      const candidateAuditCsv = buildCandidateAuditCsv(candidateAudit, isEn);
-      const { csv: candidateStateCsv, idCount: candidateStateIdCount } = buildCandidateStateCsv(candidateAuditIndex, date, isEn);
       const skipDecisionRows = [
         ...logs
           .filter(log => String(log.status) === 'skipped' || String(log.status) === 'failed')
@@ -443,6 +502,7 @@
         ...traces
           .filter(trace => {
             const textToTest = `${trace.step || ''} ${trace.reason || ''}`;
+            if (String(trace.step || '') === 'candidate_skip_list_filter_summary') return true;
             return /skip|not_due|zero|outside|limit|risk|no_candidate/i.test(textToTest)
               && !/passed|start|allowed|success|done|running/i.test(textToTest);
           })
@@ -527,17 +587,11 @@
         `- 详细事件数据 file: ${monthDir}/watcher-data-${date}.jsonl`,
         `- Trace 事件记录数: ${traces.length}`
       ]);
-      summaryLines.push(
-        ...(isEn ? [
-          `- Candidate Audit CSV: ${monthDir}/${date}-candidate-audit.csv (${candidateAudit.length} rows)`,
-          `- Candidate State CSV: ${monthDir}/${date}-candidate-state.csv (${candidateStateIdCount} IDs)`,
-          ...(cleanerStats.failed > 0 ? [`- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`] : [])
-        ] : [
-          `- 候选审计 CSV: ${monthDir}/${date}-candidate-audit.csv（${candidateAudit.length} 行）`,
-          `- 候选状态 CSV: ${monthDir}/${date}-candidate-state.csv（${candidateStateIdCount} 个 ID）`,
-          ...(cleanerStats.failed > 0 ? [`- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`] : [])
-        ])
-      );
+      if (cleanerStats.failed > 0) {
+        summaryLines.push(isEn
+          ? `- PDF Cleaner Errors: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`
+          : `- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`);
+      }
 
       const sizeInterceptedLogs = logs.filter(log => {
         const r = String(log.reason || '');
@@ -633,6 +687,31 @@
         );
       }
 
+      const listPerfLines = [];
+      if (listPerfTraceRows.length > 0) {
+        listPerfLines.push(
+          isEn ? '## List Parsing Performance' : '## 列表解析性能',
+          '',
+          isEn
+            ? '| Time | Trigger | Step | Publisher | Page | Detail | Date |'
+            : '| 时间 | 触发方式 | 阶段 | 出版社 | 页码 | 耗时拆分 | 日期 |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
+          ...listPerfTraceRows.map(trace => {
+            const details = trace.details || {};
+            return formatMarkdownTableRow([
+              formatBeijingTimeOnly(trace.time),
+              trace.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (trace.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : trace.trigger),
+              translateStep(trace.step || '', isEn),
+              details.publisher || '',
+              details.pickedPage || details.currentPage || '',
+              formatListPerfDetail(trace),
+              formatBeijingDateOnly(trace.time)
+            ]);
+          }),
+          ''
+        );
+      }
+
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
@@ -643,6 +722,7 @@
         ...sizeInterceptedLines,
         ...doiNotFoundLines,
         ...cleanerErrorLines,
+        ...listPerfLines,
         '## Skips And Decisions',
         '',
         isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',
@@ -681,8 +761,6 @@
       ].map(line => line.trimEnd()).join('\n');
 
       await writeReportFile(`${reportStem}.csv`, csv, 'text/csv', opts);
-      await writeReportFile(`${reportStem}-candidate-audit.csv`, candidateAuditCsv, 'text/csv', opts);
-      await writeReportFile(`${reportStem}-candidate-state.csv`, candidateStateCsv, 'text/csv', opts);
       await writeReportFile(`${reportStem}.md`, md, 'text/markdown', opts);
       // PRIVATE_WATCHER_ONLY: skipped writing .jsonl file to optimize disk space
     }

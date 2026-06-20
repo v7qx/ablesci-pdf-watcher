@@ -114,12 +114,24 @@
           const noisySteps = [
             'candidate_skip_list_filter',
             'candidate_skip_processed',
+            'candidate_detail_start',
+            'candidate_payload_allowed',
+            'candidate_enqueue',
+            'candidate_handled',
             'session_plan_url',
             'session_plan_result',
             'session_plan_done',
             'session_source_order',
             'run_session_size',
+            'run_start',
+            'run_finish',
+            'run_target_state',
             'session_size_calculated',
+            'random_single_assist_source',
+            'random_single_page_range_detected',
+            'random_single_assist_page',
+            'random_single_assist_candidates',
+            'random_single_assist_page_try',
             'tab_open_request',
             'tab_opened',
             'tab_complete',
@@ -129,6 +141,8 @@
             'tab_close_failed',
             'list_dom_ready',
             'list_parse_result',
+            'detail_extract_result',
+            'queue_message_done',
             'alarm_refresh_start',
             'alarm_cleared',
             'alarm_disabled',
@@ -136,7 +150,8 @@
             'alarm_scheduled_existing_assist',
             'alarm_scheduled_rate_limited_retry',
             'sync_web_assist_count',
-            'assist_next_scheduled'
+            'assist_next_scheduled',
+            'perf_watcher_checkpoint'
           ];
           if (noisySteps.includes(step)) return;
         }

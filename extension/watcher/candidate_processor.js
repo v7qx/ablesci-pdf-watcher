@@ -21,8 +21,6 @@
       isDetailAllowedForWatcher,
       handleAllowedPayload,
       removeQueuedCandidate,
-      buildCandidateAuditEntry,
-      appendCandidateAuditEntries,
       updateCurrentPageCandidateStatus
     } = config;
 
@@ -74,71 +72,57 @@
     }
 
     async function queueableCandidatesFromList(candidates, opts, trigger, pagePick, blacklistedIds = []) {
+      const totalStartedAt = Date.now();
       const stateForListFilter = await getWatcherState();
       const queueable = [];
-      const auditEntries = [];
       const journalBlockedSummary = { count: 0, examples: new Set(), journals: new Set(), page: pagePick.pickedPage || '' };
-      for (const rawCandidate of Array.isArray(candidates) ? candidates : []) {
+      const skippedReasonCounts = {};
+      const list = Array.isArray(candidates) ? candidates : [];
+      const loopStartedAt = Date.now();
+      for (const rawCandidate of list) {
         const candidate = enrichCandidateJournalFromMap(rawCandidate, stateForListFilter);
         const listAllowed = isListCandidateAllowed(candidate, opts, stateForListFilter, blacklistedIds);
         if (listAllowed.ok) {
           queueable.push(candidate);
-          auditEntries.push(buildCandidateAuditEntry('list_queueable', candidate, {
-            status: 'queueable',
-            reason: 'passed_list_filter',
-            trigger,
-            page: pagePick.pickedPage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            source: 'list_page_refill'
-          }));
           continue;
         }
-        await appendWatcherTrace('candidate_skip_list_filter', {
-          reason: listAllowed.reason,
-          reasonText: describeWatcherReason(listAllowed.reason),
-          trigger,
-          detailUrl: candidate.detailUrl,
-          assistId: candidate.assistId || '',
-          journalShortName: candidate.journalShortName || '',
-          assistTimeText: candidate.assistTimeText || '',
-          assistAgeSeconds: candidate.assistAgeSeconds ?? '',
-          journalAccess: listAllowed.journalAccess || null,
-          source: 'list_page_refill'
-        });
+        skippedReasonCounts[listAllowed.reason] = Number(skippedReasonCounts[listAllowed.reason] || 0) + 1;
         if (listAllowed.reason === 'journal_blocked_rule') {
           journalBlockedSummary.count += 1;
           if (candidate.assistId) journalBlockedSummary.examples.add(candidate.assistId);
           const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
           if (shortName) journalBlockedSummary.journals.add(shortName);
         }
-        auditEntries.push(buildCandidateAuditEntry('list_skip', candidate, {
-          status: 'skipped',
-          reason: listAllowed.reason,
-          trigger,
-          page: pagePick.pickedPage,
-          pageOrder: pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          source: 'list_page_refill',
-          details: {
-            reasonText: describeWatcherReason(listAllowed.reason),
-            journalAccess: listAllowed.journalAccess || null
-          }
-        }));
-        await updateProcessed(
-          getProcessedKey(candidate),
-          'skipped',
-          listAllowed.reason,
-          processedMeta(candidate, null, pagePick, pagePick.pickedPage)
-        );
-        await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
       }
-      await appendCandidateAuditEntries(auditEntries);
+      const filterLoopMs = Date.now() - loopStartedAt;
+      const summaryStartedAt = Date.now();
       await appendJournalBlockedSummary(journalBlockedSummary, trigger);
+      const appendSummaryMs = Date.now() - summaryStartedAt;
+      if (Object.keys(skippedReasonCounts).length > 0) {
+        await appendWatcherTrace('candidate_skip_list_filter_summary', {
+          reason: 'list_filter_summary',
+          trigger,
+          pickedPage: pagePick.pickedPage || '',
+          publisher: pagePick.publisher || '',
+          skippedCount: Math.max(0, list.length - queueable.length),
+          reasonCounts: skippedReasonCounts,
+          source: 'list_page_refill'
+        });
+      }
+      await appendWatcherTrace('perf_list_filter', {
+        reason: 'list_filter_done',
+        trigger,
+        candidateCount: list.length,
+        queueableCount: queueable.length,
+        skippedCount: Math.max(0, list.length - queueable.length),
+        journalBlockedCount: journalBlockedSummary.count,
+        pickedPage: pagePick.pickedPage || '',
+        publisher: pagePick.publisher || '',
+        filterLoopMs,
+        appendSummaryMs,
+        skippedStateWrites: 'deferred',
+        totalMs: Date.now() - totalStartedAt
+      });
       return queueable;
     }
 
@@ -187,21 +171,6 @@
             const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
             if (shortName) journalBlockedSummary.journals.add(shortName);
           }
-          await appendCandidateAuditEntries([buildCandidateAuditEntry('consume_list_skip', candidate, {
-            status: 'skipped',
-            reason: listAllowed.reason,
-            trigger,
-            page: candidatePage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            source: 'list_page',
-            details: {
-              reasonText: describeWatcherReason(listAllowed.reason),
-              journalAccess: listAllowed.journalAccess || null
-            }
-          })]);
           await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', listAllowed.reason);
           await removeQueuedCandidate(candidate, listAllowed.reason);
           continue;
@@ -214,17 +183,6 @@
             assistId: candidate.assistId || '',
             source: 'list_page'
           });
-          await appendCandidateAuditEntries([buildCandidateAuditEntry('processed_skip', candidate, {
-            status: 'skipped',
-            reason: 'processed_before',
-            trigger,
-            page: candidatePage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            source: 'list_page'
-          })]);
           await updateCurrentPageCandidateStatus(candidate.assistId, 'skipped', 'processed_before');
           await removeQueuedCandidate(candidate, 'processed_before');
           continue;
@@ -238,18 +196,6 @@
             sourceKey: sourceKeyFromCandidate(candidate, pagePick),
             source: 'list_page'
           });
-          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_budget_exhausted', candidate, {
-            status: 'pending',
-            reason: 'source_detail_attempt_budget',
-            trigger,
-            page: candidatePage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            source: 'list_page',
-            details: { maxDetailAttempts }
-          })]);
           break;
         }
         detailAttempts += 1;
@@ -260,17 +206,6 @@
           assistId: candidate.assistId || '',
           source: 'list_page'
         });
-        await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_start', candidate, {
-          status: 'processing',
-          reason: 'candidate_passed_list_filter',
-          trigger,
-          page: candidatePage,
-          pageOrder: pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          source: 'list_page'
-        })]);
         await updateCurrentPageCandidateStatus(candidate.assistId, 'processing', '检查详情页...');
         const detailStartedAt = Date.now();
         const detail = await inspectDetail(candidate);
@@ -295,17 +230,6 @@
           await updateProcessed(getProcessedKey(candidate), 'failed', detail.reason, processedMeta(candidate, null, pagePick, candidatePage));
           await incrementDaily('failed', trigger);
           await appendWatcherLog({ ...candidate, trigger, status: 'failed', reason: detail.reason, page: candidatePage });
-          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_failed', candidate, {
-            status: 'failed',
-            reason: detail.reason,
-            trigger,
-            page: candidatePage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            source: 'list_page'
-          })]);
           await removeQueuedCandidate(candidate, detail.reason);
           continue;
         }
@@ -329,19 +253,6 @@
           await updateProcessed(key, 'skipped', detailAllowed.reason, processedMeta(candidate, payload, pagePick, candidatePage));
           await incrementDaily('skipped', trigger);
           await appendWatcherLog({ ...payload, detailUrl: candidate.detailUrl, trigger, status: 'skipped', reason: detailAllowed.reason, page: candidatePage });
-          await appendCandidateAuditEntries([buildCandidateAuditEntry('detail_skip', { ...candidate, ...payload }, {
-            status: 'skipped',
-            reason: detailAllowed.reason,
-            trigger,
-            page: candidatePage,
-            pageOrder: pagePick.pageOrder,
-            pageMax: pagePick.pageMax,
-            urlKey: pagePick.urlKey,
-            publisher: pagePick.publisher,
-            tabId: detail.tabId,
-            source: 'list_page',
-            details: { reasonText: describeWatcherReason(detailAllowed.reason) }
-          })]);
           await removeQueuedCandidate(candidate, detailAllowed.reason);
           continue;
         }
@@ -359,22 +270,6 @@
         });
         const handled = typeof handledResult === 'object' ? handledResult.handled === true : handledResult === true;
         if (!handled) await closeTabQuietly(detail.tabId, 'candidate_not_handled');
-        await appendCandidateAuditEntries([buildCandidateAuditEntry(handled ? 'handled' : 'handle_not_done', { ...candidate, ...payload }, {
-          status: handled ? 'handled' : 'not_handled',
-          reason: handledResult?.reason || (handled ? 'handled' : 'candidate_not_handled'),
-          trigger,
-          page: candidatePage,
-          pageOrder: pagePick.pageOrder,
-          pageMax: pagePick.pageMax,
-          urlKey: pagePick.urlKey,
-          publisher: pagePick.publisher,
-          tabId: detail.tabId,
-          source: 'list_page',
-          details: {
-            stopRun: handledResult?.stopRun === true,
-            removeQueue: handledResult?.removeQueue === true
-          }
-        })]);
         if (handled || handledResult?.stopRun === true || handledResult?.removeQueue === true) {
           await removeQueuedCandidate(candidate, handledResult?.reason || 'handled');
         }

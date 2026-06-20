@@ -132,7 +132,17 @@
           if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
             accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
           }
-          const normalSkipReasons = new Set(['publisher_unsupported', 'no_access', 'explicit_no_subscription', 'empty_pdf_file', 'assist_closed', 'tab_drag_locked']);
+          const normalSkipReasons = new Set([
+            'publisher_unsupported',
+            'recognized_but_unsupported_landing_host',
+            'unsupported_landing_host',
+            'invalid_landing_url',
+            'no_access',
+            'explicit_no_subscription',
+            'empty_pdf_file',
+            'assist_closed',
+            'tab_drag_locked'
+          ]);
           if (!normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});
           }
@@ -142,8 +152,10 @@
               await saveErrorDiagnostic(payload, err);
             }
             const cleanerExtra = err?.pdfCleanerResult ? { pdfCleanerResult: err.pdfCleanerResult } : {};
-            if (failureReason === 'publisher_unsupported') {
-              const message = formatTaskError(err) || '当前出版商页面类型不支持，已按正常情况跳过本次任务。';
+            if (failureReason === 'publisher_unsupported' || failureReason === 'recognized_but_unsupported_landing_host' || failureReason === 'unsupported_landing_host' || failureReason === 'invalid_landing_url') {
+              const landing = err?.landingCheck || {};
+              const platformText = landing.platform ? `（${landing.platform}）` : '';
+              const message = formatTaskError(err) || `DOI 跳转落地域名暂不支持${platformText}，已按正常情况跳过本次任务。`;
               post(port, 'done', message, {
                 html: escapeHtml(message),
                 recomend: false,
@@ -151,7 +163,7 @@
                 downloadOnly: true,
                 blocked: true,
                 skipped: true,
-                skipReason: 'publisher_unsupported',
+                skipReason: failureReason,
                 ...cleanerExtra
               });
             } else if (isNonPdfAccessPageError(err)) {

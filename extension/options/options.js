@@ -195,7 +195,7 @@ async function load() {
     document.title = 'Ablesci PDF Watcher Settings';
     const descNode = el('watcherListUrlsDesc');
     if (descNode) {
-      descNode.textContent = 'One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Add &page_min=1&page_max=5 to limit the page range.';
+      descNode.textContent = 'One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Quick-pick generates &page_min=1&page_max= to auto-detect the max page; set &page_min=1&page_max=5 to limit the range.';
     }
   }
 
@@ -204,6 +204,7 @@ async function load() {
 }
 
 const WATCHER_PUBLISHER_LIST_BASE = 'https://www.ablesci.com/assist/index?status=waiting&publisher=';
+const WATCHER_PUBLISHER_RANDOM_PAGE_SUFFIX = '&page_min=1&page_max=';
 
 // Publisher quick-pick: convenience that writes editable list URLs (one per
 // checked publisher) into the watcherListUrls textarea. The textarea stays the
@@ -215,7 +216,7 @@ function generateListUrlsFromPublishers() {
     .filter(Boolean);
   if (!slugs.length) return;
   const textarea = el('watcherListUrls');
-  if (textarea) textarea.value = slugs.map(slug => WATCHER_PUBLISHER_LIST_BASE + slug).join('\n');
+  if (textarea) textarea.value = slugs.map(slug => WATCHER_PUBLISHER_LIST_BASE + slug + WATCHER_PUBLISHER_RANDOM_PAGE_SUFFIX).join('\n');
 }
 
 function syncPublisherChecksFromUrls() {

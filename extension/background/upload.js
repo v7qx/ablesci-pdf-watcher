@@ -86,6 +86,70 @@
       return result;
     }
 
+    function isSupplementalPdfDownload(payload, item) {
+      const values = [
+        payload?.doi,
+        payload?.pdfUrl,
+        payload?.pageUrl,
+        payload?.title,
+        payload?.suggestedFilename,
+        item?.url,
+        item?.finalUrl,
+        item?.filename
+      ].map(value => String(value || '').toLowerCase()).filter(Boolean);
+      if (!values.length) return false;
+      return values.some(value =>
+        /(?:^|[/?#&._-])mm\d+(?:[/?#&._-]|$)/i.test(value) ||
+        /(?:^|[/?#&._-])supp\d*(?:[/?#&._-]|$)/i.test(value) ||
+        /(?:^|[/?#&._-])suppl\d*(?:[/?#&._-]|$)/i.test(value) ||
+        /(?:supplemental|supplementary)(?:[/?#&._-]|$)/i.test(value)
+      );
+    }
+
+    async function stopForSupplementalPdfDownload(port, diag, payload, item, downloadMeta, opts = {}) {
+      let removed = false;
+      let removeReason = 'no local filename';
+      const filename = item?.filename || '';
+      if (filename) {
+        try {
+          await deleteUploadedFile(opts.nativeHostName, filename);
+          removed = true;
+          removeReason = 'deleted supplemental pdf file';
+        } catch (err) {
+          removeReason = formatTaskError(err) || 'failed to delete supplemental pdf file';
+        }
+      }
+      if (!opts.keepDownloadHistory && item?.id != null) {
+        try { await chromeApi.downloads.erase({ id: item.id }); } catch (_) {}
+      }
+      const message = removed
+        ? '下载到的文件疑似补充材料 PDF，已删除本地文件并跳过上传。'
+        : '下载到的文件疑似补充材料 PDF，已跳过上传；本地文件删除失败，请人工检查下载目录。';
+      await saveDiagnostic({
+        ...diag,
+        stage: 'blocked-supplement-pdf-download',
+        downloadItem: downloadMeta || sanitizeDownloadItem(item),
+        error: 'supplemental pdf download detected',
+        removedDownloadFile: removed,
+        removeReason,
+        source: {
+          doi: payload?.doi || '',
+          pdfUrl: payload?.pdfUrl || '',
+          pageUrl: payload?.pageUrl || '',
+          title: payload?.title || payload?.suggestedFilename || ''
+        }
+      });
+      post(port, 'done', message, {
+        html: escapeHtml(message),
+        recomend: false,
+        reload: false,
+        downloadOnly: true,
+        blocked: true,
+        skipped: true,
+        skipReason: 'supplement_pdf'
+      });
+    }
+
     function pdfCleanerSummaryText(result) {
       if (!result || !result.enabled) return '';
       const engine = result.engine ? `，引擎 ${result.engine}` : '';
@@ -305,6 +369,10 @@
       await saveDiagnostic({ ...diag, stage: 'download-complete', downloadItem: downloadMeta });
       if (isHtmlDownloadItem(item)) {
         await stopForNonPdfDownload(port, diag, item, downloadMeta, 'blocked-html-download', htmlDownloadMessage, opts);
+        return;
+      }
+      if (isSupplementalPdfDownload(payload, item)) {
+        await stopForSupplementalPdfDownload(port, diag, payload, item, downloadMeta, opts);
         return;
       }
 

@@ -103,6 +103,9 @@
       if (/doi\.org/i.test(raw) && /not found|404|invalid|不存在|未找到/i.test(raw)) return 'doi_resolution_failed';
       if (/There was a problem providing the content you requested/i.test(raw)) return 'publisher_error_page';
       if (/publisher.*challenge|出版商.*验证|Cloudflare|Just a moment|captcha|security check/i.test(raw)) return 'cf_challenge';
+      if (/recognized_but_unsupported_landing_host|已知但暂不支持.*落地域名|IEEE Computer Society CSDL/i.test(raw)) return 'recognized_but_unsupported_landing_host';
+      if (/unsupported_landing_host|落地域名暂不支持|暂不支持.*落地域名/i.test(raw)) return 'unsupported_landing_host';
+      if (/invalid_landing_url|无效.*落地 URL/i.test(raw)) return 'invalid_landing_url';
       if (/明确返回无正文订阅权限|does not subscribe to this content on ScienceDirect/i.test(raw)) return 'explicit_no_subscription';
       if (/ScienceDirect 当前页面没有正文订阅权限|当前页面没有正文订阅权限|页面明确显示无正文访问权限|无正文访问权限|无正文\s*PDF\s*访问权限|无访问权限/i.test(raw)) return 'no_access';
       if (/等待 ScienceDirect 登录\/机构访问超时|需要登录或机构访问|ScienceDirect 需要登录/i.test(raw)) return 'login_required';

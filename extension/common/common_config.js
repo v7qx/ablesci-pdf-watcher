@@ -43,7 +43,7 @@
     watcherMaxCandidatesPerRun: 1,
     watcherMinNonSdSeekingCount: 200,
     watcherListUrls: [
-      'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page=3'
+      'https://www.ablesci.com/assist/index?status=waiting&publisher=elsevier&page_min=1&page_max='
     ],
     watcherRequireDoi: true,
     watcherSkipReported: true,

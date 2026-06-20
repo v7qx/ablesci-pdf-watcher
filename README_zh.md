@@ -100,6 +100,19 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\native-host\install_host.ps1 -Browser Chrome -ExtensionId <你的扩展ID>
 ```
 
+下载目录安全白名单：
+
+- Helper 只会上传默认 `Downloads`、`%TEMP%`，以及 `%LOCALAPPDATA%\AblesciPdfWatcher\.ablesci_pdf_watcher.install.json` 中记录目录里的 PDF。
+- 如果某个 Chrome / Edge profile 使用了自定义下载目录，需要为该 profile 重新运行安装脚本，让 Helper 刷新白名单。
+- `-ProfileDir` 既可以传专用 profile 根目录，例如 `BrowserProfile_Chrome`，也可以直接传具体 profile 目录，例如 `...\Google\Chrome\User Data\Profile 4`。
+- 未传 `-DownloadDir` 时，安装脚本会读取该 profile 的 `Preferences -> download.default_directory` 并写入白名单；只有想让脚本设置并白名单化某个目录时，才需要显式传 `-DownloadDir`。
+
+已有 Chrome profile 的示例：
+
+```powershell
+.\native-host\install_host.ps1 -Browser Chrome -ProfileDir "$env:LOCALAPPDATA\Google\Chrome\User Data\Profile 4"
+```
+
 ---
 
 ### 三、验证与测试

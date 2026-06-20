@@ -10,6 +10,48 @@ import (
 	"testing"
 )
 
+func TestMarkerDownloadDirsFromBytesIncludesLegacyAndProfiles(t *testing.T) {
+	legacy := filepath.Join(t.TempDir(), "legacy-downloads")
+	profile4 := filepath.Join(t.TempDir(), "profile4-downloads")
+	dedicated := filepath.Join(t.TempDir(), "dedicated-downloads")
+	payload, err := json.Marshal(map[string]any{
+		"download_dir": legacy,
+		"profiles": []map[string]string{
+			{
+				"browser":      "Chrome",
+				"profile_dir":  filepath.Join(t.TempDir(), "Profile 4"),
+				"download_dir": profile4,
+				"updated_at":   "2026-06-20T00:00:00",
+			},
+			{
+				"browser":      "Chrome",
+				"profile_dir":  filepath.Join(t.TempDir(), "BrowserProfile_Chrome"),
+				"download_dir": dedicated,
+				"updated_at":   "2026-06-20T00:00:00",
+			},
+			{"browser": "Chrome"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal marker: %v", err)
+	}
+
+	got := markerDownloadDirsFromBytes(payload)
+	want := []string{
+		cleanOptionalDir(legacy),
+		cleanOptionalDir(profile4),
+		cleanOptionalDir(dedicated),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("dir count mismatch: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("dir %d mismatch: got %q want %q; all=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestEnsureAllowedPDFPathAllowsTempDir(t *testing.T) {
 	path := filepath.Join(os.TempDir(), "ablesci-test.pdf")
 	if err := ensureAllowedPDFPath(path); err != nil {

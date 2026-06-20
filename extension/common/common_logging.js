@@ -31,27 +31,70 @@
     if (!value || typeof value !== 'object') return null;
     const hasCandidateShape = value.assistId || value.title || value.doi || value.journalName || value.journalShortName || value.reason;
     if (!hasCandidateShape) return null;
-    return {
-      assistId: normalizeText(value.assistId || '').slice(0, 80),
-      title: normalizeText(value.title || '').slice(0, 160),
-      doi: normalizeText(value.doi || '').slice(0, 120),
-      journal: normalizeText(value.journalName || value.journalShortName || '').slice(0, 160),
-      reason: normalizeText(value.reason || '').slice(0, 120),
-      pickedPage: value.pickedPage ?? value.page ?? '',
-      pageOrder: normalizeText(value.pageOrder || '').slice(0, 40),
-      pageMax: value.pageMax ?? value.maxPage ?? '',
-      candidateCount: value.candidateCount ?? '',
-      parsedCount: value.parsedCount ?? '',
-      queueableCount: value.queueableCount ?? '',
-      rowCount: value.rowCount ?? '',
-      detailLinkCount: value.detailLinkCount ?? '',
-      assistIdCount: value.assistIdCount ?? '',
-      bodyLength: value.bodyLength ?? '',
-      emptyListLike: value.emptyListLike ?? '',
-      cfChallenge: value.cfChallenge ?? '',
-      loginLike: value.loginLike ?? '',
-      elapsedMs: value.elapsedMs ?? ''
+    const compact = {};
+    const setText = (key, raw, limit) => {
+      const text = normalizeText(raw || '').slice(0, limit);
+      if (text) compact[key] = text;
     };
+    const setValue = (key, raw) => {
+      if (raw !== undefined && raw !== null && raw !== '') compact[key] = raw;
+    };
+
+    setText('assistId', value.assistId, 80);
+    setText('title', value.title, 160);
+    setText('doi', value.doi, 120);
+    setText('journal', value.journalName || value.journalShortName, 160);
+    setText('reason', value.reason, 120);
+    setValue('pickedPage', value.pickedPage ?? value.page);
+    setText('pageOrder', value.pageOrder, 40);
+    setValue('pageMax', value.pageMax ?? value.maxPage);
+    for (const key of [
+      'candidateCount',
+      'parsedCount',
+      'queueableCount',
+      'rowCount',
+      'detailLinkCount',
+      'assistIdCount',
+      'bodyLength',
+      'emptyListLike',
+      'cfChallenge',
+      'loginLike',
+      'elapsedMs',
+      'durationMs',
+      'totalMs',
+      'fetchHeadersMs',
+      'readTextMs',
+      'parseMs',
+      'totalParseMs',
+      'stripBodyMs',
+      'titleMs',
+      'extractItemsMs',
+      'mapCandidatesMs',
+      'extractStatsMs',
+      'normalizeMs',
+      'initPageDataMs',
+      'sourceGateMs',
+      'orderMs',
+      'listFilterMs',
+      'filterLoopMs',
+      'appendSummaryMs',
+      'sinceRunStartMs',
+      'sinceListParseStartMs',
+      'sinceListParseDoneMs',
+      'orderedCount',
+      'skippedCount',
+      'journalBlockedCount',
+      'skippedStateWrites'
+    ]) {
+      setValue(key, value[key]);
+    }
+    if (value.reasonCounts && typeof value.reasonCounts === 'object' && !Array.isArray(value.reasonCounts)) {
+      const reasonCounts = Object.fromEntries(Object.entries(value.reasonCounts)
+        .filter(([, count]) => count !== undefined && count !== null && count !== '' && Number(count) !== 0)
+        .slice(0, 12));
+      if (Object.keys(reasonCounts).length > 0) compact.reasonCounts = reasonCounts;
+    }
+    return compact;
   }
 
   function sanitizeTraceUrl(value, traceLevel, helpers = {}) {

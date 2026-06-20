@@ -112,6 +112,12 @@ func main() {
 		fmt.Println("答：可以。它仅用于支持“右下角消息通知”功能。如果您不需要弹窗提醒，")
 		fmt.Println("    可以随时删除该快捷方式或文件夹，完全不会影响插件的下载和上传功能。")
 		fmt.Println()
+		fmt.Println("【当前允许读取 / 上传 PDF 的目录】")
+		for _, dir := range allowedPDFDirs() {
+			fmt.Println(" - " + dir)
+		}
+		fmt.Println("如果自定义了浏览器下载目录，请重新运行 native-host\\install_host.ps1 刷新白名单。")
+		fmt.Println()
 		fmt.Println("请按回车键退出本程序...")
 		var input string
 		fmt.Scanln(&input)
@@ -894,12 +900,10 @@ func allowedPDFDirs() []string {
 	if temp := os.TempDir(); temp != "" {
 		dirs = append(dirs, temp)
 	}
-	// The browser may be configured with a custom download directory at install
-	// time; the installer records it in the marker so uploads from that dir are
-	// not rejected. Falls back to Downloads/temp only when no marker dir is set.
-	if marker := markerDownloadDir(); marker != "" {
-		dirs = append(dirs, marker)
-	}
+	// The browser may be configured with custom download directories per profile.
+	// The installer records them in the marker so uploads from those dirs are not
+	// rejected. Falls back to Downloads/temp when no marker dir is set.
+	dirs = append(dirs, markerDownloadDirs()...)
 	seen := map[string]bool{}
 	out := []string{}
 	for _, dir := range dirs {
@@ -916,25 +920,46 @@ func allowedPDFDirs() []string {
 // installMarkerFileName must match $MarkerFileName in native-host/install_host.ps1.
 const installMarkerFileName = ".ablesci_pdf_watcher.install.json"
 
-// markerDownloadDir reads the download directory recorded by the installer in the
-// Helper's install marker (next to the exe). Returns "" if the marker is missing,
-// unreadable, or has no usable download_dir.
-func markerDownloadDir() string {
+type installMarkerProfile struct {
+	Browser     string `json:"browser"`
+	ProfileDir  string `json:"profile_dir"`
+	DownloadDir string `json:"download_dir"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// markerDownloadDirs reads download directories recorded by the installer in the
+// Helper's install marker (next to the exe). It supports the legacy top-level
+// download_dir plus the profile-scoped profiles[].download_dir list.
+func markerDownloadDirs() []string {
 	helperDir, err := nativeHelperDir()
 	if err != nil {
-		return ""
+		return nil
 	}
 	data, err := os.ReadFile(filepath.Join(helperDir, installMarkerFileName))
 	if err != nil {
-		return ""
+		return nil
 	}
+	return markerDownloadDirsFromBytes(data)
+}
+
+func markerDownloadDirsFromBytes(data []byte) []string {
 	var marker struct {
-		DownloadDir string `json:"download_dir"`
+		DownloadDir string                 `json:"download_dir"`
+		Profiles    []installMarkerProfile `json:"profiles"`
 	}
 	if err := json.Unmarshal(data, &marker); err != nil {
-		return ""
+		return nil
 	}
-	return cleanOptionalDir(marker.DownloadDir)
+	dirs := []string{}
+	if dir := cleanOptionalDir(marker.DownloadDir); dir != "" {
+		dirs = append(dirs, dir)
+	}
+	for _, profile := range marker.Profiles {
+		if dir := cleanOptionalDir(profile.DownloadDir); dir != "" {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 func cleanOptionalDir(dir string) string {

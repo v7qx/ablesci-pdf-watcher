@@ -8,7 +8,7 @@
 
   [string]$ProfileDir = "",
 
-  [string]$DownloadDir = "$env:USERPROFILE\Downloads",
+  [string]$DownloadDir = "",
 
   [string]$ExtensionDir = ""
 )
@@ -32,6 +32,38 @@ function Get-DefaultUserDataDir([string]$BrowserName) {
     return "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
   }
   return "$env:LOCALAPPDATA\Google\Chrome\User Data"
+}
+
+function Test-BrowserProfileDir([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  $name = Split-Path -Leaf ([System.IO.Path]::GetFullPath($Path).TrimEnd('\'))
+  if ($name -eq "Default" -or $name -like "Profile *") { return $true }
+  if (Test-Path -LiteralPath (Join-Path $Path "Preferences")) { return $true }
+  return $false
+}
+
+function Resolve-BrowserProfileSelection([string]$BrowserName, [string]$ProfilePath) {
+  if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
+    $root = [System.IO.Path]::GetFullPath((Get-DefaultUserDataDir $BrowserName))
+    return [pscustomobject]@{
+      UserDataDir = $root
+      ProfileDir = ""
+      ExplicitProfileDir = $false
+    }
+  }
+  $full = [System.IO.Path]::GetFullPath($ProfilePath)
+  if (Test-BrowserProfileDir $full) {
+    return [pscustomobject]@{
+      UserDataDir = [System.IO.Path]::GetFullPath((Split-Path -Parent $full))
+      ProfileDir = $full
+      ExplicitProfileDir = $true
+    }
+  }
+  return [pscustomobject]@{
+    UserDataDir = $full
+    ProfileDir = [System.IO.Path]::GetFullPath((Join-Path $full "Default"))
+    ExplicitProfileDir = $true
+  }
 }
 
 function Get-PreferencePaths([string]$BrowserName, [string]$UserDataDir) {
@@ -129,22 +161,44 @@ function Set-ObjectProperty($Object, [string]$Name, $Value) {
   $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
 }
 
-function Ensure-BrowserProfileDownloadPrefs([string]$UserDataDir, [string]$DownloadDir) {
-  if ([string]::IsNullOrWhiteSpace($UserDataDir)) {
+function Get-BrowserProfileDownloadDir([string]$ConcreteProfileDir) {
+  if ([string]::IsNullOrWhiteSpace($ConcreteProfileDir)) {
+    return ""
+  }
+  $preferencesPath = Join-Path ([System.IO.Path]::GetFullPath($ConcreteProfileDir)) "Preferences"
+  if (!(Test-Path -LiteralPath $preferencesPath)) {
+    return ""
+  }
+  try {
+    $prefs = Get-Content -LiteralPath $preferencesPath -Raw | ConvertFrom-Json
+    if ($null -ne $prefs.download -and $null -ne $prefs.download.default_directory) {
+      $dir = [string]$prefs.download.default_directory
+      if (![string]::IsNullOrWhiteSpace($dir)) {
+        return [System.IO.Path]::GetFullPath($dir)
+      }
+    }
+  } catch {
+    Write-Warning "Could not read profile download directory: $preferencesPath"
+  }
+  return ""
+}
+
+function Ensure-BrowserProfileDownloadPrefs([string]$ConcreteProfileDir, [string]$DownloadDir) {
+  if ([string]::IsNullOrWhiteSpace($ConcreteProfileDir)) {
     return
   }
-  $profileRoot = [System.IO.Path]::GetFullPath($UserDataDir)
+  $profileRoot = [System.IO.Path]::GetFullPath($ConcreteProfileDir)
+  $userDataRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $profileRoot))
   $downloadRoot = if ([string]::IsNullOrWhiteSpace($DownloadDir)) {
     Join-Path $profileRoot "Downloads"
   } else {
     [System.IO.Path]::GetFullPath($DownloadDir)
   }
-  $defaultProfileDir = Join-Path $profileRoot "Default"
-  $preferencesPath = Join-Path $defaultProfileDir "Preferences"
-  $localStatePath = Join-Path $profileRoot "Local State"
-  $firstRunPath = Join-Path $profileRoot "First Run"
+  $preferencesPath = Join-Path $profileRoot "Preferences"
+  $localStatePath = Join-Path $userDataRoot "Local State"
+  $firstRunPath = Join-Path $userDataRoot "First Run"
 
-  New-Item -ItemType Directory -Force -Path $defaultProfileDir | Out-Null
+  New-Item -ItemType Directory -Force -Path $profileRoot | Out-Null
   New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
   if (!(Test-Path -LiteralPath $firstRunPath)) {
     New-Item -ItemType File -Force -Path $firstRunPath | Out-Null
@@ -184,8 +238,28 @@ function Ensure-BrowserProfileDownloadPrefs([string]$UserDataDir, [string]$Downl
   Write-Host "  PDF direct  : enabled"
 }
 
-if (![string]::IsNullOrWhiteSpace($ProfileDir)) {
-  Ensure-BrowserProfileDownloadPrefs $ProfileDir $DownloadDir
+$ProfileInfo = if ($Browser -eq "All") {
+  [pscustomobject]@{ UserDataDir = ""; ProfileDir = ""; ExplicitProfileDir = $false }
+} else {
+  Resolve-BrowserProfileSelection $Browser $ProfileDir
+}
+$DownloadDirWasExplicit = ![string]::IsNullOrWhiteSpace($DownloadDir)
+$ResolvedDownloadDir = ""
+
+if ($ProfileInfo.ExplicitProfileDir) {
+  if ($DownloadDirWasExplicit) {
+    $ResolvedDownloadDir = [System.IO.Path]::GetFullPath($DownloadDir)
+    Ensure-BrowserProfileDownloadPrefs $ProfileInfo.ProfileDir $ResolvedDownloadDir
+  } else {
+    $ResolvedDownloadDir = Get-BrowserProfileDownloadDir $ProfileInfo.ProfileDir
+    if ([string]::IsNullOrWhiteSpace($ResolvedDownloadDir)) {
+      Write-Warning "No download.default_directory was found in this profile. Default Downloads and TEMP are still allowed; pass -DownloadDir to whitelist a custom directory."
+    } else {
+      Write-Host "Detected profile download directory: $ResolvedDownloadDir"
+    }
+  }
+} elseif ($DownloadDirWasExplicit) {
+  $ResolvedDownloadDir = [System.IO.Path]::GetFullPath($DownloadDir)
 }
 
 if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
@@ -193,7 +267,7 @@ if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
     throw "Automatic ExtensionId detection is only supported for one browser at a time. Use -Browser Chrome or -Browser Edge, or pass -ExtensionId explicitly."
   }
   $extensionsPage = if ($Browser -eq "Edge") { "edge://extensions/" } else { "chrome://extensions/" }
-  $detected = Find-ExtensionIdInPreferences $Browser $ProfileDir $ExtensionDir
+  $detected = Find-ExtensionIdInPreferences $Browser $ProfileInfo.UserDataDir $ExtensionDir
   if ($null -eq $detected) {
     $profileHint = if ([string]::IsNullOrWhiteSpace($ProfileDir)) { "(未指定，正在检查默认浏览器 Profile)" } else { [System.IO.Path]::GetFullPath($ProfileDir) }
     $hint = @(
@@ -286,16 +360,55 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
 
 $MarkerPath = Join-Path $InstallDir $MarkerFileName
-$ResolvedDownloadDir = if ([string]::IsNullOrWhiteSpace($DownloadDir)) { "" } else { [System.IO.Path]::GetFullPath($DownloadDir) }
+$ExistingMarker = Read-JsonObject $MarkerPath
+$ExistingLegacyDownloadDir = if ($null -ne $ExistingMarker.download_dir) { [string]$ExistingMarker.download_dir } else { "" }
+$LegacyDownloadDir = $ExistingLegacyDownloadDir
+if ([string]::IsNullOrWhiteSpace($LegacyDownloadDir) -and !$ProfileInfo.ExplicitProfileDir -and ![string]::IsNullOrWhiteSpace($ResolvedDownloadDir)) {
+  $LegacyDownloadDir = $ResolvedDownloadDir
+}
+
+$Profiles = @()
+if ($null -ne $ExistingMarker.profiles) {
+  foreach ($profile in @($ExistingMarker.profiles)) {
+    $profileBrowser = if ($null -ne $profile.browser) { [string]$profile.browser } else { "" }
+    $profileDir = if ($null -ne $profile.profile_dir) { [string]$profile.profile_dir } else { "" }
+    $profileDownloadDir = if ($null -ne $profile.download_dir) { [string]$profile.download_dir } else { "" }
+    if ([string]::IsNullOrWhiteSpace($profileDir) -or [string]::IsNullOrWhiteSpace($profileDownloadDir)) {
+      continue
+    }
+    $sameProfile = $false
+    if ($ProfileInfo.ExplicitProfileDir -and [string]::Equals($profileBrowser, $Browser, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $sameProfile = Test-SamePath $profileDir $ProfileInfo.ProfileDir
+    }
+    if (!$sameProfile) {
+      $Profiles += [ordered]@{
+        browser = $profileBrowser
+        profile_dir = [System.IO.Path]::GetFullPath($profileDir)
+        download_dir = [System.IO.Path]::GetFullPath($profileDownloadDir)
+        updated_at = if ($null -ne $profile.updated_at) { [string]$profile.updated_at } else { "" }
+      }
+    }
+  }
+}
+if ($ProfileInfo.ExplicitProfileDir -and ![string]::IsNullOrWhiteSpace($ResolvedDownloadDir)) {
+  $Profiles += [ordered]@{
+    browser = $Browser
+    profile_dir = $ProfileInfo.ProfileDir
+    download_dir = $ResolvedDownloadDir
+    updated_at = (Get-Date).ToString("s")
+  }
+}
+
 $Marker = [ordered]@{
   host_name = $HostName
   install_dir = $InstallDir
   helper_exe = [System.IO.Path]::GetFileName($TargetExe)
   manifest = [System.IO.Path]::GetFileName($ManifestPath)
-  download_dir = $ResolvedDownloadDir
+  download_dir = $LegacyDownloadDir
+  profiles = $Profiles
   installed_at = (Get-Date).ToString("s")
 }
-$Marker | ConvertTo-Json -Depth 4 | Set-Content -Path $MarkerPath -Encoding UTF8
+$Marker | ConvertTo-Json -Depth 6 | Set-Content -Path $MarkerPath -Encoding UTF8
 
 # Register Start Menu shortcut with AppUserModelID so Windows notification
 # shows a stable app name. No custom icon is bound to avoid extra build assets.
@@ -421,4 +534,13 @@ Write-Host "Host name: $HostName"
 Write-Host "Manifest : $ManifestPath"
 Write-Host "Helper   : $TargetExe"
 Write-Host "Allowed origins: $($AllowedOrigins -join ', ')"
+if (![string]::IsNullOrWhiteSpace($LegacyDownloadDir)) {
+  Write-Host "Legacy allowed download dir: $LegacyDownloadDir"
+}
+if ($Profiles.Count -gt 0) {
+  Write-Host "Profile allowed download dirs:"
+  foreach ($profile in $Profiles) {
+    Write-Host "  [$($profile.browser)] $($profile.profile_dir) -> $($profile.download_dir)"
+  }
+}
 Write-Host "You can now click Test Native Helper in the extension options page."

@@ -181,7 +181,11 @@
       })
       .filter(Boolean);
     return segments.some(part =>
-      /^(?:supplement|supplements|supp|suppl)(?:[-_]\w+)?$/i.test(part)
+      // Whole path segment that is a supplement marker, optionally prefixed by an
+      // issue number. OUP/Oxford Academic supplement issues use "<issue>_Supplement"
+      // (e.g. .../article/204/1_Supplement/86.14/...), so a leading "<digits>_" must
+      // still match; a plain numeric issue like "6" must not.
+      /^(?:\d+[-_])?(?:supplement|supplements|supp|suppl)(?:[-_]\w+)?$/i.test(part)
     );
   }
 
@@ -279,6 +283,111 @@
     } catch (_) {
       return false;
     }
+  }
+
+  function getNormalizedHost(url) {
+    try {
+      return new URL(String(url || '')).hostname.toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function hostMatchesAllowedHost(host, allowedHost) {
+    const h = String(host || '').toLowerCase();
+    const allowed = String(allowedHost || '').toLowerCase();
+    return !!h && !!allowed && (h === allowed || h.endsWith('.' + allowed));
+  }
+
+  const PUBLISHER_LANDING_ALLOWLIST = {
+    sciencedirect: ['sciencedirect.com', 'linkinghub.elsevier.com'],
+    nature: ['nature.com'],
+    springer: ['link.springer.com'],
+    rsc: ['pubs.rsc.org'],
+    wiley: ['onlinelibrary.wiley.com'],
+    aip: ['pubs.aip.org', 'aip.scitation.org', 'scitation.org'],
+    acs: ['pubs.acs.org'],
+    ieee: ['ieeexplore.ieee.org'],
+    oxford: ['academic.oup.com'],
+    iop: ['iopscience.iop.org'],
+    cnpe: ['cnpereading.com'],
+    sage: ['journals.sagepub.com']
+  };
+
+  const SHARED_LANDING_ALLOWLIST = Object.values(PUBLISHER_LANDING_ALLOWLIST)
+    .flat()
+    .filter(Boolean);
+
+  const RECOGNIZED_BUT_UNSUPPORTED_LANDING_HOSTS = [
+    { hosts: ['computer.org', 'publications.computer.org'], platform: 'IEEE Computer Society CSDL' }
+  ];
+
+  function publisherForDoi(value) {
+    const text = String(value || '').trim();
+    const doiMatch = decodeURIComponent(text).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
+    const doi = (doiMatch ? doiMatch[1] : text).toLowerCase();
+    if (!doi) return '';
+    if (/^10\.1016\//.test(doi)) return 'sciencedirect';
+    if (/^10\.1038\//.test(doi)) return 'nature';
+    if (/^10\.1007\//.test(doi)) return 'springer';
+    if (/^10\.1039\//.test(doi)) return 'rsc';
+    if (/^10\.1002\//.test(doi)) return 'wiley';
+    if (/^10\.1021\//.test(doi)) return 'acs';
+    if (/^10\.1109\//.test(doi)) return 'ieee';
+    if (/^10\.1093\//.test(doi)) return 'oxford';
+    if (/^10\.1063\//.test(doi)) return 'aip';
+    if (/^10\.1088\//.test(doi)) return 'iop';
+    if (/^10\.1177\//.test(doi)) return 'sage';
+    return '';
+  }
+
+  function isAllowedLandingForPublisher(publisher, finalUrl) {
+    const host = getNormalizedHost(finalUrl);
+    return SHARED_LANDING_ALLOWLIST.some(allowedHost => hostMatchesAllowedHost(host, allowedHost));
+  }
+
+  function getRecognizedUnsupportedLanding(publisher, finalUrl) {
+    const key = String(publisher || '').toLowerCase();
+    const host = getNormalizedHost(finalUrl);
+    for (const entry of RECOGNIZED_BUT_UNSUPPORTED_LANDING_HOSTS) {
+      const matched = (entry.hosts || []).some(unsupportedHost => hostMatchesAllowedHost(host, unsupportedHost));
+      if (matched) {
+        return {
+          platform: entry.platform || 'recognized unsupported platform',
+          reason: 'recognized_but_unsupported_landing_host',
+          publisher: key
+        };
+      }
+    }
+    return null;
+  }
+
+  function validatePublisherLanding({ publisher, doi, finalUrl } = {}) {
+    const key = String(publisher || '').toLowerCase();
+    const host = getNormalizedHost(finalUrl);
+    if (!finalUrl || !host) {
+      return { ok: false, status: 'skipped', reason: 'invalid_landing_url', publisher: key, doi: doi || '', finalUrl: finalUrl || '', host };
+    }
+    if (isDoiHost(host)) {
+      return { ok: true, status: 'pending_redirect', publisher: key, doi: doi || '', finalUrl, host };
+    }
+    if (isAllowedLandingForPublisher(key, finalUrl)) {
+      return { ok: true, status: 'allowed', publisher: key, doi: doi || '', finalUrl, host };
+    }
+    const recognizedUnsupported = getRecognizedUnsupportedLanding(key, finalUrl);
+    if (recognizedUnsupported) {
+      return {
+        ok: false,
+        status: 'skipped',
+        reason: recognizedUnsupported.reason,
+        platform: recognizedUnsupported.platform,
+        publisher: key,
+        doi: doi || '',
+        finalUrl,
+        host
+      };
+    }
+    return { ok: false, status: 'skipped', reason: 'unsupported_landing_host', publisher: key, doi: doi || '', finalUrl, host };
   }
 
   function isScienceDirectRelatedHost(h) {
@@ -547,6 +656,12 @@
     publisherForUrl,
     isScienceDirectPdfUrl,
     isDoiUrl,
+    getNormalizedHost,
+    hostMatchesAllowedHost,
+    publisherForDoi,
+    isAllowedLandingForPublisher,
+    getRecognizedUnsupportedLanding,
+    validatePublisherLanding,
     isScienceDirectRelatedHost,
     isScienceDirectAssetPdfUrl,
     natureArticleUrlFromPdfUrl,

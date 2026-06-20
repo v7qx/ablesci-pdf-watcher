@@ -76,9 +76,9 @@
       }
     }
 
-    async function parseListUrl(url) {
+    async function parseListUrl(url, traceContext = {}) {
       if (typeof fetchListUrl === 'function') {
-        const fetched = await fetchListUrl(url);
+        const fetched = await fetchListUrl(url, traceContext);
         const fetchedCount = Array.isArray(fetched?.candidates) ? fetched.candidates.length : 0;
         const shouldFallbackToTab =
           fetched?.fetchFailed === true ||
@@ -87,6 +87,9 @@
         if (!shouldFallbackToTab) {
           await appendWatcherTrace('list_parse_result', {
             reason: 'background_fetch_accepted',
+            trigger: traceContext.trigger || '',
+            publisher: traceContext.publisher || '',
+            pickedPage: traceContext.pickedPage || '',
             url,
             cfChallenge: fetched.cfChallenge === true,
             candidateCount: fetchedCount,
@@ -105,6 +108,9 @@
         }
         await appendWatcherTrace('list_fetch_fallback_to_tab', {
           reason: fetched?.fetchFailed ? 'fetch_failed' : (fetched?.debug?.loginLike ? 'login_like' : 'zero_candidates'),
+          trigger: traceContext.trigger || '',
+          publisher: traceContext.publisher || '',
+          pickedPage: traceContext.pickedPage || '',
           url,
           candidateCount: fetchedCount,
           cfChallenge: fetched?.cfChallenge === true,
@@ -133,6 +139,9 @@
         function appendListParseTrace(parsed, reason) {
           return appendWatcherTrace('list_parse_result', {
             reason,
+            trigger: traceContext.trigger || '',
+            publisher: traceContext.publisher || '',
+            pickedPage: traceContext.pickedPage || '',
             url,
             tabId: tab.id,
             cfChallenge: parsed.cfChallenge === true,
@@ -157,6 +166,9 @@
         const readiness = readyResult?.[0]?.result || {};
         await appendWatcherTrace('list_dom_ready', {
           reason: readiness.ready ? 'assist_list_dom_ready' : 'assist_list_dom_timeout',
+          trigger: traceContext.trigger || '',
+          publisher: traceContext.publisher || '',
+          pickedPage: traceContext.pickedPage || '',
           url,
           tabId: tab.id,
           ready: readiness.ready === true,
@@ -185,6 +197,9 @@
           const retryReadiness = await waitForListDom(3500);
           await appendWatcherTrace('list_parse_empty_retry', {
             reason: 'zero_candidates_retry',
+            trigger: traceContext.trigger || '',
+            publisher: traceContext.publisher || '',
+            pickedPage: traceContext.pickedPage || '',
             url,
             tabId: tab.id,
             ready: retryReadiness.ready === true,

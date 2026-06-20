@@ -29,6 +29,8 @@
       isIopUrl,
       isScienceDirectAssetPdfUrl,
       publisherForUrl,
+      publisherForDoi,
+      validatePublisherLanding,
       isExpectedPublisherPage,
       recordPublisherCfChallenge,
       appendDiagnosticTrace
@@ -185,6 +187,26 @@
         pending.publisher = publisherForUrl?.(url) || pending.publisher || '';
         if (typeof pending.setExpectedDownloadUrl === 'function') pending.setExpectedDownloadUrl(url);
         return;
+      }
+      if (isDoiHost(expectedHost) && currentHost && !isDoiHost(currentHost) && changeInfo.status === 'complete') {
+        const publisher = pending.publisher || publisherForDoi?.(pending.payloadSummary?.doi || pending.pdfUrl || '') || publisherForUrl?.(url) || '';
+        const landingCheck = validatePublisherLanding?.({
+          publisher,
+          doi: pending.payloadSummary?.doi || '',
+          finalUrl: url
+        });
+        if (landingCheck && !landingCheck.ok) {
+          const err = new Error(`DOI 跳转落地域名暂不支持${landingCheck.platform ? ` (${landingCheck.platform})` : ''}：${landingCheck.host || 'unknown'}，已跳过。`);
+          err.failureReason = landingCheck.reason || 'unsupported_landing_host';
+          err.landingCheck = landingCheck;
+          tracePublisherStep(pending, 'publisher_landing_rejected_after_redirect_complete', {
+            ...landingCheck,
+            currentUrl: shortUrl(url)
+          });
+          console.warn('[doi-landing] skipped', landingCheck);
+          pending.finishError?.(err);
+          return;
+        }
       }
 
       if (isScienceDirectAssetPdfUrl(url)) {

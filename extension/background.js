@@ -61,6 +61,8 @@ const {
   isIeeeUrl,
   isOxfordUrl,
   publisherForUrl,
+  publisherForDoi,
+  validatePublisherLanding,
   isScienceDirectPdfUrl,
   isDoiUrl,
   isScienceDirectRelatedHost,
@@ -244,6 +246,8 @@ const {
   isIopUrl,
   isScienceDirectAssetPdfUrl,
   publisherForUrl,
+  publisherForDoi,
+  validatePublisherLanding,
   isExpectedPublisherPage,
   recordPublisherCfChallenge,
   appendDiagnosticTrace
@@ -274,6 +278,8 @@ const { downloadPdf } = createBackgroundDownloadAgentApi({
   isOxfordUrl,
   isIopUrl,
   publisherForUrl,
+  publisherForDoi,
+  validatePublisherLanding,
   publisherArticleUrlFromPdfUrl,
   looksLikePdfDownloadUrl,
   isLikelyTargetDownload,
@@ -349,7 +355,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report_i18n.js', 'watcher/report_candidates.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/candidate_audit.js', 'watcher/list_scan_status.js', 'watcher/assist_sync.js', 'watcher/candidate_processor.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
+  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report_i18n.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/list_scan_status.js', 'watcher/assist_sync.js', 'watcher/candidate_processor.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

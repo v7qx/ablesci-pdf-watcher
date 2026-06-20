@@ -47,12 +47,11 @@
       flushWatcherTrace,
       queueableCandidatesFromList,
       processCandidateBatch,
-      auditParsedListCandidates,
-      listUrlWithAuditPage,
       normalizeParsedListCandidateContext,
       buildCurrentListScan,
       describeCurrentListScan,
       clearCurrentListScan,
+      setCurrentListScan,
       initCurrentPageData,
       pruneWatcherState,
       emergencyStorageTrim
@@ -402,6 +401,20 @@
         resultReason: result.reason || 'unknown'
       });
       await appendWatcherTrace('run_finish', { reason: 'finally', phase: 'run_finalize', trigger: run.trigger, runId: run.runId });
+      await setCurrentListScan?.(buildCurrentListScan({
+        trigger: run.trigger,
+        pickedListUrl: result.scannedUrl || run.attempt.pickedListUrl || '',
+        pagePick: {
+          publisher: result.scannedPublisher || run.attempt.scannedPublisher || run.attempt.publisher || '',
+          pickedPage: result.scannedPage || run.attempt.scannedPage || run.attempt.pickedPage || '',
+          pageOrder: run.attempt.pageOrder || '',
+          pageMin: run.attempt.pageMin || '',
+          pageMax: run.attempt.pageMax || ''
+        },
+        phase: 'finalizing',
+        status: 'running',
+        reason: result.reason || ''
+      })).catch(() => {});
       await recordRunFinish(run.trigger, result).catch(() => {});
       if (run.trigger !== 'manual' && run.opts) {
         await scheduleNextAssistAfterRun(run.opts, result, run.trigger).catch(() => {});
@@ -412,7 +425,20 @@
       try { await writeDailyReports(); } catch (_) {}
       await flushWatcherLogs().catch(() => {});
       await flushWatcherTrace().catch(() => {});
-      await clearCurrentListScan();
+      await setCurrentListScan?.(buildCurrentListScan({
+        trigger: run.trigger,
+        pickedListUrl: result.scannedUrl || run.attempt.pickedListUrl || '',
+        pagePick: {
+          publisher: result.scannedPublisher || run.attempt.scannedPublisher || run.attempt.publisher || '',
+          pickedPage: result.scannedPage || run.attempt.scannedPage || run.attempt.pickedPage || '',
+          pageOrder: run.attempt.pageOrder || '',
+          pageMin: run.attempt.pageMin || '',
+          pageMax: run.attempt.pageMax || ''
+        },
+        phase: 'done',
+        status: result.ok === true ? 'done' : 'failed',
+        reason: result.reason || 'unknown'
+      })).catch(() => {});
       stateRef.autoWatcherRunning = false;
       stateRef.autoWatcherStartedAt = 0;
     }
@@ -500,6 +526,13 @@
 
         const singleRunListUrls = listUrlsForRun(opts);
         const singleListUrl = singleRunListUrls[0] || '';
+        await setCurrentListScan?.(buildCurrentListScan({
+          trigger,
+          listUrl: singleListUrl,
+          pickedListUrl: singleListUrl,
+          phase: 'source_selected',
+          status: 'running'
+        })).catch(() => {});
         await appendWatcherTrace('random_single_assist_source', {
           reason: singleListUrl ? 'single_random_source_selected' : 'no_list_url',
           phase: 'single_random_run',
@@ -553,7 +586,11 @@
               detectUrl.searchParams.delete('page_min');
               detectUrl.searchParams.delete('page_max');
               detectUrl.searchParams.set('page', String(urlPageMeta.pageMin));
-              const parsedPage1 = await parseListUrl(detectUrl.href);
+              const parsedPage1 = await parseListUrl(detectUrl.href, {
+                trigger,
+                publisher: urlPageMeta.publisher,
+                pickedPage: 1
+              });
               if (parsedPage1 && !parsedPage1.isErrorPage && !parsedPage1.cfChallenge) {
                 detectedMaxPage = parsedPage1.listStats?.maxPage || urlPageMeta.pageMin;
               }
@@ -578,6 +615,8 @@
             applyAttemptPagePick(attempt, pagePick, pickedListUrl, {});
             updateStateLastPicked(stateForTargets, pagePick, pickedListUrl);
             stateForTargets.currentListScan = buildScanStatus(scan, pagePick, pickedListUrl, 'single_random_page');
+            stateForTargets.currentListScan.phase = 'page_selected';
+            stateForTargets.currentListScan.status = 'running';
             await saveWatcherStateSafe(stateForTargets);
 
             await appendWatcherTrace('random_single_assist_page', {
@@ -596,15 +635,28 @@
             });
             await incrementDaily('checked', trigger);
 
+            await setCurrentListScan?.(buildCurrentListScan({
+              pagePick,
+              trigger,
+              listUrl: urlToTry,
+              pickedListUrl,
+              phase: 'parsing_list',
+              status: 'running'
+            })).catch(() => {});
             const parseStartedAt = Date.now();
-            const parsed = await parseListUrl(pickedListUrl);
+            const parsed = await parseListUrl(pickedListUrl, {
+              trigger,
+              publisher: pagePick.publisher,
+              pickedPage: pagePick.pickedPage
+            });
+            const parseFinishedAt = Date.now();
             recordScannedPage(scan, pickedListUrl, pagePick);
             await appendWatcherTrace('perf_list_parse', {
               reason: 'single_random_list_parse_done',
               phase: 'single_random_run',
               trigger,
               runId: run.runId,
-              durationMs: Date.now() - parseStartedAt,
+              durationMs: parseFinishedAt - parseStartedAt,
               pickedPage: pagePick.pickedPage,
               parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
               maxPage: parsed?.listStats?.maxPage || ''
@@ -622,13 +674,32 @@
               return finish({ ok: false, reason: 'cf_challenge', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
             }
 
+            const listPipelineStartedAt = Date.now();
+            const normalizeStartedAt = Date.now();
             normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl);
-            const auditPickedListUrl = listUrlWithAuditPage(pickedListUrl, pagePick.pickedPage);
-            await initCurrentPageData(auditPickedListUrl, pagePick, parsed);
-            await auditParsedListCandidates(parsed, pagePick, auditPickedListUrl, trigger);
+            const normalizeMs = Date.now() - normalizeStartedAt;
+            const initPageDataStartedAt = Date.now();
+            await initCurrentPageData(pickedListUrl, pagePick, parsed);
+            const initPageDataMs = Date.now() - initPageDataStartedAt;
 
+            const sourceGateStartedAt = Date.now();
             const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
+            const sourceGateMs = Date.now() - sourceGateStartedAt;
             if (!sourceGate.ok) {
+              await appendWatcherTrace('perf_list_pipeline', {
+                reason: 'list_pipeline_source_gate_skip',
+                phase: 'single_random_run',
+                trigger,
+                runId: run.runId,
+                listUrl: pickedListUrl,
+                publisher: pagePick.publisher,
+                pickedPage: pagePick.pickedPage,
+                parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+                normalizeMs,
+                initPageDataMs,
+                sourceGateMs,
+                totalMs: Date.now() - listPipelineStartedAt
+              });
               await appendWatcherTrace('random_single_assist_source_gate_skip', {
                 reason: sourceGate.reason,
                 phase: 'single_random_run',
@@ -650,8 +721,40 @@
             }
             await resetCfChallengeStreak();
 
+            const orderStartedAt = Date.now();
             const candidates = orderCandidatesForRun(parsed.candidates, stateForTargets, opts, 1);
+            const orderMs = Date.now() - orderStartedAt;
+            const listFilterStartedAt = Date.now();
             const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick, singleBlacklistedIds);
+            const listFilterMs = Date.now() - listFilterStartedAt;
+            await appendWatcherTrace('perf_list_pipeline', {
+              reason: 'list_pipeline_done',
+              phase: 'single_random_run',
+              trigger,
+              runId: run.runId,
+              listUrl: pickedListUrl,
+              publisher: pagePick.publisher,
+              pickedPage: pagePick.pickedPage,
+              parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+              orderedCount: candidates.length,
+              queueableCount: queueableCandidates.length,
+              normalizeMs,
+              initPageDataMs,
+              sourceGateMs,
+              orderMs,
+              listFilterMs,
+              totalMs: Date.now() - listPipelineStartedAt
+            });
+            await setCurrentListScan?.(buildCurrentListScan({
+              pagePick,
+              trigger,
+              listUrl: urlToTry,
+              pickedListUrl,
+              phase: 'filtering_candidates',
+              status: 'running',
+              candidateCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+              queueableCount: queueableCandidates.length
+            })).catch(() => {});
             await appendWatcherTrace('random_single_assist_candidates', {
               reason: 'single_random_candidates_filtered',
               phase: 'single_random_run',
@@ -675,6 +778,21 @@
 
             // Try up to MAX_CANDIDATES_PER_PAGE candidates in priority order (pre-sorted by orderCandidatesForRun)
             const toTry = Math.min(queueableCandidates.length, MAX_CANDIDATES_PER_PAGE);
+            await appendWatcherTrace('perf_list_to_detail_start', {
+              reason: 'list_to_detail_start',
+              phase: 'single_random_run',
+              trigger,
+              runId: run.runId,
+              listUrl: pickedListUrl,
+              publisher: pagePick.publisher,
+              pickedPage: pagePick.pickedPage,
+              parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
+              queueableCount: queueableCandidates.length,
+              toTry,
+              sinceRunStartMs: Date.now() - run.startedAt,
+              sinceListParseStartMs: Date.now() - parseStartedAt,
+              sinceListParseDoneMs: Date.now() - parseFinishedAt
+            });
             await appendWatcherTrace('random_single_assist_page_try', {
               reason: 'single_page_candidate_try',
               phase: 'single_random_run',
@@ -690,6 +808,17 @@
 
             for (let ci = 0; ci < toTry && singleHandledCountRef.value === 0; ci++) {
               const candidate = queueableCandidates[ci];
+              await setCurrentListScan?.(buildCurrentListScan({
+                pagePick,
+                trigger,
+                listUrl: urlToTry,
+                pickedListUrl,
+                phase: 'trying_candidate',
+                status: 'running',
+                candidateCount: queueableCandidates.length,
+                queueableCount: queueableCandidates.length,
+                assistId: candidate?.assistId || ''
+              })).catch(() => {});
               await appendWatcherTrace('random_single_candidate_selected', {
                 reason: 'single_random_candidate_selected',
                 phase: 'single_random_run',

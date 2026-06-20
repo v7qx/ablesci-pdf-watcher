@@ -6,18 +6,28 @@
     const {
       chromeApi = typeof chrome !== 'undefined' ? chrome : null,
       getWatcherState,
-      saveWatcherStateSafe,
-      listUrlWithAuditPage
+      saveWatcherStateSafe
     } = config;
 
     const CURRENT_PAGE_DATA_KEY = 'autoWatcherCurrentPageData';
+
+    function listUrlWithPage(listUrl, page) {
+      if (!Number.isFinite(Number(page))) return listUrl;
+      try {
+        const u = new URL(listUrl);
+        u.searchParams.set('page', String(Number(page)));
+        return u.toString();
+      } catch (_) {
+        return listUrl;
+      }
+    }
 
     function normalizeParsedListCandidateContext(parsed, pagePick, pickedListUrl) {
       const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
       const auditPage = Number.isFinite(Number(parsed?.listStats?.currentPage))
         ? Number(parsed.listStats.currentPage)
         : pagePick.pickedPage;
-      const auditListUrl = listUrlWithAuditPage(pickedListUrl, auditPage);
+      const auditListUrl = listUrlWithPage(pickedListUrl, auditPage);
       for (const candidate of candidates) {
         if (!candidate || typeof candidate !== 'object') continue;
         candidate.listUrl = auditListUrl;
@@ -29,9 +39,26 @@
     }
 
     function buildCurrentListScan(details = {}) {
-      const { pagePick = {}, trigger = '', listUrl = '', pickedListUrl = '', scanIndex = '', scanLimit = '', mode = 'background_fetch' } = details;
+      const {
+        pagePick = {},
+        trigger = '',
+        listUrl = '',
+        pickedListUrl = '',
+        scanIndex = '',
+        scanLimit = '',
+        mode = 'background_fetch',
+        phase = '',
+        status = 'running',
+        reason = '',
+        candidateCount = '',
+        queueableCount = '',
+        assistId = ''
+      } = details;
       return {
         mode,
+        phase,
+        status,
+        reason,
         trigger,
         configuredUrl: listUrl,
         pickedListUrl,
@@ -44,6 +71,9 @@
         range: '',
         scanIndex,
         scanLimit,
+        candidateCount,
+        queueableCount,
+        assistId,
         updatedAt: new Date().toISOString()
       };
     }
@@ -53,7 +83,24 @@
       const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
       const page = scan.page ? `第 ${scan.page} 页` : '';
       const mode = '随机页';
-      return [mode, publisher, page].filter(Boolean).join(' ');
+      const phaseMap = {
+        start: '启动',
+        source_selected: '选源',
+        page_selected: '选页',
+        parsing_list: '解析列表',
+        filtering_candidates: '筛候选',
+        trying_candidate: '打开详情',
+        downloading: '下载/上传',
+        finalizing: '写报告',
+        done: '已完成'
+      };
+      const phase = phaseMap[scan.phase] || '';
+      const counts = scan.queueableCount !== '' && scan.queueableCount != null
+        ? `可处理 ${scan.queueableCount}/${scan.candidateCount || '?'}`
+        : '';
+      const assist = scan.assistId ? `ID ${scan.assistId}` : '';
+      const result = scan.status && scan.status !== 'running' && scan.reason ? String(scan.reason) : '';
+      return [phase || mode, publisher, page, counts, assist, result].filter(Boolean).join(' ');
     }
 
     async function clearCurrentListScan() {
@@ -61,6 +108,17 @@
         const state = await getWatcherState();
         if (!state.currentListScan) return;
         state.currentListScan = null;
+        await saveWatcherStateSafe(state);
+      } catch (_) {}
+    }
+
+    async function setCurrentListScan(scan = {}) {
+      try {
+        const state = await getWatcherState();
+        state.currentListScan = {
+          ...(scan && typeof scan === 'object' ? scan : {}),
+          updatedAt: new Date().toISOString()
+        };
         await saveWatcherStateSafe(state);
       } catch (_) {}
     }
@@ -167,6 +225,7 @@
       buildCurrentListScan,
       describeCurrentListScan,
       clearCurrentListScan,
+      setCurrentListScan,
       initCurrentPageData,
       updateCurrentPageCandidateStatus
     };

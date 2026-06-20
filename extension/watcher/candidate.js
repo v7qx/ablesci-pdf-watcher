@@ -235,6 +235,16 @@
       return false;
     }
 
+    function isLikelySupplementCandidate(candidate = {}) {
+      const doi = String(candidate.doi || '').trim();
+      // OUP / Oxford Academic supplement issues carry a dot-delimited ".Supp."
+      // (or ".Suppl.") segment in the DOI, e.g. 10.4049/jimmunol.204.Supp.86.14
+      // (the article URL is ".../<issue>_Supplement/..."). These are usually
+      // meeting abstracts with no full text, so treat them as supplements and
+      // skip before opening the publisher page.
+      return /\.supp(?:l)?\.\w/i.test(doi);
+    }
+
     function describeWatcherReason(reason) {
       const code = normalizeText(reason);
       const labels = {
@@ -650,7 +660,7 @@
       if (opts.watcherSkipCorrigendum && candidate.title && /^Corrigendum\s+to/i.test(String(candidate.title).trim())) {
         return { ok: false, reason: 'list_corrigendum' };
       }
-      if (opts.watcherSkipSupplement && (candidate.documentType === 'supplement' || candidate.supplement)) {
+      if (opts.watcherSkipSupplement && (candidate.documentType === 'supplement' || candidate.supplement || isLikelySupplementCandidate(candidate))) {
         return { ok: false, reason: 'list_supplement' };
       }
       if (opts.watcherSkipBookChapter && (candidate.documentType === 'book_chapter' || isLikelyBookChapterCandidate(candidate))) {
@@ -793,7 +803,7 @@
 
       if (opts.watcherSkipBookChapter && payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
       if (opts.watcherSkipPatentReport && payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
-      if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement)) return { ok: false, reason: 'detail_supplement' };
+      if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement || isLikelySupplementCandidate(payload))) return { ok: false, reason: 'detail_supplement' };
       if (opts.watcherRequireDoi && !payload?.doi) return { ok: false, reason: 'missing_doi' };
       if (!payload?.pdfUrl) return { ok: false, reason: 'missing_pdf_url' };
 

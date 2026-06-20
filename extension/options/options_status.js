@@ -17,6 +17,31 @@
     let advancedStatusCache = null;
     let advancedCountdownTimer = null;
     let lastAutoTriggerTime = 0;
+
+    function formatCurrentListScan(scan = {}) {
+      if (!scan || typeof scan !== 'object') return '';
+      const publisher = scan.publisher ? String(scan.publisher).toUpperCase() : '';
+      const page = scan.page ? `第 ${scan.page} 页` : '';
+      const phaseMap = {
+        start: '启动',
+        source_selected: '选源',
+        page_selected: '选页',
+        parsing_list: '解析列表',
+        filtering_candidates: '筛候选',
+        trying_candidate: '打开详情',
+        downloading: '下载/上传',
+        finalizing: '写报告',
+        done: '已完成'
+      };
+      const phase = phaseMap[scan.phase] || '';
+      const counts = scan.queueableCount !== '' && scan.queueableCount != null
+        ? `可处理 ${scan.queueableCount}/${scan.candidateCount || '?'}`
+        : '';
+      const assist = scan.assistId ? `ID ${scan.assistId}` : '';
+      const result = scan.status && scan.status !== 'running' && scan.reason ? String(scan.reason) : '';
+      return [phase, publisher, page, counts, assist, result].filter(Boolean).join(' ');
+    }
+
     async function renderAdvancedWatcherStatus() {
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
@@ -51,7 +76,7 @@
 
       setText('advancedError', String(Number(state.targetError || state.lag || 0)));
       setText('advancedRiskBudget', `${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`);
-      setText('advancedSessionStatus', state.currentSession?.status || state.lastSession?.status || '-');
+      setText('advancedSessionStatus', formatCurrentListScan(state.currentListScan) || state.currentSession?.status || state.lastSession?.status || '-');
       
       const runtimeLogicStr = `${state.currentSchedulerMode || '-'} / ${state.currentExecutionModel || '-'}`;
       setText('watcherRuntimeLogic', isEnabled ? runtimeLogicStr : `${runtimeLogicStr} (值守已关闭)`);
