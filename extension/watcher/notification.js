@@ -53,11 +53,6 @@
         } else if (rawMessage.includes('检测到 Ablesci 验证页')) {
           const streak = rawMessage.match(/\d+/)?.[0] || '';
           rawMessage = `Ablesci verification page detected (${streak} times). Please resolve in browser; if it continues, the watcher will pause automatically.`;
-        } else if (rawMessage.includes('连续出现') && rawMessage.includes('次无正文权限')) {
-          const matches = rawMessage.match(/\d+/g) || [];
-          const count = matches[0] || '';
-          const journals = matches[1] || '';
-          rawMessage = `Consecutive no-access occurred ${count} times in a short period, involving ${journals} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
         } else if (rawMessage.includes('连续') && rawMessage.includes('次遇到出版商验证页，已暂停低频值守')) {
           const streak = rawMessage.match(/\d+/)?.[0] || '';
           rawMessage = `Encountered publisher verification page for ${streak} consecutive times. Auto watcher has been paused. Please re-enable after manually resolving in browser.`;

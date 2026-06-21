@@ -130,10 +130,6 @@ function t(msg) {
       return 'Saved. Opened Ablesci pages will auto-update, or refresh to apply.';
     }
 
-    const m = trimmed.match(/^短时间内连续出现\s*(\d+)\s*次无正文权限，且涉及\s*(\d+)\s*个期刊。已暂停值守，请检查代理、登录态或机构访问环境。$/);
-    if (m) {
-      return `Consecutive no-access occurred ${m[1]} times in a short period, involving ${m[2]} journals. Watcher paused. Please check proxy, login status, or institutional access environment.`;
-    }
     const mCf = trimmed.match(/^连续\s*(\d+)\s*次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。$/);
     if (mCf) {
       return `Encountered publisher verification page for ${mCf[1]} consecutive times. Auto watcher paused. Please re-enable manually after resolving in browser.`;

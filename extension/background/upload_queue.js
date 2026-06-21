@@ -17,7 +17,6 @@
       classifyJournalAccessFailureReason,
       isDoiUrl,
       isLikelyRscPayload,
-      pauseWatcherForAccessEnvironment,
       saveErrorDiagnostic,
       appendDiagnosticTrace,
       isNonPdfAccessPageError,
@@ -128,10 +127,6 @@
               hasSeenPublisherChallengeForTask(payload)) {
             failureReason = 'cf_challenge';
           }
-          let accessEnvironmentPause = null;
-          if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
-            accessEnvironmentPause = await pauseWatcherForAccessEnvironment(payload);
-          }
           const normalSkipReasons = new Set([
             'publisher_unsupported',
             'recognized_but_unsupported_landing_host',
@@ -200,9 +195,7 @@
                 ...cleanerExtra
               });
             } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {
-              const message = accessEnvironmentPause?.paused
-                ? accessEnvironmentPause.message
-                : '当前出版商无正文订阅权限，任务已跳过。';
+              const message = '当前出版商无正文订阅权限，任务已跳过。';
               post(port, 'done', message, {
                 html: escapeHtml(message),
                 recomend: false,

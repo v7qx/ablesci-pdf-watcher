@@ -205,15 +205,12 @@ const {
   saveDiagnostic
 });
 const {
-  pauseWatcherForAccessEnvironment,
-  recordAccessEnvironmentSuccess,
   recordPublisherCfChallenge,
   clearPublisherCfChallengeState
 } = createBackgroundUploadGuardsApi({
   chromeApi: chrome,
   defaultOptions: DEFAULT_OPTIONS,
   getOptions,
-  publisherForUrl,
   urlHostPath
 });
 const {
@@ -308,8 +305,6 @@ const {
   cleanupOrphanPublisherTabs,
   post,
   downloadPdf,
-  pauseWatcherForAccessEnvironment,
-  recordAccessEnvironmentSuccess,
   clearPublisherCfChallengeState,
   sendNativeMessage,
   formatBytes,

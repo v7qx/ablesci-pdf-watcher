@@ -304,7 +304,7 @@
           hasDoi: !!doi,
           publisherName,
           journalShortName: extractJournalShortName(li),
-          reported: /举报|被举报|涉嫌违规/.test(`${rowText} ${markerText}`),
+          reported: /被举报|涉嫌违规|正在被举报|举报中|举报违规\s*\(\s*[1-9]\d*\s*\)/.test(`${rowText} ${markerText}`),
           rejected: /驳回|已驳回|拒绝/.test(`${rowText} ${markerText}`),
           supplement: documentType === 'supplement' || /补充材料|Supplement|supporting information|学位论文/i.test(rowText),
           documentType,

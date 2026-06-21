@@ -17,8 +17,6 @@
       cleanupOrphanPublisherTabs,
       post,
       downloadPdf,
-      pauseWatcherForAccessEnvironment,
-      recordAccessEnvironmentSuccess,
       clearPublisherCfChallengeState,
       sendNativeMessage,
       formatBytes,
@@ -305,8 +303,19 @@
             }
           }
         } catch (err) {
-          await saveDiagnostic({ ...diag, stage: 'blacklist-read-error-ignored', error: `读取本地黑名单文件失败，已跳过本次黑名单检查: ${err.message || err}` });
-          post(port, 'progress', `读取本地黑名单文件失败，已跳过本次黑名单检查并继续应助：${err.message || err}`);
+          const message = `读取本地黑名单文件失败，已停止本次自动应助：${err.message || err}`;
+          await saveDiagnostic({ ...diag, stage: 'blacklist-read-error-blocked', error: message });
+          post(port, 'done', message, {
+            html: escapeHtml(message),
+            recomend: false,
+            reload: false,
+            downloadOnly: true,
+            blocked: true,
+            skipped: true,
+            skipReason: 'blacklist_read_error',
+            message
+          });
+          return;
         }
 
         if (isBlacklisted) {
@@ -551,7 +560,6 @@
           await deleteUploadedFile(opts.nativeHostName, stat.path);
         }
         await clearPublisherCfChallengeState();
-        await recordAccessEnvironmentSuccess(payload);
         if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
           await recordManualWatcherDaily('uploaded').catch(() => {});
         }
@@ -591,12 +599,10 @@
       if (parsed && parsed.msg) {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
-        await recordAccessEnvironmentSuccess(payload);
         postDoneFromSiteResponse(port, parsed, '上传成功', { ...doneExtraForCleaner(pdfCleanerResult), pii });
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState();
-        await recordAccessEnvironmentSuccess(payload);
         const cleanerExtra = doneExtraForCleaner(pdfCleanerResult);
         const cleanerText = cleanerExtra.pdfCleanerSummary ? `；${cleanerExtra.pdfCleanerSummary}` : '';
         const cleanerHtml = cleanerExtra.pdfCleanerHtml ? `<br>${cleanerExtra.pdfCleanerHtml}` : '';
@@ -629,7 +635,6 @@
       classifyJournalAccessFailureReason,
       isDoiUrl,
       isLikelyRscPayload,
-      pauseWatcherForAccessEnvironment,
       saveErrorDiagnostic,
       appendDiagnosticTrace,
       isNonPdfAccessPageError,
