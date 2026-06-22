@@ -66,8 +66,14 @@ function Resolve-BrowserProfileSelection([string]$BrowserName, [string]$ProfileP
   }
 }
 
-function Get-PreferencePaths([string]$BrowserName, [string]$UserDataDir) {
+function Get-PreferencePaths([string]$BrowserName, [string]$UserDataDir, [string]$ProfileDir = "") {
   $paths = @()
+  if (![string]::IsNullOrWhiteSpace($ProfileDir)) {
+    $profileRoot = [System.IO.Path]::GetFullPath($ProfileDir)
+    $paths += Join-Path $profileRoot "Preferences"
+    $paths += Join-Path $profileRoot "Secure Preferences"
+    return $paths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+  }
   if (![string]::IsNullOrWhiteSpace($UserDataDir)) {
     $root = [System.IO.Path]::GetFullPath($UserDataDir)
     $paths += Join-Path $root "Default\Preferences"
@@ -97,9 +103,9 @@ function Test-SamePath([string]$A, [string]$B) {
   }
 }
 
-function Find-ExtensionIdInPreferences([string]$BrowserName, [string]$UserDataDir, [string]$TargetExtensionDir) {
+function Find-ExtensionIdInPreferences([string]$BrowserName, [string]$UserDataDir, [string]$TargetExtensionDir, [string]$ProfileDir = "") {
   $matches = @()
-  foreach ($prefPath in (Get-PreferencePaths $BrowserName $UserDataDir)) {
+  foreach ($prefPath in (Get-PreferencePaths $BrowserName $UserDataDir $ProfileDir)) {
     try {
       $prefs = Get-Content -LiteralPath $prefPath -Raw | ConvertFrom-Json
       $settings = $prefs.extensions.settings
@@ -131,10 +137,12 @@ function Find-ExtensionIdInPreferences([string]$BrowserName, [string]$UserDataDi
   if ($exact.Count -eq 1) { return $exact[0] }
   if ($matches.Count -eq 1) { return $matches[0] }
   if ($exact.Count -gt 1) {
-    throw "Multiple matching extensions were found by path. Pass -ExtensionId explicitly."
+    $details = ($exact | ForEach-Object { "  - $($_.Id) in $($_.PreferencePath)" }) -join [Environment]::NewLine
+    throw "Multiple matching extensions were found by path in the selected profile. Pass -ExtensionId explicitly.$([Environment]::NewLine)$details"
   }
   if ($matches.Count -gt 1) {
-    throw "Multiple Ablesci PDF Watcher extensions were found. Pass -ExtensionId explicitly."
+    $details = ($matches | ForEach-Object { "  - $($_.Id) in $($_.PreferencePath)" }) -join [Environment]::NewLine
+    throw "Multiple Ablesci PDF Watcher extensions were found in the selected profile. Pass -ExtensionId explicitly.$([Environment]::NewLine)$details"
   }
   return $null
 }
@@ -267,7 +275,7 @@ if ([string]::IsNullOrWhiteSpace($ExtensionId)) {
     throw "Automatic ExtensionId detection is only supported for one browser at a time. Use -Browser Chrome or -Browser Edge, or pass -ExtensionId explicitly."
   }
   $extensionsPage = if ($Browser -eq "Edge") { "edge://extensions/" } else { "chrome://extensions/" }
-  $detected = Find-ExtensionIdInPreferences $Browser $ProfileInfo.UserDataDir $ExtensionDir
+  $detected = Find-ExtensionIdInPreferences $Browser $ProfileInfo.UserDataDir $ExtensionDir $ProfileInfo.ProfileDir
   if ($null -eq $detected) {
     $profileHint = if ([string]::IsNullOrWhiteSpace($ProfileDir)) { "(未指定，正在检查默认浏览器 Profile)" } else { [System.IO.Path]::GetFullPath($ProfileDir) }
     $hint = @(
@@ -426,11 +434,15 @@ Write-Host "Host name: $HostName"
 Write-Host "Manifest : $ManifestPath"
 Write-Host "Helper   : $TargetExe"
 Write-Host "Allowed origins: $($AllowedOrigins -join ', ')"
+$DefaultDownloadsDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads"
+Write-Host "Always allowed PDF dirs:"
+Write-Host "  Downloads: $DefaultDownloadsDir"
+Write-Host "  TEMP     : $([System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()))"
 if (![string]::IsNullOrWhiteSpace($LegacyDownloadDir)) {
   Write-Host "Legacy allowed download dir: $LegacyDownloadDir"
 }
 if ($Profiles.Count -gt 0) {
-  Write-Host "Profile allowed download dirs:"
+  Write-Host "Profile-specific extra allowed download dirs:"
   foreach ($profile in $Profiles) {
     Write-Host "  [$($profile.browser)] $($profile.profile_dir) -> $($profile.download_dir)"
   }
