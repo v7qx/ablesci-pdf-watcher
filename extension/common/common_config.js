@@ -215,8 +215,8 @@
       watcherNotificationEnabled: opts.watcherNotificationEnabled !== false,
       // PRIVATE_WATCHER_ONLY: Add compact trace level
       watcherTraceLevel: ['off', 'compact', 'normal', 'verbose'].includes(opts.watcherTraceLevel) ? opts.watcherTraceLevel : DEFAULT_OPTIONS.watcherTraceLevel,
-      watcherPerfTraceEnabled: opts.watcherPerfTraceEnabled === true,
-      watcherPerfFileEnabled: opts.watcherPerfFileEnabled === true,
+      watcherPerfTraceEnabled: false,
+      watcherPerfFileEnabled: false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
       watcherNoDownloadTimeoutMinutes: 1.5,
       watcherDownloadTimeoutMinutes: 6,

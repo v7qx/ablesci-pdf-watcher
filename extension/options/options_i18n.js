@@ -151,7 +151,7 @@
   "可选绝对路径。留空时 Native Helper 写入用户 Downloads 下的 ablesci-watcher-reports。": "Optional absolute path. If empty, Go Helper writes to ablesci-watcher-reports under user Downloads.",
   "Trace 级别": "Trace Level",
   "默认关闭。需要排查时再打开，避免长期占用本地存储。": "Off by default. Enable only for debugging to save local storage.",
-  "默认关闭。需要排查时再打开，避免长期占用本地存储；性能 Trace 可单独开启。": "Off by default. Enable only for debugging to save local storage; performance trace can be enabled separately.",
+  "默认关闭。需要排查时再打开，避免长期占用本地存储。": "Off by default. Enable only for debugging to save local storage.",
   "性能记录": "Performance Recording",
   "记录值守阶段耗时；本地 JSONL 会通过 Helper 写入日报目录下的 performance 文件夹。": "Record watcher stage timings. Local JSONL is written by Helper under the performance folder in the report directory.",
   "写入 Trace": "Write Trace",

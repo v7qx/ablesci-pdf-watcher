@@ -97,8 +97,10 @@
         limit,
         remaining: Math.max(0, limit - used),
         ratio: used / Math.max(1, limit),
-        exhausted: used >= limit,
-        nearLimit: used >= limit * 0.75
+        // Risk events are retained as diagnostics only. They should not pause,
+        // throttle, or otherwise change watcher scheduling decisions.
+        exhausted: false,
+        nearLimit: false
       };
     }
 
@@ -118,6 +120,7 @@
       state.daily = state.daily || {};
       state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
       if (cost > 0) {
+        state.daily[key].riskEventCount = Number(state.daily[key].riskEventCount || 0) + 1;
         state.daily[key].riskUsed = Number(state.daily[key].riskUsed || 0) + cost;
         state.daily[key].consecutiveFailures = Number(state.daily[key].consecutiveFailures || 0) + 1;
         if (state.daily[key].consecutiveFailures >= 3) state.daily[key].riskUsed += 1;

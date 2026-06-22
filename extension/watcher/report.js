@@ -334,58 +334,6 @@
         }
         return detail;
       }
-      function formatDurationMs(value) {
-        const n = Number(value);
-        return Number.isFinite(n) ? `${Math.round(n)}ms` : '';
-      }
-      function formatListPerfDetail(trace) {
-        const details = trace?.details || {};
-        const fields = [];
-        const push = (label, key) => {
-          const text = formatDurationMs(details[key]);
-          if (text) fields.push(`${label} ${text}`);
-        };
-        if (trace?.step === 'perf_list_fetch_detail') {
-          push('fetch', 'fetchHeadersMs');
-          push('text', 'readTextMs');
-          push('parse', 'parseMs');
-          push('strip', 'stripBodyMs');
-          push('items', 'extractItemsMs');
-          push('map', 'mapCandidatesMs');
-          push('stats', 'extractStatsMs');
-          push('total', 'totalMs');
-        } else if (trace?.step === 'perf_list_filter') {
-          push('loop', 'filterLoopMs');
-          push('summary', 'appendSummaryMs');
-          push('total', 'totalMs');
-        } else if (trace?.step === 'perf_list_pipeline') {
-          push('normalize', 'normalizeMs');
-          push('pageData', 'initPageDataMs');
-          push('gate', 'sourceGateMs');
-          push('order', 'orderMs');
-          push('filter', 'listFilterMs');
-          push('total', 'totalMs');
-        } else if (trace?.step === 'perf_list_to_detail_start') {
-          push('run->detail', 'sinceRunStartMs');
-          push('parseStart->detail', 'sinceListParseStartMs');
-          push('parseDone->detail', 'sinceListParseDoneMs');
-        } else {
-          push('duration', 'durationMs');
-          push('total', 'totalMs');
-          push('elapsed', 'elapsedMs');
-        }
-        const counts = [];
-        if (details.candidateCount !== undefined && details.candidateCount !== '') counts.push(`candidates=${details.candidateCount}`);
-        if (details.parsedCount !== undefined && details.parsedCount !== '') counts.push(`parsed=${details.parsedCount}`);
-        if (details.queueableCount !== undefined && details.queueableCount !== '') counts.push(`queueable=${details.queueableCount}`);
-        if (details.skippedCount !== undefined && details.skippedCount !== '') counts.push(`skipped=${details.skippedCount}`);
-        if (details.journalBlockedCount !== undefined && details.journalBlockedCount !== '') counts.push(`journalBlocked=${details.journalBlockedCount}`);
-        return [...fields, ...counts].join(' | ');
-      }
-      const listPerfTraceRows = traces
-        .filter(trace => /^perf_list_/i.test(String(trace.step || '')))
-        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-        .slice(0, 30);
       const csvRows = [
         csvHeader,
         reportRow('summary', {
@@ -450,24 +398,6 @@
               details: reportJson(details)
             });
           }),
-        ...traces
-          .filter(trace => /^perf_list_/i.test(String(trace.step || '')))
-          .map(trace => {
-            const details = trace.details || {};
-            return reportRow('trace_perf', {
-              time: formatBeijingDateTime(trace.time),
-              sessionId: trace.sessionId || details.sessionId || '',
-              trigger: trace.trigger || details.trigger || '',
-              assistId: traceAssistIdValue(details),
-              detailUrl: traceDetailUrlValue(details, trace),
-              status: translateStep(trace.step || '', isEn),
-              reason: translateReason(trace.reason || details.reason || '', isEn),
-              publisher: details.publisher || '',
-              step: trace.step || '',
-              url: traceDetailUrlValue(details, trace),
-              details: reportJson(details)
-            });
-          }),
         ...journalAccessStats.map(entry => reportRow('journal_access_cache', {
           time: entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
           assistId: entry.lastAssistId || '',
@@ -503,6 +433,7 @@
           .filter(trace => {
             const textToTest = `${trace.step || ''} ${trace.reason || ''}`;
             if (String(trace.step || '') === 'candidate_skip_list_filter_summary') return true;
+            if (/^tab_(open|opened|complete|close|closed|open_failed|close_failed)/i.test(String(trace.step || ''))) return false;
             return /skip|not_due|zero|outside|limit|risk|no_candidate/i.test(textToTest)
               && !/passed|start|allowed|success|done|running/i.test(textToTest);
           })
@@ -522,13 +453,11 @@
         `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- Latest Selected List Link: ${latestPickedListUrl ? `[Click here](${latestPickedListUrl})` : 'None'}`,
         `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- Risk Budget Used today / Limit: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- Target Assists Today: ${Number(state.todayTarget || 0)}`
       ] : [
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- 最近一次选中的列表页链接: ${latestPickedListUrl ? `[点击跳转](${latestPickedListUrl})` : '无'}`,
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- 今日已用风险预算 / 上限: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`
       ]) : (isEn ? [
         `- Checked Candidate Count: ${Number(daily.checked || 0)}`,
@@ -537,24 +466,17 @@
         `- Skipped Candidate Count: ${Number(daily.skipped || 0)}`,
         `- Failed Task Count: ${Number(daily.failed || 0)}`,
         `- Notifications Sent: ${Number(daily.notified || 0)}`,
-        `- Scheduler: ${state.lastAssistStrategy || state.currentExecutionModel || state.schedulerModelMode || 'simple'}`,
         `- Next Wake Time: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- Next Assist Attempt Time: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
         `- Next Assist Strategy & Reason: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
         `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- Latest Run Trigger & Result: trigger=${state.lastRunTrigger || ''}, result=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
         `- Latest Attempt Time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- Latest Attempt Trigger: ${lastAttempt.trigger || ''}`,
         `- Latest Attempt Execution Result: ${translateReason(lastAttempt.resultReason || '', isEn)}`,
-        `- Latest Session Target Downloads: ${lastAttempt.targetSessionSize ?? ''}`,
-        `- Latest Checked Paper Delta: ${lastAttempt.checkedDelta ?? ''}`,
-        `- Latest Downloaded Paper Delta: ${lastAttempt.downloadedDelta ?? ''}`,
         `- Latest List Scan Triggered: ${lastAttempt.listScanStarted === true ? 'Yes' : 'No'}`,
         `- Latest Selected List Link: ${latestPickedListUrl ? `[Link](${latestPickedListUrl})` : ''}`,
-        `- Latest Parsed List Pages: ${lastAttempt.parsedListPages || ''}`,
-        `- Latest Backoff-Skipped Pages: ${lastAttempt.backoffSkippedPages || ''}`,
+        `- Latest Parsed List Pages In Run: ${lastAttempt.parsedListPages || ''}`,
         `- Monthly Assists (Expected / Actual / Deficit): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- Risk Events today / Threshold: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- Target Assists Today: ${Number(state.todayTarget || 0)}`,
         `- Details File: ${monthDir}/watcher-data-${date}.jsonl`,
         `- Trace Event Count: ${traces.length}`
@@ -565,24 +487,17 @@
         `- 已跳过候选数: ${Number(daily.skipped || 0)}`,
         `- 失败任务数: ${Number(daily.failed || 0)}`,
         `- 发送通知数: ${Number(daily.notified || 0)}`,
-        `- 调度策略: ${state.lastAssistStrategy || state.currentExecutionModel || state.schedulerModelMode || 'simple'}`,
         `- 下一次唤醒时间: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
         `- 下一次应助尝试时间: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
         `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
-        `- 最近一次运行原因与结果: 触发方式=${state.lastRunTrigger || ''}, 结果=${translateReason(state.lastRunResult?.reason || '', isEn)}`,
         `- 最近一次尝试时间: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- 最近一次尝试触发方式: ${lastAttempt.trigger || ''}`,
         `- 最近一次尝试执行结果: ${translateReason(lastAttempt.resultReason || '', isEn)}`,
-        `- 最近一次会话目标下载数: ${lastAttempt.targetSessionSize ?? ''}`,
-        `- 最近一次检查文献增量: ${lastAttempt.checkedDelta ?? ''}`,
-        `- 最近一次下载文献增量: ${lastAttempt.downloadedDelta ?? ''}`,
         `- 最近一次是否启动列表扫描: ${lastAttempt.listScanStarted === true ? '是' : '否'}`,
         `- 最近一次选中的列表页链接: ${latestPickedListUrl ? `[点击跳转](${latestPickedListUrl})` : ''}`,
-        `- 最近一次实际解析页: ${lastAttempt.parsedListPages || ''}`,
-        `- 最近一次冷却跳过页: ${lastAttempt.backoffSkippedPages || ''}`,
+        `- 最近一次解析过的列表页: ${lastAttempt.parsedListPages || ''}`,
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
-        `- 今日风险事件累计 / 阈值: ${Number(daily.riskUsed || state.riskUsed || 0)} / ${Number(state.riskLimit || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`,
         `- 详细事件数据 file: ${monthDir}/watcher-data-${date}.jsonl`,
         `- Trace 事件记录数: ${traces.length}`
@@ -687,31 +602,6 @@
         );
       }
 
-      const listPerfLines = [];
-      if (listPerfTraceRows.length > 0) {
-        listPerfLines.push(
-          isEn ? '## List Parsing Performance' : '## 列表解析性能',
-          '',
-          isEn
-            ? '| Time | Trigger | Step | Publisher | Page | Detail | Date |'
-            : '| 时间 | 触发方式 | 阶段 | 出版社 | 页码 | 耗时拆分 | 日期 |',
-          '| --- | --- | --- | --- | --- | --- | --- |',
-          ...listPerfTraceRows.map(trace => {
-            const details = trace.details || {};
-            return formatMarkdownTableRow([
-              formatBeijingTimeOnly(trace.time),
-              trace.trigger === 'alarm' ? (isEn ? 'Auto' : '自动') : (trace.trigger === 'manual' ? (isEn ? 'Manual' : '手动') : trace.trigger),
-              translateStep(trace.step || '', isEn),
-              details.publisher || '',
-              details.pickedPage || details.currentPage || '',
-              formatListPerfDetail(trace),
-              formatBeijingDateOnly(trace.time)
-            ]);
-          }),
-          ''
-        );
-      }
-
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
@@ -722,7 +612,6 @@
         ...sizeInterceptedLines,
         ...doiNotFoundLines,
         ...cleanerErrorLines,
-        ...listPerfLines,
         '## Skips And Decisions',
         '',
         isEn ? '| Time | Trigger | Step | Reason | Detail | Date |' : '| 时间 | 触发方式 | 步骤 (Step) | 原因 (Reason) | 详情 (Detail) | 日期 |',

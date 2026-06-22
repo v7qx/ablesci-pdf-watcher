@@ -84,6 +84,9 @@
     }
 
     async function recordNativePerformance(hostName, message, entry) {
+      // Kept for local debugging only. The option UI is hidden and normalized to
+      // false; avoid honoring stale storage values from earlier debug sessions.
+      return;
       try {
         const action = message?.action || 'native_message';
         if (action === 'append_text_file') return;
