@@ -866,7 +866,14 @@ func cleanOptionalDir(dir string) string {
 	if !filepath.IsAbs(dir) {
 		return ""
 	}
-	return filepath.Clean(dir)
+	cleaned := filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return filepath.Clean(resolved)
+	}
+	if _, err := os.Stat(cleaned); err == nil {
+		return cleaned
+	}
+	return cleaned
 }
 
 func isPathInsideDir(path string, dir string) bool {
