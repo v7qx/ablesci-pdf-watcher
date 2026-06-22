@@ -54,7 +54,18 @@ func TestMarkerDownloadDirsFromBytesIncludesLegacyAndProfiles(t *testing.T) {
 }
 
 func TestEnsureAllowedPDFPathAllowsTempDir(t *testing.T) {
-	path := filepath.Join(os.TempDir(), "ablesci-test.pdf")
+	file, err := os.CreateTemp("", "ablesci-test-*.pdf")
+	if err != nil {
+		t.Fatalf("create temp pdf: %v", err)
+	}
+	path := file.Name()
+	file.Close()
+	defer os.Remove(path)
+
+	path, err = cleanExistingPath(path)
+	if err != nil {
+		t.Fatalf("clean temp pdf path: %v", err)
+	}
 	if err := ensureAllowedPDFPath(path); err != nil {
 		t.Fatalf("expected temp path to be allowed: %v", err)
 	}
