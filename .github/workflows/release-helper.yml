@@ -48,25 +48,25 @@ jobs:
           $dist = Join-Path $PWD "native-host\dist"
           $zip = Join-Path $dist "ablesci-pdf-helper-windows.zip"
           $sums = Join-Path $dist "SHA256SUMS.txt"
-          $sha = Get-Content -LiteralPath $sums -Raw
-          $notes = @"
-          Windows Native Helper built by GitHub Actions.
-
-          Source commit: $env:GITHUB_SHA
-
-          Verify after download:
-
-          ````powershell
-          Get-FileHash .\ablesci_pdf_helper.exe -Algorithm SHA256
-          Get-AuthenticodeSignature .\ablesci_pdf_helper.exe
-          ````
-
-          SHA256:
-
-          ````text
-          $sha
-          ````
-          "@
+          $sha = (Get-Content -LiteralPath $sums -Raw).Trim()
+          $notes = @(
+            "Windows Native Helper built by GitHub Actions."
+            ""
+            "Source commit: $env:GITHUB_SHA"
+            ""
+            "Verify after download:"
+            ""
+            '```powershell'
+            'Get-FileHash .\ablesci_pdf_helper.exe -Algorithm SHA256'
+            'Get-AuthenticodeSignature .\ablesci_pdf_helper.exe'
+            '```'
+            ""
+            "SHA256:"
+            ""
+            '```text'
+            $sha
+            '```'
+          ) -join "`n"
           gh release view $tag 1>$null 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $zip $sums --clobber
