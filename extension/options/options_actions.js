@@ -313,13 +313,9 @@
       }
       showPill('watcherNotifyStatus', '发送中');
       const res = await sendRuntimeMessage({ type: 'ablesciTestWatcherNotification' });
-      const mode = res.mode === 'browser' ? '浏览器' : 'Native';
-      const label = res.fallbackFrom === 'native'
-        ? `Native 失败，已回退到${mode}`
-        : mode;
       showPill(
         'watcherNotifyStatus',
-        res.ok ? `${label} 已发送` : `${mode} 失败：${res.reason || '未知错误'}`,
+        res.ok ? '浏览器通知已发送' : `浏览器通知失败：${res.reason || '未知错误'}`,
         !res.ok
       );
     }

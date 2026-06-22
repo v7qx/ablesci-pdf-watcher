@@ -27,8 +27,8 @@ import (
 
 const createNoWindow = 0x08000000
 
-// maxDebugLogBytes bounds the size of the optional debug/diagnostic logs
-// (ablesci_notify.log, ablesci_cleaner_debug.log). When a log grows past this,
+// maxDebugLogBytes bounds the size of optional debug/diagnostic logs such as
+// ablesci_cleaner_debug.log. When a log grows past this,
 // rotateLogIfTooLarge rolls it to a single ".old" generation and starts fresh,
 // so disk use is bounded at ~2x this value.
 const maxDebugLogBytes = 256 * 1024
@@ -108,9 +108,9 @@ func main() {
 		fmt.Println("本程序由浏览器插件在后台自动运行，平时不需要手动双击打开。")
 		fmt.Println()
 		fmt.Println("【常见问题】")
-		fmt.Println("问：开始菜单里的快捷方式可以删除吗？")
-		fmt.Println("答：可以。它仅用于支持“右下角消息通知”功能。如果您不需要弹窗提醒，")
-		fmt.Println("    可以随时删除该快捷方式或文件夹，完全不会影响插件的下载和上传功能。")
+		fmt.Println("问：旧版本开始菜单里的快捷方式可以删除吗？")
+		fmt.Println("答：可以。当前版本提醒统一使用浏览器通知，不再需要 Helper 快捷方式。")
+		fmt.Println("    删除历史快捷方式或文件夹不会影响插件的下载和上传功能。")
 		fmt.Println()
 		fmt.Println("【当前允许读取 / 上传 PDF 的目录】")
 		for _, dir := range allowedPDFDirs() {
@@ -149,8 +149,6 @@ func run() error {
 		return handleDeleteFile(req)
 	case "copy_pdf":
 		return handleCopyPDF(req)
-	case "notify_user":
-		return handleNotifyUser(req)
 	case "open_local_storage":
 		return handleOpenLocalStorageDir(req)
 	case "write_text_file":
@@ -387,111 +385,6 @@ func isSafeCopyPDFSuffix(suffix string) bool {
 		return false
 	}
 	return true
-}
-
-func handleNotifyUser(req Request) error {
-	brand := "Ablesci PDF Watcher"
-	title := limitText(firstNonEmpty(req.Title, brand), 80)
-	message := limitText(firstNonEmpty(req.Message, "需要人工处理。"), 240)
-	if runtime.GOOS == "windows" {
-		debug := isCleanerDebugEnabled(req)
-		// Title/message may contain semi-trusted, web-derived text (publisher /
-		// journal / assist-help title). They are passed to PowerShell via
-		// environment variables (cmd.Env below) and read with $env:..., never
-		// concatenated into the script body — so there is no string assembly to
-		// escape and no script-injection surface.
-
-		// Set AppUserModelID so Windows Notification Center shows the brand name
-		// instead of "Windows PowerShell". Must be called before any WinForms objects are created.
-		setAppID := `$setAppIDSrc = @"` + "\r\n" +
-			`using System;` + "\r\n" +
-			`using System.Runtime.InteropServices;` + "\r\n" +
-			`public class AblesciNotify {` + "\r\n" +
-			`    [DllImport("shell32.dll", SetLastError=true)]` + "\r\n" +
-			`    public static extern void SetCurrentProcessExplicitAppUserModelID(` + "\r\n" +
-			`        [MarshalAs(UnmanagedType.LPWStr)] string AppID);` + "\r\n" +
-			`}` + "\r\n" +
-			`"@` + "\r\n" +
-			`Add-Type -TypeDefinition $setAppIDSrc;` +
-			`[AblesciNotify]::SetCurrentProcessExplicitAppUserModelID("AblesciPDFWatcher")`
-
-		// Windows Toast Notification. Windows still reserves the source icon area;
-		// without a custom shortcut icon it uses the default app icon.
-		// Sound is handled by the Toast XML <audio> element; do NOT call SystemSounds.Play() to avoid double beep.
-		toastNotify := `$escTitle = [System.Security.SecurityElement]::Escape($title); ` +
-			`$escMsg = [System.Security.SecurityElement]::Escape($msg); ` +
-			`$appID = "AblesciPDFWatcher"; ` +
-			`$toastXml = [string]::Format('<toast duration="short"><visual><binding template="ToastGeneric"><text>{0}</text><text>{1}</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>', $escTitle, $escMsg); ` +
-			`$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; ` +
-			`$null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]; ` +
-			`$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; ` +
-			`$xml.LoadXml($toastXml); ` +
-			`$toast = New-Object Windows.UI.Notifications.ToastNotification($xml); ` +
-			`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appID).Show($toast)`
-
-		// Read the notification text from the environment (set on cmd.Env below)
-		// instead of interpolating user-derived text into the script.
-		readEnv := `$title = $env:ABLESCI_NOTIFY_TITLE; $msg = $env:ABLESCI_NOTIFY_MSG;`
-		scriptBody := readEnv + " " + setAppID + "; " + toastNotify
-		if debug {
-			// Diagnostic log only when debug is enabled; the file is size-capped
-			// (rotateLogIfTooLarge) so it cannot grow without bound.
-			rotateLogIfTooLarge(filepath.Join(os.TempDir(), "ablesci_notify.log"), maxDebugLogBytes)
-			logStart := `try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') START $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {};`
-			logEnd := `; try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') END $title" | Out-File -Append "$env:TEMP\ablesci_notify.log" -Encoding UTF8 } catch {}`
-			scriptBody = logStart + " " + scriptBody + logEnd
-		}
-		fullScript := scriptBody
-
-		tmpFile, err := os.CreateTemp("", "ablesci_notify_*.ps1")
-		if err != nil {
-			return fmt.Errorf("notify: create temp script: %w", err)
-		}
-		tmpPath := tmpFile.Name()
-		// Write UTF-8 BOM so Windows PowerShell can parse the script correctly
-		tmpFile.Write([]byte{0xEF, 0xBB, 0xBF})
-		if _, err := tmpFile.WriteString(fullScript); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return fmt.Errorf("notify: write temp script: %w", err)
-		}
-		tmpFile.Close()
-
-		// Launch PowerShell directly (no cmd /c start /min intermediate).
-		// HideWindow + createNoWindow ensures no console or taskbar flash.
-		// PowerShell exits after ToastNotificationManager.Show(), which is fire-and-forget.
-		cmd := exec.Command("powershell.exe",
-			"-NoLogo",
-			"-NoProfile",
-			"-NonInteractive",
-			"-ExecutionPolicy", "Bypass",
-			"-STA",
-			"-WindowStyle", "Hidden",
-			"-File", tmpPath)
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    true,
-			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
-		}
-		cmd.Env = append(os.Environ(),
-			"ABLESCI_NOTIFY_TITLE="+title,
-			"ABLESCI_NOTIFY_MSG="+message,
-		)
-		cmd.Stdin = strings.NewReader("")
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-
-		if err := cmd.Run(); err != nil {
-			os.Remove(tmpPath)
-			return fmt.Errorf("notify: launch: %w", err)
-		}
-
-		// Clean up temp script immediately after PowerShell completes
-		os.Remove(tmpPath)
-
-		return writeResponse(Response{OK: true, Action: "notify_user"})
-	}
-	fmt.Fprint(os.Stderr, "\a")
-	return writeResponse(Response{OK: true, Action: "notify_user"})
 }
 
 func handleOpenLocalStorageDir(req Request) error {

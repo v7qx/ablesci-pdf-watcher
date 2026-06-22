@@ -145,7 +145,6 @@
   "图标倒计时": "Badge Countdown",
   "扩展图标显示下一次应助倒计时": "Show next assist countdown on the extension icon",
   "浏览器通知": "Browser Notification",
-  "Native Helper（实验）": "Native Helper (Exp)",
   "提醒方式": "Notification Mode",
   "测试提醒": "Test Alert",
   "日报目录": "Report Directory",

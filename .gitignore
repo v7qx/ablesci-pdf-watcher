@@ -39,5 +39,6 @@ native-host/*.local.json
 
 # optional local build artifacts
 native-helper/bin/
+native-host/dist/
 native-helper/*.exe
 native-helper/*.syso

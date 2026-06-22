@@ -19,7 +19,7 @@ $HostName = "com.ablesci.pdf_watcher"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
-$PrebuiltExe = Join-Path $RepoRoot "native-helper\bin\windows-amd64\ablesci_pdf_helper.exe"
+$PrebuiltExe = Join-Path $RepoRoot "native-host\dist\ablesci_pdf_helper.exe"
 $SourceGoDir = Join-Path $RepoRoot "native-helper"
 $MarkerFileName = ".ablesci_pdf_watcher.install.json"
 if ([string]::IsNullOrWhiteSpace($ExtensionDir)) {
@@ -313,14 +313,14 @@ if (Test-Path $PrebuiltExe) {
   Copy-Item $PrebuiltExe $TargetExe -Force
 } else {
   if (!(Get-Command go -ErrorAction SilentlyContinue)) {
-    throw "未找到 Go，且仓库中没有预编译 Helper：$PrebuiltExe。请先准备 Go 环境或放入预编译 Helper，然后重新运行 native-host\build_helper.ps1 或 native-host\install_host.ps1。"
+    throw "未找到 Go，且仓库中没有预编译 Helper：$PrebuiltExe。请先准备 Go 环境或下载 GitHub Release 构建产物，然后重新运行 native-host\build_helper.ps1 或 native-host\install_host.ps1。"
   }
   Push-Location $SourceGoDir
   try {
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
     $env:CGO_ENABLED = "0"
-    go build -trimpath -ldflags "-s -w" -o $TargetExe .
+    go build -trimpath -ldflags "-s -w -buildid=" -o $TargetExe .
   } finally {
     Pop-Location
   }
@@ -409,114 +409,6 @@ $Marker = [ordered]@{
   installed_at = (Get-Date).ToString("s")
 }
 $Marker | ConvertTo-Json -Depth 6 | Set-Content -Path $MarkerPath -Encoding UTF8
-
-# Register Start Menu shortcut with AppUserModelID so Windows notification
-# shows a stable app name. No custom icon is bound to avoid extra build assets.
-$ShortcutCode = @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-
-[ComImport, Guid("00021401-0000-0000-C000-000000000046")]
-public class ShellLink {}
-
-[ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IShellLinkW {
-    void GetPath(StringBuilder sb, int cch, IntPtr pfd, uint fFlags);
-    IntPtr GetIDList();
-    void SetIDList(IntPtr pidl);
-    void GetDescription(StringBuilder sb, int cch);
-    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-    void GetWorkingDirectory(StringBuilder sb, int cch);
-    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
-    void GetArguments(StringBuilder sb, int cch);
-    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
-    ushort GetHotKey();
-    void SetHotKey(ushort wHotKey);
-    uint GetShowCmd();
-    void SetShowCmd(uint iShowCmd);
-    void GetIconLocation(StringBuilder sb, int cch, out int piIcon);
-    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
-    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
-    void Resolve(IntPtr hwnd, uint fFlags);
-    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
-}
-
-[ComImport, Guid("0000010B-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IPersistFile {
-    void GetCurFile([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile);
-    [PreserveSig] int IsDirty();
-    void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
-    void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
-    void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public struct PROPERTYKEY {
-    public Guid fmtid;
-    public uint pid;
-}
-
-[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IPropertyStore {
-    [PreserveSig] int GetCount(out uint cProps);
-    [PreserveSig] int GetAt(uint iProp, out PROPERTYKEY pkey);
-    [PreserveSig] int GetValue(ref PROPERTYKEY key, out IntPtr pv); // simplified
-    [PreserveSig] int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
-    [PreserveSig] int Commit();
-}
-
-[StructLayout(LayoutKind.Sequential)]
-public struct PROPVARIANT {
-    public ushort vt;
-    ushort wReserved1;
-    ushort wReserved2;
-    ushort wReserved3;
-    public IntPtr ptrVal;
-}
-
-public static class ShortcutManager {
-    public static void Create(string lnkPath, string targetPath, string iconPath, string appId) {
-        var link = (IShellLinkW)new ShellLink();
-        link.SetPath(targetPath);
-        if (!string.IsNullOrEmpty(iconPath)) {
-            link.SetIconLocation(iconPath, 0);
-        }
-        var store = (IPropertyStore)link;
-        var key = new PROPERTYKEY {
-            fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"),
-            pid = 5  // PKEY_AppUserModel_ID
-        };
-        var pv = new PROPVARIANT();
-        pv.vt = 31;  // VT_LPWSTR
-        pv.ptrVal = Marshal.StringToCoTaskMemUni(appId);
-        store.SetValue(ref key, ref pv);
-        store.Commit();
-        Marshal.FreeCoTaskMem(pv.ptrVal);
-        var file = (IPersistFile)link;
-        var dir = System.IO.Path.GetDirectoryName(lnkPath);
-        if (!System.IO.Directory.Exists(dir)) {
-            System.IO.Directory.CreateDirectory(dir);
-        }
-        file.Save(lnkPath, true);
-    }
-}
-'@
-
-$AppIdForShortcut = "AblesciPDFWatcher"
-$ShortcutName = "Ablesci PDF Watcher"
-$StartMenuPrograms = [Environment]::GetFolderPath('StartMenu') + "\Programs"
-$ShortcutDir = Join-Path $StartMenuPrograms "Ablesci PDF Watcher"
-$ShortcutPath = Join-Path $ShortcutDir "$ShortcutName.lnk"
-
-try {
-  Add-Type -TypeDefinition $ShortcutCode -ReferencedAssemblies "System.Runtime.InteropServices"
-  [ShortcutManager]::Create($ShortcutPath, $TargetExe, "", $AppIdForShortcut)
-  Write-Host "Start Menu shortcut created: $ShortcutPath"
-  Write-Host "  AppUserModelID = $AppIdForShortcut"
-} catch {
-  Write-Warning "Failed to create Start Menu shortcut: $_"
-}
 
 $Browsers = if ($Browser -eq "All") { @("Chrome", "Edge") } else { @($Browser) }
 foreach ($BrowserName in $Browsers) {

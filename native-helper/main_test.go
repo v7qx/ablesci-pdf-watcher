@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -70,6 +71,79 @@ func TestEnsureAllowedPDFPathRejectsOutsideAllowedDirs(t *testing.T) {
 	}
 	if err := ensureAllowedPDFPath(outside); err == nil {
 		t.Fatal("expected outside path to be rejected")
+	}
+}
+
+func TestInspectPDFRejectsInvalidHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-pdf.pdf")
+	if err := os.WriteFile(path, []byte("<html>login required</html>"), 0644); err != nil {
+		t.Fatalf("write invalid pdf: %v", err)
+	}
+	if _, _, err := inspectPDF(path); err == nil {
+		t.Fatal("expected invalid PDF header to be rejected")
+	}
+}
+
+func TestHandleUploadOSSRejectsNonPDFBeforeNetwork(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "ablesci-upload-nonpdf.txt")
+	if err := os.WriteFile(path, []byte("not pdf"), 0644); err != nil {
+		t.Fatalf("write non-pdf: %v", err)
+	}
+	defer os.Remove(path)
+
+	if err := handleUploadOSS(Request{Path: path, OSS: OSSFields{Host: "https://ables1.oss-cn-shanghai.aliyuncs.com/"}}); err == nil {
+		t.Fatal("expected upload_oss to reject non-pdf file before network upload")
+	}
+}
+
+func TestHandleDeleteFileRejectsOutsideAllowedDirs(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	path := filepath.Join(dir, "ablesci-outside-delete-test.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.4\n% test\n"), 0644); err != nil {
+		t.Fatalf("write outside pdf: %v", err)
+	}
+	defer os.Remove(path)
+	if err := handleDeleteFile(Request{Path: path}); err == nil {
+		t.Fatal("expected delete_file to reject path outside allowed dirs")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("delete_file should not remove rejected file: %v", err)
+	}
+}
+
+func TestRunPingPong(t *testing.T) {
+	resp, err := runNativeRequest(Request{Action: "ping"})
+	if err != nil {
+		t.Fatalf("run ping: %v", err)
+	}
+	if !resp.OK || resp.Action != "pong" {
+		t.Fatalf("unexpected ping response: %+v", resp)
+	}
+}
+
+func TestReadRequestRejectsMalformedJSON(t *testing.T) {
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdin pipe: %v", err)
+	}
+	os.Stdin = r
+	payload := []byte(`{"action":`)
+	if err := binary.Write(w, binary.LittleEndian, uint32(len(payload))); err != nil {
+		t.Fatalf("write length: %v", err)
+	}
+	if _, err := w.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	w.Close()
+	_, readErr := readRequest()
+	r.Close()
+	os.Stdin = oldStdin
+	if readErr == nil {
+		t.Fatal("expected malformed native messaging JSON to be rejected")
 	}
 }
 
@@ -392,4 +466,60 @@ func captureNativeResponse(t *testing.T, fn func() error) Response {
 		t.Fatalf("decode response: %v", err)
 	}
 	return resp
+}
+
+func runNativeRequest(req Request) (Response, error) {
+	oldStdin := os.Stdin
+	oldStdout := os.Stdout
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		return Response{}, err
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		stdinR.Close()
+		stdinW.Close()
+		return Response{}, err
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return Response{}, err
+	}
+	var input bytes.Buffer
+	if err := binary.Write(&input, binary.LittleEndian, uint32(len(payload))); err != nil {
+		return Response{}, err
+	}
+	input.Write(payload)
+	if _, err := stdinW.Write(input.Bytes()); err != nil {
+		return Response{}, err
+	}
+	stdinW.Close()
+
+	os.Stdin = stdinR
+	os.Stdout = stdoutW
+	runErr := run()
+	stdoutW.Close()
+	os.Stdin = oldStdin
+	os.Stdout = oldStdout
+	stdinR.Close()
+	if runErr != nil {
+		stdoutR.Close()
+		return Response{}, runErr
+	}
+	defer stdoutR.Close()
+	var size uint32
+	if err := binary.Read(stdoutR, binary.LittleEndian, &size); err != nil {
+		return Response{}, err
+	}
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(stdoutR, buf); err != nil {
+		return Response{}, err
+	}
+	var resp Response
+	if err := json.Unmarshal(buf, &resp); err != nil {
+		return Response{}, err
+	}
+	return resp, nil
 }

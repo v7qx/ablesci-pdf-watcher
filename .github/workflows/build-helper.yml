@@ -1,0 +1,48 @@
+name: Build Windows Native Helper
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - native-helper/**
+      - native-host/**
+      - .github/workflows/build-helper.yml
+  pull_request:
+    paths:
+      - native-helper/**
+      - native-host/**
+      - .github/workflows/build-helper.yml
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native-helper/go.mod
+          cache: true
+
+      - name: Test helper
+        shell: pwsh
+        working-directory: native-helper
+        run: go test ./...
+
+      - name: Build helper
+        shell: pwsh
+        run: .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablesci-pdf-helper-windows
+          path: |
+            native-host/dist/ablesci_pdf_helper.exe
+            native-host/dist/SHA256SUMS.txt
+          if-no-files-found: error

@@ -13,8 +13,7 @@
       incrementDaily,
       appendWatcherLog,
       normalizeText,
-      appendWatcherTrace,
-      nativeNotifyTimeoutMs
+      appendWatcherTrace
     } = config;
 
     async function sendBrowserNotification(message, opts = {}) {
@@ -70,33 +69,6 @@
       if (!opts.watcherNotificationEnabled) {
         if (url) console.warn('[Ablesci Auto Watcher] notification disabled, skip:', message, deps.urlHostPath(url));
         return { ok: false, mode: 'disabled', reason: 'notification_disabled' };
-      }
-      if (opts.watcherNotifyMode === 'native') {
-        try {
-          await deps.sendNativeMessage(opts.nativeHostName, {
-            action: 'notify_user',
-            title: 'Ablesci PDF Watcher',
-            message
-          }, nativeNotifyTimeoutMs);
-          if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-          return { ok: true, mode: 'native' };
-        } catch (err) {
-          console.warn('[Ablesci Auto Watcher] native notify failed', err);
-          try {
-            const fallback = await sendBrowserNotification(message, notifyOptions);
-            if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-            return {
-              ok: true,
-              mode: 'browser',
-              fallbackFrom: 'native',
-              reason: err?.message || String(err),
-              fallback
-            };
-          } catch (browserErr) {
-            if (url) console.warn('[Ablesci Auto Watcher] needs attention:', message, deps.urlHostPath(url));
-            return { ok: false, mode: 'native', reason: err?.message || String(err), fallbackReason: browserErr?.message || String(browserErr) };
-          }
-        }
       }
       try {
         await sendBrowserNotification(message, notifyOptions);

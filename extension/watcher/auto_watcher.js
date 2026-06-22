@@ -14,7 +14,6 @@
   const TRACE_FLUSH_INTERVAL_MS = 5 * 1000;
   const TRACE_FLUSH_BATCH_SIZE = 20;
   const NATIVE_CONFIG_TIMEOUT_MS = 15 * 1000;
-  const NATIVE_NOTIFY_TIMEOUT_MS = 10 * 1000;
   const NATIVE_REPORT_TIMEOUT_MS = 30 * 1000;
   const MAX_SESSION_CANDIDATES = 10;
   const ACTIVE_RUN_RETENTION_DAYS = 62;
@@ -307,8 +306,7 @@
     incrementDaily,
     appendWatcherLog: entry => appendWatcherLog(entry),
     normalizeText,
-    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
-    nativeNotifyTimeoutMs: NATIVE_NOTIFY_TIMEOUT_MS
+    appendWatcherTrace: (step, details) => appendWatcherTrace(step, details)
   });
   const {
     quotaHoldPlan,

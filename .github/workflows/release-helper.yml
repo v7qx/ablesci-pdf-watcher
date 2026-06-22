@@ -1,0 +1,75 @@
+name: Release Windows Native Helper
+
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native-helper/go.mod
+          cache: true
+
+      - name: Test helper
+        shell: pwsh
+        working-directory: native-helper
+        run: go test ./...
+
+      - name: Build helper
+        shell: pwsh
+        run: .\native-host\build_helper.ps1 -TargetOS windows -TargetArch amd64 -Version $env:GITHUB_REF_NAME
+
+      - name: Package helper
+        shell: pwsh
+        run: |
+          $dist = Join-Path $PWD "native-host\dist"
+          $zip = Join-Path $dist "ablesci-pdf-helper-windows.zip"
+          if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
+          Compress-Archive -Path (Join-Path $dist "ablesci_pdf_helper.exe"), (Join-Path $dist "SHA256SUMS.txt") -DestinationPath $zip
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $dist = Join-Path $PWD "native-host\dist"
+          $zip = Join-Path $dist "ablesci-pdf-helper-windows.zip"
+          $sums = Join-Path $dist "SHA256SUMS.txt"
+          $sha = Get-Content -LiteralPath $sums -Raw
+          $notes = @"
+          Windows Native Helper built by GitHub Actions.
+
+          Source commit: $env:GITHUB_SHA
+
+          Verify after download:
+
+          ````powershell
+          Get-FileHash .\ablesci_pdf_helper.exe -Algorithm SHA256
+          Get-AuthenticodeSignature .\ablesci_pdf_helper.exe
+          ````
+
+          SHA256:
+
+          ````text
+          $sha
+          ````
+          "@
+          gh release view $tag 1>$null 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $sums --clobber
+          } else {
+            gh release create $tag $zip $sums --title $tag --notes $notes
+          }
