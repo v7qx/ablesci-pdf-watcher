@@ -148,6 +148,62 @@
     return false;
   }
 
+  function hasWileyBookPage() {
+    if (common.currentPublisher() !== 'wiley') return false;
+    const path = String(location.pathname || '');
+    if (/^\/doi\/book(?:\/|$)/i.test(path)) return true;
+    const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href') || '';
+    return /\/doi\/book(?:\/|$)/i.test(canonical);
+  }
+
+  function isWileyArticlePdfHref(href) {
+    try {
+      const url = new URL(String(href || ''), location.href);
+      if (!/(^|\.)onlinelibrary\.wiley\.com$/i.test(url.hostname)) return false;
+      return /^\/doi\/(?:pdfdirect|pdf|epdf)\/10\.\d{4,9}\//i.test(url.pathname);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isWileyPromotionalPdf(el, href) {
+    if (common.currentPublisher() !== 'wiley') return false;
+    const marker = [
+      href || '',
+      el?.id || '',
+      el?.innerText || '',
+      el?.getAttribute?.('title') || ''
+    ].join(' ');
+    if (/\/pb-assets\//i.test(String(href || ''))) return true;
+    if (/\b(?:flyer|brochure|prospectus)\b/i.test(marker)) return true;
+    try {
+      return !!el?.closest?.('#eLS-flyer, .journal-resources, [class*="journal-resources"]');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function hasOxfordAccessDeniedPage() {
+    if (common.currentPublisher() !== 'oxford') return false;
+
+    const noAccessJump = document.querySelector(
+      'a.js-no-access-jumplink[href*="#no-access-message"], a.get-access-jumplink[href*="#no-access-message"]'
+    );
+    if (noAccessJump) return true;
+
+    const isAbstractPage = /\/article-abstract\//i.test(location.pathname || '');
+    const redirectedFromFullText = /(?:^|[?&])redirectedFrom=fulltext(?:&|$)/i.test(location.search || '');
+    if (isAbstractPage && redirectedFromFullText) return true;
+
+    const unauthorizedWidget = document.querySelector(
+      '[data-widget-instance*="UnAuthorizedLoginAndPaywall"], #article-purchase, .widget-PurchaseOptions, .purchase-ppv-wrap-article'
+    );
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    const accessText = /For full access to this pdf|Get access|View Article Abstract\s*&\s*Purchase Options/i.test(text);
+    const purchaseText = /Purchase|Short-term Access|Sign in through your institution|purchase an annual subscription/i.test(text);
+    return !!unauthorizedWidget && accessText && purchaseText;
+  }
+
   function hasSageErrorPage() {
     if (common.currentPublisher() !== 'sage') return false;
     const title = String(document.title || '').trim();
@@ -227,11 +283,16 @@
           ? (/\/doi\/pdfdirect\//i.test(href || '') ? 6 : (/\/doi\/pdf\//i.test(href || '') ? 4 : 0))
           : 0;
         const supplementary = isSupplementary(marker);
-        return { el, href, marker, visible, score: hrefScore + textScore + publisherScore, supplementary };
+        const promotional = publisher === 'wiley' && isWileyPromotionalPdf(el, href);
+        return { el, href, marker, visible, score: hrefScore + textScore + publisherScore, supplementary, promotional };
       });
     const candidates = allCandidates
       .filter(item => {
         if (!item.href || !item.visible || item.score === 0 || item.supplementary) return false;
+        // Wiley's Resources sidebar exposes flyers and other promotional PDFs.
+        if (item.promotional) return false;
+        // Only DOI-bound Wiley PDF routes are article candidates.
+        if (publisher === 'wiley' && !isWileyArticlePdfHref(item.href)) return false;
         // 排除 ACS 整本书的预览样章 PDF（#previewIF / preview_button / /pb-assets/in-focus/preview/）
         if (isAcsPreviewLink(item.el, item.href)) return false;
         // 排除 Google Scholar CASA 等中间跳转链接（host 非目标出版社）
@@ -249,6 +310,7 @@
       visible: item.visible,
       score: item.score,
       supplementary: item.supplementary,
+      promotional: item.promotional,
       text: (item.el.innerText || item.el.textContent || item.el.getAttribute('aria-label') || item.el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80)
     }));
     return {
@@ -257,6 +319,7 @@
         selectorCount: allCandidates.length,
         eligibleCount: candidates.length,
         rejectedSupplementaryCount: allCandidates.filter(item => item.supplementary).length,
+        rejectedPromotionalCount: allCandidates.filter(item => item.promotional).length,
         sample
       }
     };
@@ -304,6 +367,17 @@
       stopObserver();
       return;
     }
+    if (publisher === 'wiley' && hasWileyBookPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('wiley', {
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'Wiley 整本书或参考工具页面不属于期刊论文，已停止本次下载。',
+        source: 'wiley_book_page'
+      });
+      stopObserver();
+      return;
+    }
     if (publisher === 'wiley' && hasWileyAccessDeniedPage()) {
       pdfTriggered = true;
       common.sendPublisherMessage('wiley', {
@@ -322,6 +396,17 @@
         accessDenied: true,
         error: 'Springer 页面明确显示无正文访问权限，已停止本次下载。',
         source: 'springer_access_denied_page'
+      });
+      stopObserver();
+      return;
+    }
+    if (publisher === 'oxford' && hasOxfordAccessDeniedPage()) {
+      pdfTriggered = true;
+      common.sendPublisherMessage('oxford', {
+        articleUrl: location.href,
+        accessDenied: true,
+        error: 'Oxford Academic 页面明确显示无正文 PDF 访问权限，已停止本次下载。',
+        source: 'oxford_access_denied_page'
       });
       stopObserver();
       return;

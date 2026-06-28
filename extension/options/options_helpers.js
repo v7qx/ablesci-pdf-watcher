@@ -68,7 +68,6 @@
       const assistAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
       return {
         nextRunAt: assistAt,
-        nextAssistAt: assistAt,
         assistCountdownAt: assistAt
       };
     }

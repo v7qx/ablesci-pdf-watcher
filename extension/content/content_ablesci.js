@@ -37,9 +37,12 @@
     return v;
   }
 
-  function isUploadBlocked() {
+  function uploadBlockedReason() {
     const t = document.body ? document.body.innerText : '';
-    return /已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭/.test(t);
+    if (/已经有人上传了文献|请等待求助人确认|待确认|已完成|已关闭/.test(t)) {
+      return '当前页面看起来已经有人上传、待确认、已完成或已关闭，正常应助应停止。';
+    }
+    return '';
   }
 
   function findQuickAssistButtonBar() {
@@ -664,19 +667,31 @@
     return match ? cleanJournalName(match[1]) : '';
   }
 
-  function isAblesciErrorPage() {
+  function ablesciServiceErrorInfo() {
     const bodyText = String(document.body ? document.body.innerText || document.body.textContent || '' : '');
     const titleText = String(document.title || '');
-    return /502 Bad Gateway|504 Gateway Time|500 Internal Server|503 Service Temporarily|403 Forbidden|404 Not Found/i.test(titleText + ' ' + bodyText) ||
-           /科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i.test(titleText + ' ' + bodyText);
+    const combined = `${titleText} ${bodyText}`;
+    const marker = combined.match(/502 Bad Gateway|504 Gateway Time(?:-out)?|500 Internal Server(?: Error)?|503 Service (?:Temporarily Unavailable|Unavailable)|403 Forbidden|404 Not Found/i)?.[0] ||
+      combined.match(/科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|您所访问的资源出现网络错误/i)?.[0] || '';
+    return {
+      isServiceError: !!marker,
+      marker,
+      title: titleText.trim(),
+      bodyText: bodyText.replace(/\s+/g, ' ').trim()
+    };
   }
 
-  function collectPayload() {
+  function isAblesciErrorPage() {
+    return ablesciServiceErrorInfo().isServiceError;
+  }
+
+  function collectPayload(options = {}) {
     if (isAblesciErrorPage()) {
       throw new Error('科研通网站返回服务错误（502 Bad Gateway 或其他网络错误）');
     }
-    if (isUploadBlocked()) {
-      throw new Error('当前页面看起来已经有人上传、待确认、已完成或已关闭，已停止。');
+    const blockedReason = uploadBlockedReason();
+    if (blockedReason && options.debugSimulation !== true) {
+      throw new Error(blockedReason.replace('正常应助应停止。', '已停止。'));
     }
     const picked = window.AblesciPdfAdapters.pickPdfUrlFromDocument(document);
 
@@ -687,6 +702,8 @@
     const title = visibleText($('.assist-title')) || document.title || suggestedFilename;
     const journalName = extractJournalName();
     const risk = detectPageRisk();
+    const riskReasons = risk.reasons.slice();
+    if (blockedReason) riskReasons.unshift(blockedReason);
     const documentTypeInfo = extractDocumentTypeInfo();
     const requesterId = extractRequesterId();
 
@@ -707,8 +724,9 @@
       pdfUrl: picked.url,
       pdfUrlSource: picked.source,
       suggestedFilename,
-      downloadOnly: risk.downloadOnly,
-      riskReasons: risk.reasons
+      downloadOnly: riskReasons.length > 0,
+      riskReasons,
+      debugBlockReasons: blockedReason ? [blockedReason] : []
     };
   }
 
@@ -719,8 +737,8 @@
       .join(' ');
   }
 
-  function buildPayloadFromCurrentPage() {
-    const payload = collectPayload();
+  function buildPayloadFromCurrentPage(options = {}) {
+    const payload = collectPayload(options);
     return {
       ...payload,
       statusText: extractStatusText(),
@@ -808,11 +826,29 @@
     port.postMessage({ type: 'startUpload', payload });
   }
 
-  function addButton() {
+  function addButton(options = {}) {
     if ($('#' + BTN_ID)) return;
     const found = findButtonMount();
     if (!found.mount) {
-      console.warn('[Ablesci Native PDF Watcher] no mount point found');
+      if (options.finalAttempt === true) {
+        const serviceError = ablesciServiceErrorInfo();
+        const selectorState = {
+          quickAssistRows: Array.from(document.querySelectorAll('tr')).filter(tr => /快捷应助/.test(tr.innerText || tr.textContent || '')).length,
+          assistDetail: document.querySelectorAll('.assist-detail').length,
+          assistTitle: document.querySelectorAll('.assist-title').length,
+          assistDoi: document.querySelectorAll('.assist-doi').length,
+          assistUrl: document.querySelectorAll('.assist-url').length
+        };
+        const reason = serviceError.isServiceError
+          ? `ablesci_service_error:${serviceError.marker || 'unknown'}`
+          : (/登录|请先登录|login/i.test(serviceError.bodyText) ? 'login_page_or_session_expired' : 'expected_detail_dom_missing');
+        console.warn(
+          `[Ablesci Native PDF Watcher] upload button mount skipped; reason=${reason}; ` +
+          `url=${location.href}; title=${serviceError.title || '(empty)'}; readyState=${document.readyState}; ` +
+          `bodyLength=${serviceError.bodyText.length}; selectors=${JSON.stringify(selectorState)}; ` +
+          `summary=${serviceError.bodyText.slice(0, 240) || '(empty)'}`
+        );
+      }
       return;
     }
     ensureStyle();
@@ -851,7 +887,9 @@
       try {
         sendResponse({
           ok: true,
-          payload: buildPayloadFromCurrentPage()
+          payload: buildPayloadFromCurrentPage({
+            debugSimulation: msg.debugSimulation === true
+          })
         });
       } catch (err) {
         sendResponse({
@@ -901,10 +939,10 @@
     pageOptions = opts;
     addButton();
     setTimeout(addButton, 1000);
-    setTimeout(addButton, 3000);
+    setTimeout(() => addButton({ finalAttempt: true }), 3000);
   }).catch(() => {
     addButton();
     setTimeout(addButton, 1000);
-    setTimeout(addButton, 3000);
+    setTimeout(() => addButton({ finalAttempt: true }), 3000);
   });
 })();

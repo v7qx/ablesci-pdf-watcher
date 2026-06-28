@@ -244,23 +244,34 @@
 
     async function handleUpload(port, payload, signal = null, optsOverride = null) {
       throwIfAborted(signal);
+      const debugSimulation = payload?.debugSimulation === true;
+      if (debugSimulation) {
+        payload = {
+          ...payload,
+          downloadOnly: true
+        };
+      }
       const opts = optsOverride || await getOptions();
       const diag = makeDiagnosticBase(payload, opts);
 
       // 1. 校验 Corrigendum 更正类求助
       if (opts.watcherSkipCorrigendum && payload?.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
-        await saveDiagnostic({ ...diag, stage: 'skipped-corrigendum', error: '已按设置跳过 Corrigendum 更正类求助' });
-        post(port, 'done', '已跳过 Corrigendum 更正类求助', {
-          html: '已按设置跳过 Corrigendum 更正类求助。',
-          recomend: false,
-          reload: false,
-          downloadOnly: true,
-          blocked: true,
-          skipped: true,
-          skipReason: 'corrigendum',
-          message: '已按设置跳过 Corrigendum 更正类求助'
-        });
-        return;
+        if (debugSimulation) {
+          post(port, 'progress', '正常应助本应跳过 Corrigendum 更正类求助；模拟模式继续测试后续链路。');
+        } else {
+          await saveDiagnostic({ ...diag, stage: 'skipped-corrigendum', error: '已按设置跳过 Corrigendum 更正类求助' });
+          post(port, 'done', '已跳过 Corrigendum 更正类求助', {
+            html: '已按设置跳过 Corrigendum 更正类求助。',
+            recomend: false,
+            reload: false,
+            downloadOnly: true,
+            blocked: true,
+            skipped: true,
+            skipReason: 'corrigendum',
+            message: '已按设置跳过 Corrigendum 更正类求助'
+          });
+          return;
+        }
       }
 
       // 2. 校验求助人黑名单 (异步读取本地黑名单文件)
@@ -304,38 +315,46 @@
           }
         } catch (err) {
           const message = `读取本地黑名单文件失败，已停止本次自动应助：${err.message || err}`;
-          await saveDiagnostic({ ...diag, stage: 'blacklist-read-error-blocked', error: message });
-          post(port, 'done', message, {
-            html: escapeHtml(message),
-            recomend: false,
-            reload: false,
-            downloadOnly: true,
-            blocked: true,
-            skipped: true,
-            skipReason: 'blacklist_read_error',
-            message
-          });
-          return;
+          if (debugSimulation) {
+            post(port, 'progress', `${message}；模拟模式仅记录该拦截并继续。`);
+          } else {
+            await saveDiagnostic({ ...diag, stage: 'blacklist-read-error-blocked', error: message });
+            post(port, 'done', message, {
+              html: escapeHtml(message),
+              recomend: false,
+              reload: false,
+              downloadOnly: true,
+              blocked: true,
+              skipped: true,
+              skipReason: 'blacklist_read_error',
+              message
+            });
+            return;
+          }
         }
 
         if (isBlacklisted) {
           const blockMsg = blacklistComment ? `求助人已被列入黑名单，拒绝应助。备注: ${blacklistComment}` : '求助人已被列入黑名单，拒绝应助。';
-          await saveDiagnostic({ ...diag, stage: 'skipped-blacklist', error: blockMsg });
-          let htmlMsg = `当前求助人（ID: ${escapeHtml(payload.requesterId)}）已被列入本地黑名单，拒绝下载和上传。`;
-          if (blacklistComment) {
-            htmlMsg += `<br><span style="color: #e6a23c; font-size: 0.95em;"><strong>拉黑备注：</strong>${escapeHtml(blacklistComment)}</span>`;
+          if (debugSimulation) {
+            post(port, 'progress', `${blockMsg} 正常应助本应停止；模拟模式继续测试后续链路。`);
+          } else {
+            await saveDiagnostic({ ...diag, stage: 'skipped-blacklist', error: blockMsg });
+            let htmlMsg = `当前求助人（ID: ${escapeHtml(payload.requesterId)}）已被列入本地黑名单，拒绝下载和上传。`;
+            if (blacklistComment) {
+              htmlMsg += `<br><span style="color: #e6a23c; font-size: 0.95em;"><strong>拉黑备注：</strong>${escapeHtml(blacklistComment)}</span>`;
+            }
+            post(port, 'done', '已跳过黑名单求助人', {
+              html: htmlMsg,
+              recomend: false,
+              reload: false,
+              downloadOnly: true,
+              blocked: true,
+              skipped: true,
+              skipReason: 'blacklist',
+              message: `求助人 ID (${payload.requesterId}) 在本地黑名单中，任务已安全终止。${blacklistComment ? '备注: ' + blacklistComment : ''}`
+            });
+            return;
           }
-          post(port, 'done', '已跳过黑名单求助人', {
-            html: htmlMsg,
-            recomend: false,
-            reload: false,
-            downloadOnly: true,
-            blocked: true,
-            skipped: true,
-            skipReason: 'blacklist',
-            message: `求助人 ID (${payload.requesterId}) 在本地黑名单中，任务已安全终止。${blacklistComment ? '备注: ' + blacklistComment : ''}`
-          });
-          return;
         }
       }
 
@@ -370,7 +389,7 @@
         pii = extractScienceDirectPii(payload.pdfUrl || payload.pageUrl || item.url || item.finalUrl || '');
       }
 
-      if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+      if (!debugSimulation && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
         await recordManualWatcherDaily('downloaded').catch(() => {});
       }
 

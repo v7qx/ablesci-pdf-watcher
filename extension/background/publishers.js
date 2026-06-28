@@ -240,15 +240,12 @@
       };
     }
 
-    if (!publisherForUrl(u.href)) {
-      return {
-        skip: true,
-        type: 'unsupported_book_chapter_url',
-        reason: 'Unsupported publisher URL points to a book/chapter path, not a journal article'
-      };
-    }
-
-    return null;
+    const publisher = publisherForUrl(u.href);
+    return {
+      skip: true,
+      type: publisher ? `${publisher}_book_chapter_url` : 'unsupported_book_chapter_url',
+      reason: 'Publisher URL points to a book/chapter path, not a journal article'
+    };
   }
 
   function sageArticleUrlFromPdfUrl(url) {

@@ -227,14 +227,20 @@
       maxPage = Math.max(...pageNums.filter(Number.isFinite));
 
       const publisherCounts = {};
-      const publisherRe = /<div\b[^>]*class\s*=\s*"[^"]*\bwaiting-publisher-item\b[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+      const publisherRe = /<(a|div)\b[^>]*class\s*=\s*"[^"]*\bwaiting-publisher-item\b[^"]*"[^>]*>([\s\S]*?)<\/\1>/gi;
       let p;
       while ((p = publisherRe.exec(html))) {
         const block = p[0];
         const title = attrValue(block.match(/<img\b[^>]*\btitle\s*=[^>]*>/i)?.[0] || block, 'title')
           || attrValue(block, 'title').replace(/^查看\s+|\s+的所有求助$/g, '');
+        const href = htmlDecode(attrValue(block, 'href'));
+        let publisherSlug = '';
+        try {
+          publisherSlug = String(new URL(href, url).searchParams.get('publisher') || '').toLowerCase();
+        } catch (_) {}
         const count = numberFromText(stripTags(block.match(/<span\b[^>]*class\s*=\s*"[^"]*\bwaiting-publisher-item-num\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] || ''));
-        if (title && Number.isFinite(count)) publisherCounts[title] = count;
+        const key = publisherSlug || title;
+        if (key && Number.isFinite(count)) publisherCounts[key] = count;
       }
 
       return {
@@ -255,7 +261,11 @@
     function parseAssistListHtml(html, url) {
       const parseStartedAt = Date.now();
       const stripStartedAt = Date.now();
-      const bodyText = stripTags(html);
+      const visibleHtml = String(html || '')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ');
+      const bodyText = stripTags(visibleHtml);
       const stripBodyMs = Date.now() - stripStartedAt;
       const titleStartedAt = Date.now();
       const title = stripTags(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '');

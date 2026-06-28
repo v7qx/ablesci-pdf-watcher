@@ -22,6 +22,7 @@
     } = deps;
 
     let currentSimulatePort = null;
+    let currentSimulateTabId = null;
     let lastJournalAccessSummary = null;
 
     function showText(id, msg, isErr) {
@@ -531,6 +532,10 @@
           try { currentSimulatePort.disconnect(); } catch (_) {}
           currentSimulatePort = null;
         }
+        if (currentSimulateTabId) {
+          try { await chromeApi.tabs.remove(currentSimulateTabId); } catch (_) {}
+          currentSimulateTabId = null;
+        }
         btn.textContent = '开始模拟';
         btn.disabled = false;
         appendSimulateLog('exception', '手动暂停了模拟；保留当前日志方便复制。');
@@ -543,15 +548,22 @@
         return;
       }
 
-      let pdfUrl = rawVal;
+      let sourceUrl = rawVal;
       if (!/^https?:\/\//i.test(rawVal)) {
         if (/^10\.\d{4,9}\//i.test(rawVal)) {
-          pdfUrl = 'https://doi.org/' + rawVal;
+          sourceUrl = 'https://doi.org/' + rawVal;
         } else {
-          alert('输入的格式不正确，请输入以 10. 开头的 DOI，或者完整的 URL 链接');
+          alert('输入的格式不正确，请输入求助详情链接、以 10. 开头的 DOI，或者完整的文献 URL');
           return;
         }
       }
+      let isAssistDetail = false;
+      try {
+        const parsed = new URL(sourceUrl);
+        isAssistDetail = /(^|\.)ablesci\.com$/i.test(parsed.hostname) &&
+          /^\/assist\/detail\/?$/i.test(parsed.pathname) &&
+          !!parsed.searchParams.get('id');
+      } catch (_) {}
 
       function escapeHtml(s) {
         return String(s || '')
@@ -611,10 +623,82 @@
       logContainer.innerHTML = '';
       logContainer.style.display = 'block';
 
-      appendSimulateLog('progress', `开始文献探测: ${pdfUrl}`);
-      appendSimulateLog('progress', '正在连接插件后台任务队列...');
+      appendSimulateLog('progress', `开始文献探测: ${sourceUrl}`);
 
       try {
+        let payload;
+        if (isAssistDetail) {
+          appendSimulateLog('progress', '正在打开求助详情页并采集真实应助信息...');
+          const tab = await chromeApi.tabs.create({ url: sourceUrl, active: false });
+          currentSimulateTabId = tab.id;
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => finish(new Error('求助详情页加载超时')), 45000);
+            function finish(err) {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              chromeApi.tabs.onUpdated.removeListener(listener);
+              chromeApi.tabs.onRemoved.removeListener(removedListener);
+              err ? reject(err) : resolve();
+            }
+            function listener(tabId, changeInfo) {
+              if (tabId === tab.id && changeInfo.status === 'complete') finish();
+            }
+            function removedListener(tabId) {
+              if (tabId === tab.id) finish(new Error('求助详情页标签已关闭'));
+            }
+            chromeApi.tabs.onUpdated.addListener(listener);
+            chromeApi.tabs.onRemoved.addListener(removedListener);
+            chromeApi.tabs.get(tab.id).then(current => {
+              if (current.status === 'complete') finish();
+            }).catch(finish);
+          });
+
+          let response = null;
+          for (let attempt = 0; attempt < 6; attempt += 1) {
+            try {
+              response = await chromeApi.tabs.sendMessage(tab.id, {
+                type: 'ablesciExtractDetailPayload',
+                debugSimulation: true
+              });
+              if (response) break;
+            } catch (_) {}
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          if (!response) throw new Error('详情页脚本未响应，请确认扩展已重载且页面可正常访问');
+          if (!response.ok) throw new Error(response.error || '详情页信息采集失败');
+          payload = {
+            ...response.payload,
+            downloadOnly: true,
+            debugSimulation: true
+          };
+
+          appendSimulateLog('done', `详情页采集完成：ID=${payload.assistId || '-'}，DOI=${payload.doi || '未提供'}`);
+          appendSimulateLog('progress', `下载入口：${payload.pdfUrl || '未识别'}（来源：${payload.pdfUrlSource || '-'}）`);
+          const blockers = Array.isArray(payload.riskReasons) ? payload.riskReasons.filter(Boolean) : [];
+          if (blockers.length) {
+            blockers.forEach(reason => appendSimulateLog('exception', `正常应助本应停止：${reason}`));
+            appendSimulateLog('progress', '模拟模式将强制仅下载，并继续测试后续链路。');
+          }
+        } else {
+          payload = {
+            pdfUrl: sourceUrl,
+            suggestedFilename: `debug_simulate_${Date.now()}.pdf`,
+            assistId: `simulate_debug_${Math.random().toString(36).substring(2, 8)}`,
+            csrfToken: 'dummy_csrf_token',
+            downloadOnly: true,
+            debugSimulation: true,
+            requesterId: 'simulate_debugger',
+            title: 'Simulated Debug Test Paper'
+          };
+        }
+
+        if (currentSimulateTabId) {
+          try { await chromeApi.tabs.remove(currentSimulateTabId); } catch (_) {}
+          currentSimulateTabId = null;
+        }
+        appendSimulateLog('progress', '正在连接插件后台任务队列...');
         const port = chromeApi.runtime.connect({ name: 'ablesci-pdf-upload' });
         currentSimulatePort = port;
 
@@ -683,18 +767,14 @@
 
         port.postMessage({
           type: 'startUpload',
-          payload: {
-            pdfUrl: pdfUrl,
-            suggestedFilename: `debug_simulate_${Date.now()}.pdf`,
-            assistId: `simulate_debug_${Math.random().toString(36).substring(2, 8)}`,
-            csrfToken: 'dummy_csrf_token',
-            downloadOnly: true,
-            requesterId: 'simulate_debugger',
-            title: 'Simulated Debug Test Paper'
-          }
+          payload
         });
 
       } catch (err) {
+        if (currentSimulateTabId) {
+          try { await chromeApi.tabs.remove(currentSimulateTabId); } catch (_) {}
+          currentSimulateTabId = null;
+        }
         appendSimulateLog('exception', `启动模拟失败: ${err.message || String(err)}`);
         btn.disabled = false;
         btn.textContent = '开始模拟';

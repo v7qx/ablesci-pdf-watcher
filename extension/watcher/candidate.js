@@ -431,8 +431,13 @@
       Array.from(document.querySelectorAll('.waiting-publisher-item')).forEach(item => {
         const imgTitle = item.querySelector('img[title]')?.getAttribute('title') || '';
         const title = imgTitle || String(item.getAttribute('title') || '').replace(/^查看\s+|\s+的所有求助$/g, '');
+        let publisherSlug = '';
+        try {
+          publisherSlug = String(new URL(item.getAttribute('href') || '', location.href).searchParams.get('publisher') || '').toLowerCase();
+        } catch (_) {}
         const count = numberFromText(text(item.querySelector('.waiting-publisher-item-num')));
-        if (title && Number.isFinite(count)) publisherCounts[title] = count;
+        const key = publisherSlug || title;
+        if (key && Number.isFinite(count)) publisherCounts[key] = count;
       });
       let currentPage = 1;
       let maxPage = 1;
@@ -555,10 +560,21 @@
         return { ok: true, count: null, publisher: alias };
       }
       const counts = parsed?.listStats?.publisherCounts || {};
-      const count = Object.entries(counts).reduce((sum, [name, value]) => {
-        return publisherAlias(name) === alias ? sum + Math.max(0, Number(value) || 0) : sum;
-      }, 0);
-      if (!Number.isFinite(count) || count <= 0) return { ok: true, count: null, publisher: alias };
+      let publisherSlug = '';
+      try {
+        publisherSlug = String(new URL(listUrl).searchParams.get('publisher') || '').toLowerCase();
+      } catch (_) {}
+      const directCount = publisherSlug && Object.prototype.hasOwnProperty.call(counts, publisherSlug)
+        ? Number(counts[publisherSlug])
+        : NaN;
+      const matchingValues = Object.entries(counts)
+        .filter(([name]) => String(publisherAlias(name)).toLowerCase() === String(alias).toLowerCase())
+        .map(([, value]) => Number(value))
+        .filter(Number.isFinite);
+      const count = Number.isFinite(directCount)
+        ? directCount
+        : (matchingValues.length ? matchingValues.reduce((sum, value) => sum + Math.max(0, value), 0) : NaN);
+      if (!Number.isFinite(count)) return { ok: true, count: null, publisher: alias };
       if (count < threshold) {
         return {
           ok: false,

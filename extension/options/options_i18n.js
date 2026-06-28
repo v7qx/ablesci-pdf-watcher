@@ -16,6 +16,10 @@
   "测试中": "Testing",
   "返回异常": "Response Exception",
   "正常：": "OK: ",
+  "开发调试工具 (模拟应助)": "Developer Debug Tool (Simulated Assist)",
+  "输入求助详情链接、DOI 或文献 URL": "Enter an assist detail URL, DOI, or article URL",
+  "详情链接模式会显示正常流程本应停止的原因，但继续测试下载、PDF 校验和去水印；始终不会上传。": "Detail URL mode reports where the normal flow would stop, then continues testing download, PDF validation, and watermark cleaning. It never uploads.",
+  "开始模拟": "Start Simulation",
 
   "上传规则": "Upload Rules",
   "自动上传范围": "Auto Upload Range",
@@ -76,9 +80,7 @@
   "实际 / 预计": "Actual / Expected",
   "网页总应助": "Web Total Assists",
   "目标差额": "Target Deficit",
-  "运行模式": "Running Mode",
   "下次应助": "Next Run",
-  "计划应助": "Planned Run",
   "应助倒计时": "Countdown",
   "今日应助计数": "Today Assists",
 
@@ -102,7 +104,7 @@
   "列表 URL": "List URLs",
   "每行一个 Ablesci 求助列表链接。每轮只随机选择一个来源和一个页码，只处理一个候选；快选默认生成 <code>&amp;page_min=1&amp;page_max=</code>，会自动检测最大页；如需限制范围可改成 <code>&amp;page_min=1&amp;page_max=5</code>。": "One Ablesci assist list URL per line. Each run randomly picks one source and one page, then processes at most one candidate. Quick-pick generates <code>&amp;page_min=1&amp;page_max=</code> to auto-detect the max page; set <code>&amp;page_min=1&amp;page_max=5</code> to limit the range.",
   "非 SD 最低求助量": "Min Non-SD Requests",
-  "除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。": "Min waiting count required to parse non-SD pages. 0 to disable, defaults to 200.",
+  "仅对列表 URL 中已启用的非 Elsevier 出版社生效。低于阈值的来源会暂时移出随机池，数量回升后自动恢复；填 0 完全关闭数量读取和筛选。": "Applies only to enabled non-Elsevier list URLs. Sources below the threshold temporarily leave the random pool and return when their count recovers. Set 0 to disable count reads and filtering.",
   "控制哪些求助在列表页和详情页被跳过。": "Control which requests are skipped on list and details pages.",
   "有 DOI": "Has DOI",
   "举报": "Reported",
@@ -227,11 +229,8 @@
   "实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。": "Actual: Assists done since first sync of this month; Expected: Calculated based on elapsed month duration, deducting elapsed proportion upon first sync.",
   "从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。": "Total cumulative assists synced silently from Ablesci profile (includes other devices and manual assists).",
   "本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。": "Difference between expected and actual assists for this month (Expected - Actual). Positive means behind schedule, negative means ahead.",
-  "当前生效的定时调度逻辑与决策模式。": "Currently active scheduling logic and decision model.",
-  "下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。": "Next scheduled automatic assist run time (Beijing time).",
-  "与下次应助保持同一时间口径，便于复制和核对。": "Matches the time scale of the next run for easy comparison and copying.",
+  "下一次自动应助的具体北京时间。": "Next scheduled automatic assist run time (Beijing time).",
   "距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。": "Time remaining before the next auto assist run.",
-  "当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。": "Current daily assist limit. Shows total limit only.",
   "今日进入下载/校验流程的应助次数，按自动和手动分开显示；用于每日上限，不代表上传成功数。": "Assists that entered download/validation today, split by automatic and manual runs. Used for the daily limit; not the successful upload count.",
 
   // Watcher outcome translations

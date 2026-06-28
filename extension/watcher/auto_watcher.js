@@ -77,6 +77,7 @@
   const { createWatcherBootstrapApi } = globalThis.AblesciWatcherBootstrapModule;
   const { createWatcherListScanStatusApi } = globalThis.AblesciWatcherListScanStatusModule;
   const { createWatcherCandidateProcessorApi } = globalThis.AblesciWatcherCandidateProcessorModule;
+  const { createWatcherPublisherCountsApi } = globalThis.AblesciWatcherPublisherCountsModule;
   const { createWatcherOrchestratorApi } = globalThis.AblesciWatcherOrchestratorModule;
   const { createWatcherEntryApi } = globalThis.AblesciWatcherEntryModule;
   const WATCHER_STORAGE_KEYS = [
@@ -112,6 +113,10 @@
     largeStorageKeys: WATCHER_STORAGE_KEYS
   });
   const { publisherAlias } = createWatcherMarketApi({ normalizeText });
+  const {
+    preparePublisherPool,
+    refreshCacheFromParsedIfDue: refreshPublisherCountCacheFromParsedIfDue
+  } = createWatcherPublisherCountsApi();
   const {
     monthDone,
     lagThresholds,
@@ -448,6 +453,8 @@
     dailyDownloadedFromState,
     saveWatcherStateSafe: saveWatcherState,
     listUrlsForRun,
+    preparePublisherPool,
+    refreshPublisherCountCacheFromParsedIfDue,
     pageRangeMetaFromUrl,
     randomizeAssistListUrlWithMeta,
     incrementDaily,

@@ -69,7 +69,9 @@
     watcherPerfTraceEnabled: false,
     watcherPerfFileEnabled: false,
     watcherReportDir: '',
-    watcherNoDownloadTimeoutMinutes: 1.5,
+    // Time allowed for a publisher page to start a PDF download. Some
+    // publisher pages load their download controls slowly; keep this at 2 min.
+    watcherNoDownloadTimeoutMinutes: 2,
     watcherDownloadTimeoutMinutes: 6,
     watcherTaskTimeoutMinutes: 9,
     watcherCfPauseThreshold: 6,
@@ -218,7 +220,7 @@
       watcherPerfTraceEnabled: false,
       watcherPerfFileEnabled: false,
       watcherReportDir: String(opts.watcherReportDir || '').trim(),
-      watcherNoDownloadTimeoutMinutes: 1.5,
+      watcherNoDownloadTimeoutMinutes: 2,
       watcherDownloadTimeoutMinutes: 6,
       watcherTaskTimeoutMinutes: 9,
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),

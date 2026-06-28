@@ -98,10 +98,6 @@ function t(msg) {
   const trimmed = String(msg || '').trim();
   const isEn = globalThis.watcherActiveLanguage === 'en';
   if (isEn) {
-    if (trimmed === 'quant / quant_rules') return 'Adaptive Monthly Target';
-    if (trimmed === 'quant / fixed_interval') return 'Fixed Interval';
-    if (trimmed === 'quant / quant_rules (值守已关闭)') return 'Adaptive Monthly Target (Disabled)';
-    if (trimmed === 'quant / fixed_interval (值守已关闭)') return 'Fixed Interval (Disabled)';
     if (TEXT_MAP[trimmed]) return TEXT_MAP[trimmed];
 
     if (trimmed.startsWith('正常：')) {
@@ -139,11 +135,6 @@ function t(msg) {
       return `Publisher verification page detected (${mCfW[1]} times). Please resolve in browser; auto watcher will pause after ${mCfW[2]} times.`;
     }
   } else {
-    if (trimmed === 'quant / quant_rules') return '月目标自适应调度';
-    if (trimmed === 'quant / fixed_interval') return '固定间隔调度';
-    if (trimmed === 'quant / quant_rules (值守已关闭)') return '月目标自适应调度 (值守已关闭)';
-    if (trimmed === 'quant / fixed_interval (值守已关闭)') return '固定间隔调度 (值守已关闭)';
-
     const zhMap = {
       "candidate_handled": "候选求助处理完成",
       "session_candidates_handled": "本次值守所有候选处理完成",
@@ -290,7 +281,6 @@ const {
   stopAdvancedCountdownTimer
 } = createOptionsStatusApi({
   chromeApi: chrome,
-  defaultOptions: DEFAULT_OPTIONS,
   autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
   normalizeWorkdays,
   normalizeWorkWindows,

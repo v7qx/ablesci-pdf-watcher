@@ -353,11 +353,6 @@
         sendResponse({ ok: true, action: 'publisher_challenge_detected' });
         return false;
       }
-      if (msg.publisher === 'sciencedirect' && msg.error) {
-        pending.finishError(new Error(msg.error));
-        sendResponse({ ok: true, action: 'science_direct_error' });
-        return false;
-      }
       if (msg.accessDenied || msg.unsupported) {
         const reason = msg.error || (msg.accessDenied ? '出版商页面明确显示无正文访问权限。' : '当前出版商页面类型不支持。');
         tracePublisherStep(pending, msg.accessDenied ? 'publisher-access-denied' : 'publisher-unsupported', {
@@ -370,6 +365,11 @@
         err.failureReason = msg.accessDenied ? 'no_access' : 'publisher_unsupported';
         pending.finishError(err);
         sendResponse({ ok: true, action: msg.accessDenied ? 'publisher_access_denied' : 'publisher_unsupported' });
+        return false;
+      }
+      if (msg.publisher === 'sciencedirect' && msg.error) {
+        pending.finishError(new Error(msg.error));
+        sendResponse({ ok: true, action: 'science_direct_error' });
         return false;
       }
       if (msg.publisher === 'sciencedirect' && msg.loginRequired) {

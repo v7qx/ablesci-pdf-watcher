@@ -1,5 +1,7 @@
 'use strict';
 
+const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
+
 // Download strategy helpers used by the upload pipeline.
 (function initBackgroundDownloadAgent(globalThis) {
   function createBackgroundDownloadAgentApi(deps = {}) {
@@ -159,7 +161,7 @@
 
     async function downloadByBackgroundTab(pdfUrl, options = {}) {
       pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
-      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
+      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || DEFAULT_NO_DOWNLOAD_TIMEOUT_MS);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const signal = options.signal || null;
       return await new Promise(async (resolve, reject) => {
@@ -226,7 +228,7 @@
 
     async function downloadByInteractivePublisherTab(pdfUrl, port, options = {}) {
       pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
-      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || 90 * 1000);
+      const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || DEFAULT_NO_DOWNLOAD_TIMEOUT_MS);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const active = options.active !== false;
       const revealAfterMs = Number(options.revealAfterMs || 0);

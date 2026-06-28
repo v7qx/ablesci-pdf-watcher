@@ -263,7 +263,8 @@
               });
             } else {
               console.error(
-                `[Ablesci PDF Watcher Error] ${formatTaskError(err)}\n求助链接: ${payload?.pageUrl || '未知'}\nDOI: ${payload?.doi || '未知'}`,
+                `[Ablesci PDF Watcher Error] ${formatTaskError(err)}\n求助链接: ${payload?.pageUrl || '未知'}\nDOI: ${payload?.doi || '未知'}` +
+                (err?.responseMeta ? `\n响应信息: ${JSON.stringify(err.responseMeta)}` : ''),
                 err
               );
               post(port, 'error', formatTaskError(err), cleanerExtra);

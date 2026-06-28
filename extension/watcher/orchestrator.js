@@ -31,6 +31,8 @@
       dailyDownloadedFromState,
       saveWatcherStateSafe,
       listUrlsForRun,
+      preparePublisherPool,
+      refreshPublisherCountCacheFromParsedIfDue,
       pageRangeMetaFromUrl,
       randomizeAssistListUrlWithMeta,
       incrementDaily,
@@ -524,7 +526,20 @@
         if (sessionPhase.stopRun) return finish(sessionPhase.result);
         const { targetSessionSize } = sessionPhase;
 
-        const singleRunListUrls = listUrlsForRun(opts);
+        const configuredListUrls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls.slice() : [];
+        const publisherCountThreshold = Math.max(0, Number(opts.watcherMinNonSdSeekingCount || 0));
+        const publisherPool = await preparePublisherPool({
+          urls: configuredListUrls,
+          state: stateForTargets,
+          opts,
+          parseListUrl,
+          saveState: saveWatcherStateSafe,
+          appendTrace: appendWatcherTrace,
+          trigger,
+          runId: run.runId,
+          publisherFromUrl: url => pageRangeMetaFromUrl(url)?.publisher || ''
+        });
+        const singleRunListUrls = listUrlsForRun({ ...opts, watcherListUrls: publisherPool.eligible });
         const singleListUrl = singleRunListUrls[0] || '';
         await setCurrentListScan?.(buildCurrentListScan({
           trigger,
@@ -538,17 +553,22 @@
           phase: 'single_random_run',
           trigger,
           runId: run.runId,
-          configuredUrlCount: singleRunListUrls.length,
+          configuredUrlCount: configuredListUrls.length,
+          eligibleUrlCount: singleRunListUrls.length,
+          excludedPublishers: publisherPool.excluded.map(item => `${item.publisher}:${item.count}`),
+          publisherCountCacheFresh: publisherPool.cacheFresh === true,
           listUrl: singleListUrl
         });
         if (!singleListUrl) {
           await appendWatcherLog({
             trigger,
             status: 'skipped',
-            reason: 'no_list_url',
-            message: 'random single-assist run: no valid list URL configured.'
+            reason: configuredListUrls.length ? 'no_eligible_publisher_count' : 'no_list_url',
+            message: configuredListUrls.length
+              ? 'random single-assist run: all enabled non-SD publishers are below the configured request-count threshold.'
+              : 'random single-assist run: no valid list URL configured.'
           });
-          return finish({ ok: true, reason: 'no_list_url' });
+          return finish({ ok: true, reason: configuredListUrls.length ? 'no_eligible_publisher_count' : 'no_list_url' });
         }
 
         const singleBlacklistedIds = await readBlacklistedIds(opts, trigger);
@@ -672,6 +692,16 @@
             if (parsed.cfChallenge) {
               await recordCfChallenge(opts, pickedListUrl, trigger);
               return finish({ ok: false, reason: 'cf_challenge', scannedUrl: pickedListUrl, scannedPublisher: pagePick.publisher, scannedPage: pagePick.pickedPage });
+            }
+
+            if (publisherCountThreshold > 0) {
+              await refreshPublisherCountCacheFromParsedIfDue({
+                state: stateForTargets,
+                parsed,
+                urls: configuredListUrls,
+                opts,
+                saveState: saveWatcherStateSafe
+              });
             }
 
             const listPipelineStartedAt = Date.now();

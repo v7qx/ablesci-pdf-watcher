@@ -1,5 +1,9 @@
 // Responsibility: tab lifecycle, detail extraction, queue bridge, and allowed
 // payload handling for the auto watcher.
+// Keep a successful assist page visible briefly so the upload recommendation
+// and PDF/cleaner summary can be read. Change this value in milliseconds.
+const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
+
 (function () {
   function createWatcherRunnerApi(config) {
     const {
@@ -555,6 +559,9 @@
       if (sessionPort) {
         const result = await sessionPort.result;
         if (!payload.downloadOnly && !opts.debugDownloadOnly) {
+          if (result.ok) {
+            await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
+          }
           await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         }
         if (!result.ok) {

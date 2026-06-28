@@ -172,9 +172,10 @@
         <div id="debugDownloadToolContainer" style="margin-top: 14px; padding: 14px; background: #f9fafb; border: 1px solid var(--border); border-radius: 6px;">
           <strong style="font-size: 12px; color: var(--text-normal); display: block; margin-bottom: 6px;">开发调试工具 (模拟应助)</strong>
           <div class="debug-tool-input-row" style="display: flex; gap: 8px; align-items: center;">
-            <input id="debugDoiInput" type="text" placeholder="输入 DOI 或 文献 URL，例如: 10.1002/..." style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; height: 32px; box-sizing: border-box;">
+            <input id="debugDoiInput" type="text" placeholder="输入求助详情链接、DOI 或文献 URL" style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; height: 32px; box-sizing: border-box;">
             <button id="btnDebugSimulate" class="secondary" type="button" style="height: 32px; padding: 0 16px; white-space: nowrap; line-height: 30px; font-size: 12px;">开始模拟</button>
           </div>
+          <span style="display: block; margin-top: 7px; color: var(--text-muted); font-size: 11px;">详情链接模式会显示正常流程本应停止的原因，但继续测试下载、PDF 校验和去水印；始终不会上传。</span>
           <div id="debugLogContainer" style="margin-top: 12px; padding: 12px; background: #ffffff; border: 1px dashed var(--border); border-radius: 4px; display: none; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; color: var(--text-muted); line-height: 1.6;"></div>
         </div>
       </div>
@@ -260,11 +261,8 @@
             <div class="metric-field" title="实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。"><label>实际 / 预计</label><span id="advancedExpectedActual" class="pill">-</span></div>
             <div class="metric-field" title="从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。"><label>网页总应助</label><span id="watcherWebTotalAssists" class="pill">-</span></div>
             <div class="metric-field" title="本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。"><label>目标差额</label><span id="advancedError" class="pill">-</span></div>
-            <div class="metric-field" title="当前生效的定时调度逻辑与决策模式。"><label>运行模式</label><span id="watcherRuntimeLogic" class="pill">-</span></div>
-            <div class="metric-field" title="下一次自动应助的具体北京时间。量化模式下这里与实际唤醒时间保持一致，不再额外提前唤醒做观察。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
-            <div class="metric-field" title="与下次应助保持同一时间口径，便于复制和核对。"><label>计划应助</label><span id="watcherNextAssistAt" class="pill">-</span></div>
+            <div class="metric-field" title="下一次自动应助的具体北京时间。"><label>下次应助</label><span id="watcherNextRunAt" class="pill">-</span></div>
             <div class="metric-field" title="距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。"><label>应助倒计时</label><span id="watcherAssistCountdown" class="pill">-</span></div>
-            <div class="metric-field" title="当前配置的每日应助上限。这里只显示总上限，不再显示内部 todayTarget 等派生目标。"><label>每日应助上限</label><span id="watcherWakeCountdown" class="pill">-</span></div>
             <div class="metric-field" title="今日进入下载/校验流程的应助次数，按自动和手动分开显示；用于每日上限，不代表上传成功数。"><label>今日应助计数</label><span id="watcherRunCounts" class="pill">-</span></div>
           </div>
         </div>
@@ -350,7 +348,7 @@
       <div class="setting-row">
         <div class="setting-copy">
           <strong>非 SD 最低求助量</strong>
-          <span>除 Elsevier / ScienceDirect 外，如果当前出版社列表页统计到的求助量低于这个值，则整页直接跳过，不打开详情页。填 0 关闭，默认 200。</span>
+          <span>仅对列表 URL 中已启用的非 Elsevier 出版社生效。低于阈值的来源会暂时移出随机池，数量回升后自动恢复；填 0 完全关闭数量读取和筛选。</span>
         </div>
         <div class="setting-control setting-control-compact">
           <input id="watcherMinNonSdSeekingCount" class="compact-number" type="number" min="0" max="100000" step="1" value="200">

@@ -11,6 +11,25 @@
       escapeHtml
     } = deps;
 
+    function responsePageTitle(raw) {
+      const match = String(raw || '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+      return match ? stripHtml(match[1]).replace(/\s+/g, ' ').trim().slice(0, 160) : '';
+    }
+
+    function responseTextSummary(raw) {
+      return stripHtml(String(raw || ''))
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 260);
+    }
+
+    function isLikelyAblesciServiceHtml(raw, status, title, summary) {
+      if (Number(status) >= 500) return true;
+      return /502 Bad Gateway|504 Gateway Time(?:-out)?|500 Internal Server(?: Error)?|503 Service|科研通.*网络错误|科研通.*系统维护|当前服务器负载过高|系统错误|服务器错误/i.test(
+        `${title} ${summary} ${String(raw || '').slice(0, 1000)}`
+      );
+    }
+
     async function uploadRequest(payload, stat) {
       const body = new URLSearchParams();
       body.set(payload.csrfParam || '_csrf', payload.csrfToken);
@@ -31,7 +50,34 @@
       });
       const raw = await resp.text();
       let data;
-      try { data = JSON.parse(raw); } catch (_) { throw new Error('upload-request 返回不是 JSON：' + raw.slice(0, 200)); }
+      try {
+        data = JSON.parse(raw);
+      } catch (_) {
+        const contentType = resp.headers?.get?.('content-type') || '';
+        const title = responsePageTitle(raw);
+        const summary = responseTextSummary(raw);
+        const meta = {
+          request: 'POST /assist/upload-request',
+          status: resp.status,
+          statusText: resp.statusText || '',
+          contentType,
+          responseUrl: resp.url || '',
+          redirected: resp.redirected === true,
+          responseLength: raw.length,
+          pageTitle: title,
+          summary
+        };
+        const likelyServiceError = isLikelyAblesciServiceHtml(raw, resp.status, title, summary);
+        const err = new Error(
+          `科研通 upload-request 返回 HTML 而不是 JSON；` +
+          `HTTP ${resp.status}${resp.statusText ? ` ${resp.statusText}` : ''}；` +
+          `Content-Type=${contentType || 'unknown'}；最终地址=${resp.url || 'unknown'}；` +
+          `页面标题=${title || '未识别'}；响应长度=${raw.length}；摘要=${summary || '无可见文本'}`
+        );
+        err.failureReason = likelyServiceError ? 'ablesci_service_error' : 'upload_response_not_json';
+        err.responseMeta = meta;
+        throw err;
+      }
       if (!resp.ok) throw new Error('upload-request HTTP ' + resp.status + '：' + (data.msg || raw.slice(0, 200)));
       return data;
     }
