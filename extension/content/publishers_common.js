@@ -41,10 +41,6 @@
     return host === 'academic.oup.com';
   }
 
-  function isSage() {
-    return host === 'journals.sagepub.com' || host.endsWith('.journals.sagepub.com');
-  }
-
   function isIop() {
     return /(^|\.)iop\.org$/i.test(host);
   }
@@ -65,7 +61,6 @@
     if (isOxford()) return 'oxford';
     if (isIop()) return 'iop';
     if (isCnpe()) return 'cnpe';
-    if (isSage()) return 'sage';
     return '';
   }
 
@@ -211,15 +206,15 @@
     return false;
   }
 
-  function sendPublisherMessage(publisher, payload) {
+  function sendPublisherMessage(publisher, payload, onResponse) {
     chrome.runtime.sendMessage({
       type: 'ablesciPublisherArticleReady',
       publisher,
       pageUrl: location.href,
       ...payload
-    }, () => {
-      // 没有 pending 任务时 background 会忽略；这里不需要处理返回。
-      void chrome.runtime.lastError;
+    }, response => {
+      const runtimeError = chrome.runtime.lastError || null;
+      if (typeof onResponse === 'function') onResponse(response, runtimeError);
     });
   }
 
@@ -242,7 +237,6 @@
     isOxford,
     isIop,
     isCnpe,
-    isSage,
     currentPublisher,
     canControlCurrentPublisherPage,
     decodeHtmlUrl,

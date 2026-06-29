@@ -4,7 +4,7 @@
   const common = window.AblesciPublisherCommon;
   if (!common) return;
 
-  const supported = new Set(['springer', 'oxford', 'wiley', 'acs', 'sage']);
+  const supported = new Set(['springer', 'oxford', 'wiley', 'acs']);
   let pdfTriggered = false;
   let observer = null;
   let stopTimer = null;
@@ -204,40 +204,6 @@
     return !!unauthorizedWidget && accessText && purchaseText;
   }
 
-  function hasSageErrorPage() {
-    if (common.currentPublisher() !== 'sage') return false;
-    const title = String(document.title || '').trim();
-    if (title === 'Error | Sage' || title === 'Error | Sage Journals' || /^Error\b/i.test(title)) {
-      return true;
-    }
-    const pbContext = document.querySelector('meta[name="pbContext"]')?.getAttribute('content') || '';
-    if (pbContext.includes('page:404') || pbContext.includes('pageGroup:Error') || pbContext.includes('page:string:404')) {
-      return true;
-    }
-    return false;
-  }
-
-  function hasSageAccessDeniedPage() {
-    if (common.currentPublisher() !== 'sage') return false;
-    if (hasSageErrorPage()) return true;
-
-    // 1. 精准匹配 SAGE 专属无权限按钮/容器选择器
-    const hasPaywallDom = !!document.querySelector(
-      'a[href="#core-collateral-purchase-access"], [data-id="article-nav-menubar-purchaseAccess"], .denial-block, section.denial-block, [data-article-access="no"], .meta-panel__access--other'
-    );
-    if (hasPaywallDom) return true;
-
-    // 2. 文本匹配：SAGE 无权限页的通用文案
-    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
-    const hasPurchaseOptions = /Get full access to this article|Purchase Instant Access|Buy PDF|Subscribe to this journal|Get Access/i.test(text);
-    const hasAccessRestricted = /You do not have access to this content|You currently have no access to this content|Restricted access|View all access and purchase options|Visit the access options page to authenticate|View access options/i.test(text);
-    if (hasPurchaseOptions || hasAccessRestricted) {
-      return true;
-    }
-
-    return false;
-  }
-
   function isPdfHref(href) {
     const s = String(href || '');
     // 仅检查 URL 的 pathname，避免查询参数中的路径模式被误匹配。
@@ -411,17 +377,6 @@
       stopObserver();
       return;
     }
-    if (publisher === 'sage' && hasSageAccessDeniedPage()) {
-      pdfTriggered = true;
-      common.sendPublisherMessage('sage', {
-        articleUrl: location.href,
-        accessDenied: true,
-        error: 'SAGE 页面无访问权限或处于错误/404页面，已停止下载。',
-        source: 'sage_access_denied_page'
-      });
-      stopObserver();
-      return;
-    }
     // 针对 wiley 的 fetch 探测逻辑：
     // 不管是摘要页还是阅读器页，直接通过 fetch 请求 pdfdirect 链接，在 0.5s 内精准测出有无权限，彻底规避前台阅读器黑盒和延时挂起
     if (publisher === 'wiley' && !wileyFetchTested) {
@@ -528,23 +483,6 @@
     const result = findPdfLink();
     const found = result.selected;
     if (!found) {
-      // SAGE 文章着陆页通常没有直接 PDF 链接，只有折叠面板中的 "View PDF/EPUB" 按钮；
-      // 该按钮指向 reader 页，reader 页上才有真正的 PDF 下载链接。
-      if (publisher === 'sage') {
-        const readerEl = document.querySelector('a.btn--pdf[href*="/doi/reader/"]');
-        const readerHref = readerEl ? normalize(readerEl.getAttribute('href') || readerEl.href || '') : '';
-        if (readerHref) {
-          pdfTriggered = true;
-          common.sendPublisherMessage(publisher, {
-            articleUrl: location.href,
-            pdfUrl: readerHref,
-            source: `${publisher}_reader_page_link`,
-            diagnostics: result.diagnostics
-          });
-          stopObserver();
-          return;
-        }
-      }
       const now = Date.now();
       if (now - lastNoCandidateDiagnosticAt > 5000) {
         lastNoCandidateDiagnosticAt = now;

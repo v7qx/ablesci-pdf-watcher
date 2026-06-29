@@ -40,9 +40,8 @@
     "https://ieeexplore.ieee.org/*",
     "https://www.nature.com/*",
     "https://nature.com/*",
-    "https://*.cnpereading.com/*",
-    "https://iopscience.iop.org/*",
-    "https://journals.sagepub.com/*"
+    "https://sage.cnpereading.com/*",
+    "https://iopscience.iop.org/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -87,9 +86,8 @@
         "https://ieeexplore.ieee.org/*",
         "https://www.nature.com/*",
         "https://nature.com/*",
-        "https://*.cnpereading.com/*",
-        "https://iopscience.iop.org/*",
-        "https://journals.sagepub.com/*"
+        "https://sage.cnpereading.com/*",
+        "https://iopscience.iop.org/*"
       ],
       "js": [
         "content/publishers_common.js",
@@ -99,7 +97,7 @@
         "content/publisher_ieee.js",
         "content/publisher_aip.js",
         "content/publisher_nature.js",
-        "content/publisher_cnpe.js",
+        "content/publisher_sage_cnpe.js",
         "content/publisher_iop.js",
         "content/content_publishers.js"
       ],

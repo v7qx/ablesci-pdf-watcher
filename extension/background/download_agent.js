@@ -58,6 +58,24 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       throw new Error(`${label} 协议不受支持，已拒绝处理。`);
     }
 
+    function extractDoi(value) {
+      let text = String(value || '').trim();
+      try { text = decodeURIComponent(text); } catch (_) {}
+      const match = text.match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
+      return match ? match[1].replace(/\/+$/g, '') : '';
+    }
+
+    function sageDomesticArticleUrl(pdfUrl, payload = {}) {
+      if (isCnpeUrl(pdfUrl)) return '';
+      const doi = extractDoi(payload.doi) || extractDoi(pdfUrl);
+      if (!doi) return '';
+      const publisherHint = [payload.publisher, payload.publisherName, payload.publisherSlug]
+        .map(value => String(value || ''))
+        .join(' ');
+      const isSageRequest = publisherForDoi?.(doi) === 'sage' || isSageUrl(pdfUrl) || /\bsage\b/i.test(publisherHint);
+      return isSageRequest ? `https://sage.cnpereading.com/doi/${encodeURI(doi)}` : '';
+    }
+
     function onceDownloadComplete(downloadId, timeoutMs = 180000, signal = null) {
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -231,6 +249,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       const noDownloadTimeoutMs = Number(options.noDownloadTimeoutMs || DEFAULT_NO_DOWNLOAD_TIMEOUT_MS);
       const downloadTimeoutMs = Number(options.downloadTimeoutMs || 5 * 60 * 1000);
       const active = options.active !== false;
+      const restorePreviousTabAfterDownloadStart = options.restorePreviousTabAfterDownloadStart === true;
       const revealAfterMs = Number(options.revealAfterMs || 0);
       const signal = options.signal || null;
       const directDownloadFilenameRel = options.filenameRel || makeDownloadFilename('', options.payload?.suggestedFilename || 'paper.pdf');
@@ -248,6 +267,8 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         let expectedHost = hostnameOf(sourceUrlForMatching);
         let downloadArmed = looksLikePdfDownloadUrl(pdfUrl);
         let directDownloadInProgress = false;
+        let previousActiveTabId = null;
+        let previousTabRestored = false;
         let noDownloadTimeoutMessage = '未触发 PDF 下载超时（可能无访问权限、未通过验证，或未设置直接下载）';
         const captureId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         const pollTimeouts = new Set();
@@ -356,6 +377,13 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
           reject(err instanceof Error ? err : new Error(String(err)));
         }
 
+        function restorePreviousTab() {
+          if (!restorePreviousTabAfterDownloadStart || previousTabRestored || !Number.isInteger(previousActiveTabId)) return;
+          previousTabRestored = true;
+          if (previousActiveTabId === tabId) return;
+          chromeApi.tabs.update(previousActiveTabId, { active: true }).catch(() => {});
+        }
+
         function revealPublisherTab(reason) {
           if (settled || tabId === null || revealed) return;
           revealed = true;
@@ -432,7 +460,13 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
           }
           seenIds.add(item.id);
           downloadId = item.id;
-          tracePublisherStep('download-candidate-accepted', { source, downloadId: item.id, captureId });
+          tracePublisherStep('download-candidate-accepted', {
+            source,
+            matchReason: matchResult.reason || 'standard_match',
+            downloadId: item.id,
+            captureId
+          });
+          restorePreviousTab();
           if (noDownloadTimer) {
             clearTimeout(noDownloadTimer);
             noDownloadTimer = null;
@@ -587,6 +621,10 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
             }
           }
 
+          if (active && restorePreviousTabAfterDownloadStart) {
+            const activeTabs = await chromeApi.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+            previousActiveTabId = Number.isInteger(activeTabs?.[0]?.id) ? activeTabs[0].id : null;
+          }
           const tab = await chromeApi.tabs.create({ url: articleUrl, active });
           tabId = tab.id;
           if (chromeApi.tabs.onRemoved) {
@@ -659,6 +697,16 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
 
     async function downloadPdf(pdfUrl, suggestedFilename, opts, port, signal = null) {
       pdfUrl = ensureHttpUrl(pdfUrl, 'PDF URL');
+      const sageDomesticUrl = sageDomesticArticleUrl(pdfUrl, opts.payloadContext || {});
+      if (sageDomesticUrl) {
+        pdfUrl = sageDomesticUrl;
+        post(port, 'progress', 'SAGE 求助已改用国内站 sage.cnpereading.com 查找正文 PDF。');
+      }
+      if (isSageUrl(pdfUrl)) {
+        const err = new Error('SAGE 求助缺少可用于国内站查询的 DOI，已按信息不全跳过。');
+        err.failureReason = 'publisher_unsupported';
+        throw err;
+      }
       const filenameRel = makeDownloadFilename('', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
       const revealAfterMs = 0;
@@ -669,7 +717,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         downloadTimeoutMs,
         signal
       };
-      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl) || isCnpeUrl(pdfUrl) || isSageUrl(pdfUrl);
+      const canUsePublisherPageFallback = isSpringerUrl(pdfUrl) || isWileyUrl(pdfUrl) || isAcsUrl(pdfUrl) || isIeeeUrl(pdfUrl) || isOxfordUrl(pdfUrl) || isCnpeUrl(pdfUrl);
 
       debugLog(`downloadPdf url=${pdfUrl} isSage=${isSageUrl(pdfUrl)} isPdfUrl=${looksLikePdfDownloadUrl(pdfUrl)} mode=${mode} canFallback=${canUsePublisherPageFallback}`);
 
@@ -704,12 +752,14 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       }
 
       if (isCnpeUrl(pdfUrl) && !looksLikePdfDownloadUrl(pdfUrl)) {
-        if (mode === 'publisher_tab') {
-          post(port, 'progress', 'SAGE 易阅通使用可见文章页原生 PDF 下载模式。');
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
-        }
-        post(port, 'progress', 'SAGE 易阅通使用后台文章页原生 PDF 下载模式；仅检测到验证页时才会切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
+        // 易阅通通过页面 JavaScript 请求 Blob 后再点击临时 download 链接。
+        // Chrome 会显著节流后台不可见页，实测必须激活标签页后才稳定触发下载。
+        return await downloadByInteractivePublisherTab(pdfUrl, port, {
+          ...timeoutOptions,
+          active: true,
+          restorePreviousTabAfterDownloadStart: true,
+          payload: opts.payloadContext || null
+        });
       }
 
       if (isSpringerUrl(pdfUrl)) {
@@ -739,16 +789,6 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
           return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
         }
         post(port, 'progress', 'IOP 使用后台文章页原生 PDF 下载模式；仅检测到验证页时才会切到前台。');
-        return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
-      }
-
-      if (isSageUrl(pdfUrl) && !looksLikePdfDownloadUrl(pdfUrl)) {
-        debugLog(`SAGE route HIT: opening interactive publisher tab for ${pdfUrl}`);
-        if (mode === 'publisher_tab') {
-          post(port, 'progress', 'SAGE 使用可见文章页原生 PDF 下载模式。');
-          return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: true, payload: opts.payloadContext || null });
-        }
-        post(port, 'progress', 'SAGE 使用后台文章页原生 PDF 下载模式；仅检测到验证页时才会切到前台。');
         return await downloadByInteractivePublisherTab(pdfUrl, port, { ...timeoutOptions, active: false, revealAfterMs, payload: opts.payloadContext || null });
       }
 
@@ -793,7 +833,8 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
     }
 
     return {
-      downloadPdf
+      downloadPdf,
+      sageDomesticArticleUrl
     };
   }
 

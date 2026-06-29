@@ -504,7 +504,7 @@
           .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
       }
-      if (['springer', 'wiley', 'acs', 'oxford', 'sage'].includes(msg.publisher) && msg.pdfUrl) {
+      if (['springer', 'wiley', 'acs', 'oxford'].includes(msg.publisher) && msg.pdfUrl) {
         markPublisherChallengePassed(pending);
         if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: `same ${msg.publisher} pdf url already handled` });

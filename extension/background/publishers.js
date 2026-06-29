@@ -251,7 +251,7 @@
   function sageArticleUrlFromPdfUrl(url) {
     const s = String(url || '');
     const match = s.match(/^https?:\/\/journals\.sagepub\.com\/doi\/(?:pdf|epub)\/(10\.[^?#]+)(?:[?#].*)?$/i);
-    return match ? `https://journals.sagepub.com/doi/full/${match[1]}` : '';
+    return match ? `https://sage.cnpereading.com/doi/${match[1]}` : '';
   }
 
   function publisherForUrl(url) {
@@ -308,7 +308,7 @@
     oxford: ['academic.oup.com'],
     iop: ['iopscience.iop.org'],
     cnpe: ['cnpereading.com'],
-    sage: ['journals.sagepub.com']
+    sage: ['sage.cnpereading.com']
   };
 
   const SHARED_LANDING_ALLOWLIST = Object.values(PUBLISHER_LANDING_ALLOWLIST)
@@ -487,7 +487,9 @@
   }
 
   function isLikelyTargetDownload(item, expectedHost, sourceUrl) {
-    const url = String(item?.finalUrl || item?.url || '');
+    const itemUrl = String(item?.url || '');
+    const finalUrl = String(item?.finalUrl || '');
+    const url = finalUrl || itemUrl;
     const filename = String(item?.filename || '');
     const mime = String(item?.mime || '');
     const sourcePiis = extractAllScienceDirectPiis(sourceUrl);
@@ -497,6 +499,13 @@
       const s = String(u || '').trim();
       if (!s) return '';
       try {
+        // chrome.downloads may expose both item.url and finalUrl as
+        // blob:https://publisher.example/<uuid>. URL.hostname is empty for a
+        // blob URL, so resolve the embedded origin explicitly.
+        if (/^blob:/i.test(s)) {
+          const innerUrl = s.slice(5);
+          if (/^https?:\/\//i.test(innerUrl)) return new URL(innerUrl).hostname;
+        }
         if (/^https?:\/\//i.test(s)) return new URL(s).hostname;
         return new URL('https://' + s).hostname;
       } catch (_) {
@@ -506,6 +515,7 @@
     };
 
     const sourceHost = getHostname(sourceUrl);
+    const itemHost = getHostname(itemUrl);
     const finalHost = getHostname(url);
     const expected = getHostname(expectedHost || '').toLowerCase();
     const actualPdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) || looksLikePdfDownloadUrl(url);
@@ -585,6 +595,17 @@
     if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
     if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return { ok: true };
     if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return { ok: true };
+    // SAGE China fetches the article PDF as a Blob, then clicks a temporary
+    // <a download>. Chrome records finalUrl=blob: while item.url remains on the
+    // controlled SAGE host. download_agent.js separately requires the download
+    // to belong to the pending publisher tab, so keep this exception narrow.
+    if (expected === 'sage.cnpereading.com' &&
+        sourceHost.toLowerCase() === expected &&
+        itemHost.toLowerCase() === expected &&
+        /^blob:/i.test(finalUrl) &&
+        actualPdfLike) {
+      return { ok: true, reason: 'sage_cnpe_same_tab_blob_pdf' };
+    }
 
     // 当初始请求为 DOI (doi.org) 跳转时，允许匹配支持的各大出版社 PDF 下载主机
     if (isDoiHost(expected) || isDoiHost(sourceHost)) {
@@ -605,7 +626,7 @@
       if (/(^|\.)sagepub\.com$/i.test(finalHost)) return { ok: true };
     }
 
-    return { ok: false, reason: `host_mismatch (expected: "${expected}", finalHost: "${finalHost}", sourceHost: "${sourceHost}")` };
+    return { ok: false, reason: `host_mismatch (expected: "${expected}", finalHost: "${finalHost}", sourceHost: "${sourceHost}", itemHost: "${itemHost}", finalUrlIsBlob: ${/^blob:/i.test(finalUrl)})` };
   }
 
   function isExpectedPublisherPage(pending, pageUrl) {
@@ -623,7 +644,7 @@
     if (publisher === 'oxford') return isOxfordUrl(url);
     if (publisher === 'iop') return isIopUrl(url);
     if (publisher === 'cnpe') return isCnpeUrl(url);
-    if (publisher === 'sage') return isSageUrl(url);
+    if (publisher === 'sage') return isCnpeUrl(url);
     return false;
   }
 

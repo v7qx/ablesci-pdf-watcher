@@ -18,15 +18,15 @@
       window.AblesciNaturePublisher?.start();
       return;
     }
-    if (location.hostname.includes('cnpereading.com')) {
-      window.AblesciCnpePublisher?.start();
+    if (location.hostname === 'sage.cnpereading.com') {
+      window.AblesciSageCnpePublisher?.start();
       return;
     }
     if (common.isIeee()) {
       window.AblesciIeeePublisher?.start();
       return;
     }
-    if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isOxford() || common.isSage()) {
+    if (common.isSpringer() || common.isWiley() || common.isAcs() || common.isOxford()) {
       window.AblesciDirectPdfPublisher?.start();
       return;
     }
