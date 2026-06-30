@@ -50,6 +50,7 @@
     if (/\brsc\b|royal\s+society\s+of\s+chemistry/i.test(text)) return 'rsc';
     if (/\bacs\b/i.test(text)) return 'acs';
     if (/sage/i.test(text)) return 'sage';
+    if (/liebert|mary\s*ann\s*liebert/i.test(text)) return 'liebert';
     return '';
   }
 

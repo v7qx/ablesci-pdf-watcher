@@ -72,7 +72,11 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       const publisherHint = [payload.publisher, payload.publisherName, payload.publisherSlug]
         .map(value => String(value || ''))
         .join(' ');
-      const isSageRequest = publisherForDoi?.(doi) === 'sage' || isSageUrl(pdfUrl) || /\bsage\b/i.test(publisherHint);
+      const doiPublisher = publisherForDoi?.(doi) || '';
+      const isSageRequest = doiPublisher === 'sage' ||
+        doiPublisher === 'liebert' ||
+        isSageUrl(pdfUrl) ||
+        /\b(?:sage|liebert|mary\s*ann\s*liebert)\b/i.test(publisherHint);
       return isSageRequest ? `https://sage.cnpereading.com/doi/${encodeURI(doi)}` : '';
     }
 
@@ -373,6 +377,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         function finishError(err) {
           if (settled) return;
           settled = true;
+          restorePreviousTab();
           cleanup(true);
           reject(err instanceof Error ? err : new Error(String(err)));
         }

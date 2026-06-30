@@ -78,6 +78,19 @@
     return !!document.querySelector('.paywall__body, .paywall__container, .paywall__title, a[href*="/buyarticlepdf/"], .btn-icon--trolley');
   }
 
+  function hasRscNotFoundErrorPage() {
+    const title = String(document.title || '').replace(/\s+/g, ' ').trim();
+    const bodyClass = String(document.body?.className || '');
+    if (/^Not Found\s*\|\s*The Royal Society of Chemistry$/i.test(title)) return true;
+    if (/\bpg_?error404\b/i.test(bodyClass)) return true;
+    const errorWrap = document.querySelector('.custom-error-wrap');
+    if (!errorWrap) return false;
+    const text = String(errorWrap.innerText || errorWrap.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return /page you.?re looking for cannot be found|please check the address|return home/i.test(text);
+  }
+
   function isRscBookChapter() {
     const host = location.hostname || '';
     const path = location.pathname || '';
@@ -138,6 +151,17 @@
           source: 'rsc_challenge_page'
         });
       }
+      return;
+    }
+    if (hasRscNotFoundErrorPage()) {
+      pdfTriggered = true;
+      sendRscMessage({
+        articleUrl: location.href,
+        unsupported: true,
+        error: 'RSC 返回 Not Found 错误页，当前 DOI/文章页无法解析，已按正常情况跳过。',
+        source: 'rsc_not_found_error_page'
+      });
+      stopObserver();
       return;
     }
     const accessDenied = hasRscAccessDeniedPage();

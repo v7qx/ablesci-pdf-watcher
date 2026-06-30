@@ -114,6 +114,10 @@
     return /:\/\/(?:journals\.)?sagepub\.com\//i.test(String(url || ''));
   }
 
+  function isLiebertUrl(url) {
+    return /:\/\/(?:[^/]+\.)?(?:liebertpub|maryannliebert)\.com\//i.test(String(url || ''));
+  }
+
   function isSageKnowledgeUrl(rawUrl) {
     try {
       const u = new URL(String(rawUrl || ''));
@@ -267,6 +271,7 @@
     if (isIopUrl(url)) return 'iop';
     if (isCnpeUrl(url)) return 'cnpe';
     if (isSageUrl(url)) return 'sage';
+    if (isLiebertUrl(url)) return 'liebert';
     return '';
   }
 
@@ -308,7 +313,8 @@
     oxford: ['academic.oup.com'],
     iop: ['iopscience.iop.org'],
     cnpe: ['cnpereading.com'],
-    sage: ['sage.cnpereading.com']
+    sage: ['sage.cnpereading.com'],
+    liebert: ['sage.cnpereading.com']
   };
 
   const SHARED_LANDING_ALLOWLIST = Object.values(PUBLISHER_LANDING_ALLOWLIST)
@@ -335,6 +341,7 @@
     if (/^10\.1063\//.test(doi)) return 'aip';
     if (/^10\.1088\//.test(doi)) return 'iop';
     if (/^10\.1177\//.test(doi)) return 'sage';
+    if (/^10\.1089\//.test(doi)) return 'liebert';
     return '';
   }
 
@@ -645,6 +652,7 @@
     if (publisher === 'iop') return isIopUrl(url);
     if (publisher === 'cnpe') return isCnpeUrl(url);
     if (publisher === 'sage') return isCnpeUrl(url);
+    if (publisher === 'liebert') return isCnpeUrl(url);
     return false;
   }
 
@@ -667,6 +675,7 @@
     isIeeeUrl,
     isOxfordUrl,
     isSageUrl,
+    isLiebertUrl,
     isSageKnowledgeUrl,
     classifySageKnowledgeUrl,
     classifyUnsupportedPublisherContentUrl,

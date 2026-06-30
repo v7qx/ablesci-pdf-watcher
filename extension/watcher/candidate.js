@@ -14,7 +14,7 @@
       doiFailureSkipThreshold
     } = config;
     const JOURNAL_ACCESS_TTL_MS = 180 * 24 * 60 * 60 * 1000;
-    const JOURNAL_ACCESS_CACHEABLE_PUBLISHERS = new Set(['sciencedirect', 'wiley', 'rsc', 'acs', 'sage']);
+    const JOURNAL_ACCESS_CACHEABLE_PUBLISHERS = new Set(['sciencedirect', 'wiley', 'rsc', 'acs', 'sage', 'liebert']);
 
     function candidatePublisherName(candidate) {
       return publisherAlias(candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
@@ -76,12 +76,14 @@
       if (/\brsc\b|royal\s+society\s+of\s+chemistry|pubs\.rsc\.org|10\.1039\//i.test(values)) return 'rsc';
       if (/\bacs\b|acs\.org|pubs\.acs\.org|10\.1021\//i.test(values)) return 'acs';
       if (/sage|journals\.sagepub\.com|10\.1177\//i.test(values)) return 'sage';
+      if (/liebert|mary\s*ann\s*liebert|10\.1089\//i.test(values)) return 'liebert';
       const alias = publisherAlias(values).toLowerCase();
       if (/elsevier|sciencedirect/.test(alias)) return 'sciencedirect';
       if (/wiley/.test(alias)) return 'wiley';
       if (/\brsc\b/.test(alias)) return 'rsc';
       if (/\bacs\b/.test(alias)) return 'acs';
       if (/sage/.test(alias)) return 'sage';
+      if (/liebert/.test(alias)) return 'liebert';
       if (/ieee/.test(alias)) return 'ieee';
       return alias && alias !== 'unknown' ? alias : '';
     }

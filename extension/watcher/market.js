@@ -17,6 +17,7 @@
       if (/\baip\b|american\s+institute\s+of\s+physics|aip\.org|scitation\.org/i.test(s)) return 'AIP';
       if (/\biop\b|institute\s+of\s+physics|iopscience\.iop\.org/i.test(s)) return 'IOP';
       if (/\bsage\b|sagepub/i.test(s)) return 'SAGE';
+      if (/liebert|mary\s*ann\s*liebert|10\.1089\//i.test(s)) return 'Liebert';
       return s.split(/[\/|,，;；\s]+/).filter(Boolean)[0] || 'Unknown';
     }
 
