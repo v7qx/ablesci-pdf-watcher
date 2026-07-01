@@ -53,7 +53,9 @@
   }
 
   function isRscDirectPdfUrl(url) {
-    return /:\/\/pubs\.rsc\.org\/.*\/articlepdf\//i.test(String(url || ''));
+    const value = String(url || '');
+    return /:\/\/pubs\.rsc\.org\/.*\/(?:articlepdf|article-pdf)\//i.test(value) &&
+      !/\/article-supplement\/|_suppl(?:[/.?#]|$)/i.test(value);
   }
 
   function isRscUrl(url) {
@@ -414,6 +416,10 @@
       /(^|\.)silverchair-cdn\.com$/i.test(s);
   }
 
+  function isRscRelatedDownloadHost(h) {
+    return /^rscj\.silverchair-cdn\.com$/i.test(String(h || ''));
+  }
+
   function isScienceDirectAssetPdfUrl(url) {
     try {
       return /(^|\.)sciencedirectassets\.com$/i.test(new URL(String(url || '')).hostname);
@@ -601,6 +607,13 @@
     if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return { ok: true };
     if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
     if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return { ok: true };
+    if (expected === 'pubs.rsc.org' &&
+        sourceHost.toLowerCase() === expected &&
+        itemHost.toLowerCase() === expected &&
+        isRscRelatedDownloadHost(finalHost) &&
+        actualPdfLike) {
+      return { ok: true, reason: 'rsc_silverchair_cdn_pdf' };
+    }
     if (sourceHost && finalHost && sourceHost.toLowerCase() === finalHost.toLowerCase()) return { ok: true };
     // SAGE China fetches the article PDF as a Blob, then clicks a temporary
     // <a download>. Chrome records finalUrl=blob: while item.url remains on the

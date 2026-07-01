@@ -20,18 +20,26 @@
     try {
       const u = new URL(url, location.href);
       u.pathname = u.pathname.replace(/\/content\/articlepdf\//i, '/content/articlelanding/');
-      return u.href;
+      return /\/content\/articlelanding\//i.test(u.pathname) ? u.href : location.href;
     } catch (_) {
       return location.href;
     }
   }
 
   function findRscArticlePdfLink() {
-    const links = Array.from(document.querySelectorAll('a[href*="/content/articlepdf/"], a[type="application/pdf"], a[href*="articlepdf"]'))
+    const links = Array.from(document.querySelectorAll([
+      'a[data-doctype="contentPdf"][href]',
+      'a.article-pdfLink[href]',
+      'a[href*="/article-pdf/"]',
+      'a[href*="/content/articlepdf/"]',
+      'a[type="application/pdf"]'
+    ].join(', ')))
       .map(a => {
         const href = common.normalizeUrl(common.decodeHtmlUrl(a.getAttribute('href') || a.href), location.href);
         const text = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+        const dataDocType = a.getAttribute('data-doctype') || '';
         const marker = [
+          dataDocType,
           a.className || '',
           a.id || '',
           a.getAttribute('type') || '',
@@ -39,10 +47,16 @@
         ].join(' ');
         const isPurchaseLink = /\/content\/buyarticlepdf\//i.test(href || '');
         const articlePdf = !isPurchaseLink && (
+          /^contentPdf$/i.test(dataDocType) ||
+          /\barticle-pdfLink\b/i.test(a.className || '') ||
+          /\bstats-item-pdf-download\b/i.test(a.className || '') ||
+          /\/article-pdf\//i.test(href || '') ||
           /\/content\/articlepdf\//i.test(href || '') ||
           /Download this article|PDF format|PDF/i.test(`${text} ${marker}`)
         );
-        const supplementary = /supplement|supporting information|esm|si\b|permissions|copyright|reprint/i.test(`${href || ''} ${text} ${marker}`);
+        const supplementary = /dataSupplementDoc/i.test(dataDocType) ||
+          !!a.closest('.dataSuppLink, [id="supplementary-data"], .supplementary-data-section') ||
+          /\/article-supplement\/|_suppl(?:[/.?#]|$)|supplementary information|supporting information|permissions|copyright|reprint/i.test(`${href || ''} ${text} ${marker}`);
         return { a, href, text, articlePdf, supplementary };
       })
       .filter(item => item.href && item.articlePdf && !item.supplementary);
@@ -62,7 +76,8 @@
     ];
     for (const sel of metaSelectors) {
       const value = document.querySelector(sel)?.getAttribute('content') || '';
-      if (/\/content\/articlepdf\//i.test(value)) {
+      if (/\/(?:content\/articlepdf|article-pdf)\//i.test(value) &&
+          !/\/article-supplement\/|_suppl(?:[/.?#]|$)/i.test(value)) {
         const href = common.normalizeUrl(value, location.href);
         if (href) return { href, source: 'citation_pdf_url' };
       }

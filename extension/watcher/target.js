@@ -41,7 +41,7 @@
     }
 
     function effectiveMonthlyTarget(state, monthlyTarget) {
-      const target = Math.max(0, Number(monthlyTarget || 0)) * 1.2;
+      const target = Math.max(0, Number(monthlyTarget || 0));
       const ratio = firstSyncProgressRatio(state);
       if (ratio <= 0) return target;
       return Math.round(target * Math.max(0, 1 - ratio));
@@ -162,6 +162,10 @@
       const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
       const expectedDone = effectiveTarget;
       const lag = expectedDone - done;
+      // The 20% pressure factor only influences adaptive speed selection. User-facing
+      // expected/deficit values must continue to reflect the configured monthly target.
+      const pressureTarget = Math.round(effectiveTarget * 1.2);
+      const pressureLag = pressureTarget - done;
 
       const key = todayKey();
       const [year, month, day] = key.split('-').map(Number);
@@ -197,7 +201,7 @@
           riskLimit
         };
       }
-      const rawSpeedMode = speedModeFromTarget({ error: lag, monthlyTarget: effectiveTarget || monthlyTarget });
+      const rawSpeedMode = speedModeFromTarget({ error: pressureLag, monthlyTarget: pressureTarget || monthlyTarget });
       const speedMode = determineSpeedMode(state, opts, rawSpeedMode);
       return {
         monthKey: monthKey(),

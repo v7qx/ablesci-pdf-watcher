@@ -488,6 +488,17 @@
     return normalizeText(el.innerText || el.textContent || '');
   }
 
+  function extractAssistTitle() {
+    const copiedTitle = document.querySelector('.assist-title [data-clipboard-text]')?.getAttribute('data-clipboard-text') || '';
+    if (normalizeText(copiedTitle)) return normalizeText(copiedTitle);
+    const primaryTitle = document.querySelector('.assist-title > div:first-child');
+    return visibleText(primaryTitle) || visibleText(document.querySelector('.assist-title'));
+  }
+
+  function hasHanCharacters(value) {
+    return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(String(value || ''));
+  }
+
   function cleanRemarkText(value) {
     return normalizeText(value)
       .replace(/该求助存在备注，如果存在信息冲突，请以备注为准/g, '')
@@ -547,9 +558,15 @@
       systemRisk: false,
       systemPromptSupplementDoi: false,
       systemPromptAbnormalAssist: false,
+      chineseTitle: false,
       remark: false
     };
-    const titleText = visibleText($('.assist-title'));
+    const titleText = extractAssistTitle();
+
+    if (hasHanCharacters(titleText)) {
+      flags.chineseTitle = true;
+      reasons.push('当前求助标题含中文字符，可能将备注或附加要求写入标题，已停止自动上传。');
+    }
 
     if (/求助补充材料|补充材料求助|supporting information|supplementary material/i.test(titleText)) {
       flags.supplement = true;
@@ -699,7 +716,7 @@
     const assistId = getAssistId();
     const doi = window.AblesciPdfAdapters.getFullDoiFromDocument(document);
     const suggestedFilename = window.AblesciPdfAdapters.makePdfFilename(document);
-    const title = visibleText($('.assist-title')) || document.title || suggestedFilename;
+    const title = extractAssistTitle() || document.title || suggestedFilename;
     const journalName = extractJournalName();
     const risk = detectPageRisk();
     const riskReasons = risk.reasons.slice();

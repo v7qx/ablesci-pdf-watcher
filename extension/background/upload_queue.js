@@ -229,6 +229,14 @@
               });
             } else if (isExpectedTimeoutFailure(failureReason)) {
               const message = formatTimeoutDoneMessage(err, failureReason);
+              console.error(
+                `[Ablesci PDF Watcher Error] 出版社页面处理超时（${failureReason}）。` +
+                `可能是页面改版、下载入口未识别、服务器响应过慢或下载未完成。` +
+                `\n求助链接: ${payload?.pageUrl || '未知'}` +
+                `\nDOI: ${payload?.doi || '未知'}` +
+                `\n详情: ${formatTaskError(err)}`,
+                err
+              );
               post(port, 'done', message, {
                 html: escapeHtml(message),
                 recomend: false,

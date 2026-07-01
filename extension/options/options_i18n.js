@@ -227,7 +227,7 @@
 
   // Watcher Status card metric grid hover tooltips
   "实际：以本月首次同步网页总应助数为基准，统计之后新增的应助量；预计：月初开始时按当前月进度推算，月中首次同步时会扣除已过去比例，只保留剩余月份目标。": "Actual: Assists done since first sync of this month; Expected: Calculated based on elapsed month duration, deducting elapsed proportion upon first sync.",
-  "从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。": "Total cumulative assists synced silently from Ablesci profile (includes other devices and manual assists).",
+  "从科研通个人中心静默同步到的历史累计总应助数（包含其他设备及手动应助）。通常最多延迟约 15 分钟；网络或页面异常时可能更久。": "Total cumulative assists synced silently from the Ablesci profile (including other devices and manual assists). It normally lags by up to about 15 minutes, and may take longer after network or page errors.",
   "本月预计应助数与本月实际应助数的差值（预计 - 实际）。正数表示落后于进度，负数表示超前。": "Difference between expected and actual assists for this month (Expected - Actual). Positive means behind schedule, negative means ahead.",
   "下一次自动应助的具体北京时间。": "Next scheduled automatic assist run time (Beijing time).",
   "距离下一次自动应助的剩余时间。到点后应直接进入自动应助，而不是再等待另一套计划时间。": "Time remaining before the next auto assist run.",

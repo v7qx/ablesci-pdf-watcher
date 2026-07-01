@@ -271,6 +271,8 @@
         detail_system_prompt_si: '详情页系统提示 DOI 可能是补充材料或并非全文，已跳过',
         detail_system_prompt_abnormal: '详情页系统提示该求助可能是索引库链接、无全文或信息不准确，已跳过',
         detail_remark: '详情页存在备注，已按设置跳过',
+        list_chinese_title: '列表页标题含中文字符，已提前跳过',
+        detail_chinese_title: '详情页标题含中文字符，已跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
         list_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (列表页)',
         list_supplement: '已按设置跳过补充材料求助 (列表页)',
@@ -659,6 +661,9 @@
     function isListCandidateAllowed(candidate, opts, state = {}, blacklistedIds = []) {
       const textValue = [candidate.rowText, candidate.title, candidate.statusText].join(' ');
       if (!candidate.detailUrl) return { ok: false, reason: 'missing_detail_url' };
+      if (/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(String(candidate.title || ''))) {
+        return { ok: false, reason: 'list_chinese_title' };
+      }
       if (opts.watcherSkipReported && candidate.reported) return { ok: false, reason: 'reported' };
       if (opts.watcherSkipRejected && candidate.rejected) return { ok: false, reason: 'rejected' };
       if (opts.watcherEnableBlacklist && candidate.requesterId) {
@@ -819,6 +824,9 @@
         payload.documentTypeLabel || ''
       ].join(' ');
 
+      if (flags.chineseTitle || /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(String(payload.title || ''))) {
+        return { ok: false, reason: 'detail_chinese_title' };
+      }
       if (opts.watcherSkipBookChapter && payload.documentType === 'book_chapter') return { ok: false, reason: 'detail_book_chapter' };
       if (opts.watcherSkipPatentReport && payload.documentType === 'patent_report') return { ok: false, reason: 'detail_patent_report' };
       if (opts.watcherSkipSupplement && (payload.documentType === 'supplement' || flags.supplement || isLikelySupplementCandidate(payload))) return { ok: false, reason: 'detail_supplement' };

@@ -458,8 +458,16 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
               seenIgnoredIds.add(item.id);
               post(port, 'progress', `⚠️ 忽略下载 #${item.id}：特征码不匹配 (${matchResult.reason}，URL: ${traceUrl(item.url)})`);
             }
-            if (tabId !== null && item.tabId === tabId && (looksLikePdfDownloadUrl(item.url) || looksLikePdfDownloadUrl(item.finalUrl))) {
-              finishError(new Error(`下载特征码不匹配：${matchResult.reason}。URL: ${item.url}`));
+            const itemHost = hostnameOf(item.url);
+            const belongsToPendingPublisher = (tabId !== null && item.tabId === tabId) ||
+              (expectedHost && itemHost && itemHost.toLowerCase() === expectedHost.toLowerCase());
+            if (belongsToPendingPublisher && (looksLikePdfDownloadUrl(item.url) || looksLikePdfDownloadUrl(item.finalUrl))) {
+              const err = new Error(
+                `出版社下载地址特征发生变化：${matchResult.reason}。` +
+                `初始地址: ${traceUrl(item.url)}；最终地址: ${traceUrl(item.finalUrl) || '未知'}`
+              );
+              err.failureReason = 'download_signature_mismatch';
+              finishError(err);
             }
             return;
           }

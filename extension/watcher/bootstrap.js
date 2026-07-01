@@ -15,7 +15,7 @@
     }
 
     function isStaticSkipReason(reason) {
-      return /^(reported|rejected|sticky_assist|list_too_fresh_assist|list_supplement|list_book_chapter|list_patent_report|list_corrigendum|list_blacklist_user|detail_reported_warning|detail_rejected_history|detail_supplement|detail_book_chapter|detail_patent_report|detail_corrigendum|detail_blacklist_user|detail_remark|detail_risk_text|detail_system_prompt_si|detail_system_prompt_abnormal)$/.test(String(reason || ''));
+      return /^(reported|rejected|sticky_assist|list_too_fresh_assist|list_supplement|list_book_chapter|list_patent_report|list_corrigendum|list_blacklist_user|list_chinese_title|detail_reported_warning|detail_rejected_history|detail_supplement|detail_book_chapter|detail_patent_report|detail_corrigendum|detail_blacklist_user|detail_chinese_title|detail_remark|detail_risk_text|detail_system_prompt_si|detail_system_prompt_abnormal)$/.test(String(reason || ''));
     }
 
     function processedExpiryTime(item = {}) {
