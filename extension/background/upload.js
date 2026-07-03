@@ -47,6 +47,113 @@
       handlePublisherRuntimeMessage,
       recordManualWatcherDaily
     } = deps;
+    const DOWNLOAD_SEQUENCE_KEY = 'watcherDownloadSequence';
+    let downloadSequenceMutation = Promise.resolve();
+
+    function beijingDateKey() {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(new Date());
+    }
+
+    function allocateDownloadSequence() {
+      const operation = async () => {
+        const today = beijingDateKey();
+        const stored = await chromeApi.storage.local.get(DOWNLOAD_SEQUENCE_KEY);
+        const current = stored[DOWNLOAD_SEQUENCE_KEY] || {};
+        const value = current.date === today ? Math.max(1, Math.min(999, Number(current.next || 1))) : 1;
+        const code = String(value).padStart(3, '0');
+        await chromeApi.storage.local.set({
+          [DOWNLOAD_SEQUENCE_KEY]: { date: today, next: value >= 999 ? 1 : value + 1 }
+        });
+        return code;
+      };
+      const next = downloadSequenceMutation.then(operation, operation);
+      downloadSequenceMutation = next.catch(() => {});
+      return next;
+    }
+
+    function prefixDownloadFilename(filename, code) {
+      return `${code}-${String(filename || 'paper.pdf').replace(/^\d{3}-/, '')}`;
+    }
+
+    const TITLE_MATCH_STOPWORDS = new Set([
+      'about', 'after', 'among', 'analysis', 'associated', 'based', 'between', 'effect', 'effects',
+      'from', 'into', 'novel', 'research', 'study', 'their', 'through', 'using', 'with', 'without',
+      'the', 'and', 'for', 'that', 'this', 'via', 'toward', 'towards'
+    ]);
+
+    function normalizeTitleText(value) {
+      return String(value || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[αΑ]/g, ' alpha ')
+        .replace(/[βΒ]/g, ' beta ')
+        .replace(/[γΓ]/g, ' gamma ')
+        .replace(/[δΔ]/g, ' delta ')
+        .replace(/[εΕ]/g, ' epsilon ')
+        .replace(/[κΚ]/g, ' kappa ')
+        .replace(/[λΛ]/g, ' lambda ')
+        .replace(/[μΜµ]/g, ' mu ')
+        .replace(/[ωΩ]/g, ' omega ')
+        .replace(/[‐‑‒–—―−]/g, '-')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function compareTitleWithFirstPage(title, firstPageText) {
+      const expected = normalizeTitleText(title);
+      const actual = normalizeTitleText(firstPageText);
+      if (!expected || actual.length < 40) {
+        return { status: 'unverifiable', score: 0, matchedTokens: [], expectedTokens: [], reason: 'missing_title_or_first_page_text' };
+      }
+      if (actual.includes(expected)) {
+        return { status: 'matched', score: 1, matchedTokens: expected.split(' '), expectedTokens: expected.split(' '), reason: 'normalized_full_title' };
+      }
+      const expectedCompact = expected.replace(/\s+/g, '');
+      const actualCompact = actual.replace(/\s+/g, '');
+      if (expectedCompact.length >= 30 && actualCompact.includes(expectedCompact)) {
+        return { status: 'matched', score: 1, matchedTokens: expected.split(' '), expectedTokens: expected.split(' '), reason: 'compact_full_title' };
+      }
+      // Short standalone formula fragments such as "CH 3 NH 3" or "Fe 3 +"
+      // are too layout-sensitive to score independently. The compact full-title
+      // check above still verifies them when the complete title is available.
+      const expectedTokens = Array.from(new Set(expected.split(' ').filter(token =>
+        token.length >= 4 && !TITLE_MATCH_STOPWORDS.has(token)
+      )));
+      if (expectedTokens.length < 2) {
+        return { status: 'unverifiable', score: 0, matchedTokens: [], expectedTokens, reason: 'too_few_distinctive_title_tokens' };
+      }
+      const actualTokens = new Set(actual.split(' '));
+      const weight = token => (/\d/u.test(token) || token.length >= 8 ? 2 : 1);
+      const totalWeight = expectedTokens.reduce((sum, token) => sum + weight(token), 0);
+      const matchedTokens = expectedTokens.filter(token => actualTokens.has(token));
+      const matchedWeight = matchedTokens.reduce((sum, token) => sum + weight(token), 0);
+      const highValueTokens = expectedTokens.filter(token => weight(token) === 2);
+      const highValueMatched = highValueTokens.filter(token => actualTokens.has(token));
+      const highValueMissing = highValueTokens.filter(token => !actualTokens.has(token));
+      const score = totalWeight > 0 ? matchedWeight / totalWeight : 0;
+      const requiredCount = Math.min(4, expectedTokens.length);
+      const requiredHigh = Math.min(2, highValueTokens.length);
+      const matched = score >= 0.7 && matchedTokens.length >= requiredCount && highValueMatched.length >= requiredHigh;
+      const criticalTermsMissing = highValueMissing.length >= 2 && highValueMatched.length < requiredHigh;
+      return {
+        status: matched ? 'matched' : (score < 0.25 || criticalTermsMissing ? 'mismatch' : 'unverifiable'),
+        score: Number(score.toFixed(3)),
+        matchedTokens,
+        expectedTokens,
+        missingHighValueTokens: highValueMissing,
+        reason: matched ? 'weighted_first_page_tokens' : (criticalTermsMissing ? 'critical_title_terms_missing' : 'insufficient_first_page_title_evidence')
+      };
+    }
+
+    function usableDocumentTitle(value) {
+      const normalized = normalizeTitleText(value);
+      if (normalized.length < 20 || /^(untitled|document|article|full text|pdf)$/i.test(normalized) ||
+          /microsoft word|accepted manuscript|article in press|proof copy|\.pdf$/i.test(String(value || '').trim())) return '';
+      return normalized.split(' ').filter(Boolean).length >= 4 ? String(value || '').trim() : '';
+    }
 
     const {
       uploadRequest,
@@ -204,8 +311,9 @@
     function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null, pii = '', normalAction = '') {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
       const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
+      const sequence = String(stat?.downloadSequence || '').trim();
 
-      post(port, 'done', `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
+      post(port, 'done', sequence ? `仅下载完成 ${sequence}` : `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
         html: `已仅下载并校验 PDF，未自动上传。<br>原因：${escapeHtml(reasonText)}<br>文件：${escapeHtml(stat?.filename || 'paper.pdf')}${cleanerHtml ? `<br>${cleanerHtml}` : ''}`,
         recomend: false,
         reload: false,
@@ -214,6 +322,10 @@
         md5: stat?.md5,
         size: stat?.size,
         pageCount: stat?.page_count,
+        downloadSequence: sequence,
+        downloadId: stat?.downloadId,
+        downloadCaptureId: stat?.downloadCaptureId || '',
+        titleValidation: stat?.titleValidation || null,
         normalAction,
         pii,
         ...doneExtraForCleaner(pdfCleanerResult)
@@ -224,7 +336,8 @@
       const name = stat?.filename || basenameOf(stat?.path || '') || 'paper.pdf';
       const truncatedName = truncateFilename(name, 35);
       const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
-      const message = `调试模式已开启，未自动上传。准备上传文件：${truncatedName}${cleanerText ? `；${cleanerText}` : ''}`;
+      const sequence = String(stat?.downloadSequence || '').trim();
+      const message = sequence ? `仅下载完成 ${sequence}` : `调试模式已开启，未自动上传。准备上传文件：${truncatedName}${cleanerText ? `；${cleanerText}` : ''}`;
 
       post(port, 'done', message, {
         html: escapeHtml(message),
@@ -236,6 +349,10 @@
         md5: stat?.md5,
         size: stat?.size,
         pageCount: stat?.page_count,
+        downloadSequence: sequence,
+        downloadId: stat?.downloadId,
+        downloadCaptureId: stat?.downloadCaptureId || '',
+        titleValidation: stat?.titleValidation || null,
         normalAction,
         pii,
         ...doneExtraForCleaner(pdfCleanerResult)
@@ -252,6 +369,11 @@
         };
       }
       const opts = optsOverride || await getOptions();
+      if (debugSimulation || opts.debugDownloadOnly === true || payload.downloadOnly === true) {
+        const downloadSequence = await allocateDownloadSequence();
+        payload.downloadSequence = downloadSequence;
+        payload.suggestedFilename = prefixDownloadFilename(payload.suggestedFilename, downloadSequence);
+      }
       const diag = makeDiagnosticBase(payload, opts);
 
       // 1. 校验 Corrigendum 更正类求助
@@ -422,6 +544,9 @@
         }
         throw err;
       }
+      stat.downloadSequence = payload.downloadSequence || '';
+      stat.downloadId = item.id;
+      stat.downloadCaptureId = item._ablesciCaptureId || '';
 
       throwIfAborted(signal);
       if (!opts.keepDownloadHistory) {
@@ -504,6 +629,50 @@
           }
         }
       }
+      stat.downloadSequence = payload.downloadSequence || stat.downloadSequence || '';
+      stat.downloadId = stat.downloadId || item.id;
+      stat.downloadCaptureId = stat.downloadCaptureId || item._ablesciCaptureId || '';
+      let titleValidation;
+      try {
+        const textResult = await sendNativeMessage(opts.nativeHostName, {
+          action: 'extract_first_page_text',
+          path: stat.path || item.filename,
+          extra: {
+            cleaner_path: opts.pdfCleanerCliPath || ''
+          }
+        }, nativeMessageLongTimeoutMs);
+        const documentTitle = usableDocumentTitle(textResult?.document_title || '');
+        if (documentTitle) {
+          const metadataValidation = compareTitleWithFirstPage(payload.title || '', documentTitle);
+          titleValidation = metadataValidation.status === 'matched'
+            ? { ...metadataValidation, reason: `pdf_metadata_${metadataValidation.reason}`, documentTitle }
+            : { ...metadataValidation, status: 'mismatch', reason: 'pdf_metadata_title_mismatch', documentTitle };
+        } else {
+          titleValidation = compareTitleWithFirstPage(payload.title || '', textResult?.text || '');
+        }
+      } catch (err) {
+        titleValidation = {
+          status: 'unverifiable',
+          score: 0,
+          matchedTokens: [],
+          expectedTokens: [],
+          reason: `first_page_text_error: ${formatTaskError(err)}`
+        };
+      }
+      payload.titleValidation = titleValidation;
+      stat.titleValidation = titleValidation;
+      if (titleValidation.status !== 'matched') {
+        payload.downloadOnly = true;
+        payload.riskReasons = Array.isArray(payload.riskReasons) ? payload.riskReasons : [];
+        payload.riskReasons.push(
+          titleValidation.status === 'mismatch'
+            ? `PDF 首页标题与求助标题明显不匹配（匹配分 ${titleValidation.score}）`
+            : `无法从 PDF 首页确认求助标题（${titleValidation.reason}）`
+        );
+        post(port, 'progress', `标题安全校验未通过：${payload.riskReasons[payload.riskReasons.length - 1]}；已改为仅下载。`);
+      } else {
+        post(port, 'progress', `标题安全校验通过：首页关键词匹配分 ${titleValidation.score}。`);
+      }
       const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.slice() : [];
       const size = Number(stat.size || 0);
       const pageCount = Number(stat.page_count || 0);
@@ -578,7 +747,7 @@
         if (opts.deleteAfterUpload) {
           await deleteUploadedFile(opts.nativeHostName, stat.path);
         }
-        await clearPublisherCfChallengeState();
+        await clearPublisherCfChallengeState(payload?.watcherPublisher || '');
         if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
           await recordManualWatcherDaily('uploaded').catch(() => {});
         }
@@ -617,11 +786,11 @@
       }
       if (parsed && parsed.msg) {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
-        await clearPublisherCfChallengeState();
+        await clearPublisherCfChallengeState(payload?.watcherPublisher || '');
         postDoneFromSiteResponse(port, parsed, '上传成功', { ...doneExtraForCleaner(pdfCleanerResult), pii });
       } else {
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
-        await clearPublisherCfChallengeState();
+        await clearPublisherCfChallengeState(payload?.watcherPublisher || '');
         const cleanerExtra = doneExtraForCleaner(pdfCleanerResult);
         const cleanerText = cleanerExtra.pdfCleanerSummary ? `；${cleanerExtra.pdfCleanerSummary}` : '';
         const cleanerHtml = cleanerExtra.pdfCleanerHtml ? `<br>${cleanerExtra.pdfCleanerHtml}` : '';
@@ -639,7 +808,8 @@
       enqueueUpload,
       processQueue,
       cancelTask,
-      hasActiveTask
+      hasActiveTask,
+      hasPublisherTask
     } = createBackgroundUploadQueueApi({
       // PRIVATE_WATCHER_ONLY
       pendingPublisherTabs,
@@ -681,7 +851,8 @@
       processQueue,
       cancelTask,
       attachRuntimeListeners,
-      hasActiveTask
+      hasActiveTask,
+      hasPublisherTask
     };
   }
 

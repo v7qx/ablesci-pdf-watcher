@@ -43,6 +43,26 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       appendDiagnosticTrace,
       postDebugLog
     } = deps;
+    const filenameClaimers = new Map();
+
+    function handleDeterminingFilename(item, suggest) {
+      const claims = [];
+      for (const claimer of filenameClaimers.values()) {
+        try {
+          const claim = claimer(item);
+          if (claim) claims.push(claim);
+        } catch (_) {}
+      }
+      // Ambiguous ownership must not rename the file. A single exact task claim
+      // is required before applying its daily sequence prefix.
+      if (claims.length === 1 && typeof suggest === 'function') {
+        suggest({ filename: claims[0], conflictAction: 'uniquify' });
+      }
+    }
+
+    if (chromeApi.downloads.onDeterminingFilename) {
+      chromeApi.downloads.onDeterminingFilename.addListener(handleDeterminingFilename);
+    }
 
     // 本地 debugLog，转发到 publisher tab 的 F12 + 本地 console
     function debugLog(msg) {
@@ -63,6 +83,35 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       try { text = decodeURIComponent(text); } catch (_) {}
       const match = text.match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
       return match ? match[1].replace(/\/+$/g, '') : '';
+    }
+
+    function sameDownloadUrlPath(item, expectedUrl) {
+      const expectedRaw = String(expectedUrl || '').trim();
+      if (/^blob:https:\/\//i.test(expectedRaw)) {
+        return [item?.url, item?.finalUrl].some(value => String(value || '').trim() === expectedRaw);
+      }
+      let expected;
+      try {
+        expected = new URL(expectedRaw);
+      } catch (_) {
+        return false;
+      }
+      if (expected.protocol !== 'http:' && expected.protocol !== 'https:') return false;
+      const expectedKey = `${expected.hostname.toLowerCase()}${decodeURIComponent(expected.pathname).toLowerCase()}`;
+      for (const raw of [item?.url, item?.finalUrl]) {
+        try {
+          const actual = new URL(String(raw || '').trim());
+          const actualKey = `${actual.hostname.toLowerCase()}${decodeURIComponent(actual.pathname).toLowerCase()}`;
+          if (actualKey === expectedKey) return true;
+        } catch (_) {}
+      }
+      return false;
+    }
+
+    function sameDownloadReferrerPath(item, expectedPageUrl) {
+      const referrer = String(item?.referrer || '').trim();
+      if (!referrer) return false;
+      return sameDownloadUrlPath({ url: referrer }, expectedPageUrl);
     }
 
     function sageDomesticArticleUrl(pdfUrl, payload = {}) {
@@ -204,7 +253,14 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
 
         function onCreated(item) {
           if (downloadId !== null) return;
-          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
+          // A browser download without the exact tab owner is not attributable
+          // to this task. In particular, DOI fallback matching is intentionally
+          // broad across supported publishers and must never claim a manual
+          // download whose tabId is -1/unknown.
+          const exactTabOwner = tabId !== null && Number.isInteger(item.tabId) && item.tabId === tabId;
+          const trustedUrlOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && sameDownloadUrlPath(item, pdfUrl);
+          const trustedReferrerOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && sameDownloadReferrerPath(item, pdfUrl);
+          if (!exactTabOwner && !trustedUrlOwner && !trustedReferrerOwner) {
             return;
           }
           if (!isLikelyTargetDownload(item, hostnameOf(pdfUrl), pdfUrl).ok) return;
@@ -284,7 +340,10 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
           title: options.payload?.title || options.payload?.suggestedFilename || '',
           pageUrl: options.payload?.pageUrl || '',
           pdfUrl: options.payload?.pdfUrl || pdfUrl,
-          pdfUrlSource: options.payload?.pdfUrlSource || ''
+          pdfUrlSource: options.payload?.pdfUrlSource || '',
+          watcherPublisher: options.payload?.watcherPublisher || '',
+          watcherMultiPublisherEnabled: options.payload?.watcherMultiPublisherEnabled === true,
+          downloadSequence: options.payload?.downloadSequence || ''
         };
         const expectedPublisher = publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || publisherForDoi?.(payloadSummary.doi || pdfUrl) || '';
         const startedAfter = new Date(Date.now() - 2000).toISOString();
@@ -358,6 +417,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
           pollTimeouts.clear();
           if (abortListener && signal) signal.removeEventListener('abort', abortListener);
           chromeApi.downloads.onCreated.removeListener(onCreated);
+          filenameClaimers.delete(captureId);
           if (tabRemovedListener && chromeApi.tabs.onRemoved) chromeApi.tabs.onRemoved.removeListener(tabRemovedListener);
           tracePublisherStep('poller_cleanup', { captureId, closeTab });
           if (tabId !== null) {
@@ -433,13 +493,44 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
             }
             return;
           }
-          if (tabId !== null && Number.isInteger(item.tabId) && item.tabId >= 0 && item.tabId !== tabId) {
-            tracePublisherStep('download_candidate_owner_mismatch', { source, reason: 'tab_mismatch', downloadId: item.id, itemTabId: item.tabId, publisherTabId: tabId, captureId });
+          const exactTabOwner = tabId !== null && Number.isInteger(item.tabId) && item.tabId === tabId;
+          const trustedUrlOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && sameDownloadUrlPath(item, sourceUrlForMatching);
+          const trustedReferrerOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && (
+            sameDownloadReferrerPath(item, articleUrl) ||
+            sameDownloadReferrerPath(item, sourceUrlForMatching)
+          );
+          if (!exactTabOwner && !trustedUrlOwner && !trustedReferrerOwner) {
+            tracePublisherStep('download_candidate_owner_mismatch', {
+              source,
+              reason: 'tab_mismatch',
+              downloadId: item.id,
+              itemTabId: item.tabId,
+              publisherTabId: tabId,
+              captureId,
+              itemUrl: traceUrl(item.url),
+              finalUrl: traceUrl(item.finalUrl),
+              referrer: traceUrl(item.referrer),
+              mime: String(item.mime || ''),
+              byExtensionId: String(item.byExtensionId || '')
+            });
             if (!seenIgnoredIds.has(item.id)) {
               seenIgnoredIds.add(item.id);
-              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：标签页不匹配 (下载来自 tab ${item.tabId}，期望 ${tabId})`);
+              post(port, 'progress', `⚠️ 忽略下载 #${item.id}：无法确认属于当前任务 (下载来自 tab ${item.tabId ?? 'unknown'}，期望 ${tabId ?? 'pending'})`);
             }
             return;
+          }
+          if (trustedUrlOwner || trustedReferrerOwner) {
+            tracePublisherStep('download_candidate_owner_url_fallback', {
+              source,
+              reason: trustedUrlOwner ? 'trusted_exact_url_without_tab_id' : 'trusted_referrer_without_tab_id',
+              downloadId: item.id,
+              publisherTabId: tabId,
+              captureId,
+              sourceUrl: traceUrl(sourceUrlForMatching),
+              itemUrl: traceUrl(item.url),
+              finalUrl: traceUrl(item.finalUrl),
+              referrer: traceUrl(item.referrer)
+            });
           }
           const matchResult = isLikelyTargetDownload(item, expectedHost, sourceUrlForMatching);
           if (!matchResult.ok) {
@@ -500,6 +591,19 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
 
         function onCreated(item) {
           acceptCandidate(item, 'onCreated');
+        }
+
+        function claimDownloadFilename(item) {
+          const sequence = String(payloadSummary.downloadSequence || '').trim();
+          if (!sequence) return '';
+          const exactTabOwner = tabId !== null && Number.isInteger(item.tabId) && item.tabId === tabId;
+          const trustedUrlOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && sameDownloadUrlPath(item, sourceUrlForMatching);
+          const trustedReferrerOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && (
+            sameDownloadReferrerPath(item, articleUrl) || sameDownloadReferrerPath(item, sourceUrlForMatching)
+          );
+          if (!exactTabOwner && !trustedUrlOwner && !trustedReferrerOwner) return '';
+          const original = String(item.filename || 'paper.pdf').split(/[\\/]/).pop().replace(/^\d{3}-/, '') || 'paper.pdf';
+          return `${sequence}-${original}`;
         }
 
         async function downloadDirectFromPublisherUrl(url, source = 'publisher_direct_download') {
@@ -605,6 +709,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
             signal.addEventListener('abort', abortListener, { once: true });
           }
           chromeApi.downloads.onCreated.addListener(onCreated);
+          filenameClaimers.set(captureId, claimDownloadFilename);
           tracePublisherStep('publisher-tab-open', { active, revealAfterMs, downloadArmed, expectedHost, captureId });
 
           // 非期刊论文页面跳过（book/chapter/reference 等），只按 URL 域名和路径段判断。

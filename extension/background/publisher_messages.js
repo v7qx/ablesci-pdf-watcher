@@ -59,6 +59,16 @@
       }
     }
 
+    function normalizeTrustedPublisherPdfUrl(rawUrl, publisher = '') {
+      const httpUrl = normalizeHttpUrl(rawUrl);
+      if (httpUrl) return httpUrl;
+      const value = String(rawUrl || '').trim();
+      if (publisher === 'cnpe' && /^blob:https:\/\/sage\.cnpereading\.com\/[a-z0-9-]+$/i.test(value)) {
+        return value;
+      }
+      return '';
+    }
+
     function isSamePdfUrl(urlA, urlB) {
       if (!urlA || !urlB) return urlA === urlB;
       try {
@@ -265,7 +275,7 @@
       }
 
       if (msg.pdfUrl) {
-        const safePdfUrl = normalizeHttpUrl(msg.pdfUrl);
+        const safePdfUrl = normalizeTrustedPublisherPdfUrl(msg.pdfUrl, msg.publisher || pending.publisher || '');
         if (!safePdfUrl) {
           tracePublisherStep(pending, 'publisher-pdf-url-rejected', {
             publisher: msg.publisher || pending.publisher || '',
@@ -328,7 +338,10 @@
         pending.publisherChallengePassed = false;
         pending.publisherChallengeToken = Date.now();
         const challengeToken = pending.publisherChallengeToken;
-        recordPublisherCfChallenge(msg.pageUrl || pending.articleUrl || pending.pdfUrl || '')
+        recordPublisherCfChallenge(
+          msg.pageUrl || pending.articleUrl || pending.pdfUrl || '',
+          pending.payloadSummary?.watcherPublisher || pending.publisher || ''
+        )
           .then(result => {
             if (result.paused) {
               pending.finishError(new Error(`检测到出版商验证页，连续达到阈值 ${result.threshold}，已暂停低频值守。`));
@@ -443,7 +456,12 @@
         if (msg.clicked) {
           pending.armDownloadCapture?.(msg.pdfUrl);
           post(pending.port, 'progress', '已在易阅通页面触发原生 PDF 下载，继续监听浏览器下载。');
-          sendResponse({ ok: true, action: 'clicked_cnpe_pdf', pdfUrl: msg.pdfUrl });
+          sendResponse({
+            ok: true,
+            action: 'clicked_cnpe_pdf',
+            pdfUrl: msg.pdfUrl,
+            downloadSequence: pending.payloadSummary?.downloadSequence || ''
+          });
           return false;
         }
         if (typeof pending.downloadDirectFromPublisherUrl === 'function') {

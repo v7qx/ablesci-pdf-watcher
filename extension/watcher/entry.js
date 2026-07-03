@@ -5,6 +5,7 @@
   function createWatcherEntryApi(config) {
     const {
       chromeApi,
+      depsRef,
       setDeps,
       alarmName,
       badgeRefreshAlarmName,
@@ -26,15 +27,172 @@
       clearBufferedWatcherLogs,
       clearBufferedWatcherTrace,
       trimStoredWatcherTraceLogs,
-      notifyWatcherNeedsAttention
+      notifyWatcherNeedsAttention,
+      normalizeOptions,
+      randomIntervalMinutes
     } = config;
+    const parallelAlarmNames = {
+      elsevier: `${alarmName}:elsevier`,
+      secondary1: `${alarmName}:secondary1`,
+      secondary2: `${alarmName}:secondary2`
+    };
+    let parallelScanChain = Promise.resolve();
+
+    function publisherFromListUrl(url) {
+      try {
+        return String(new URL(url).searchParams.get('publisher') || '').trim().toLowerCase();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function configuredPublishers(opts = {}) {
+      const urls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls : [];
+      const raw = urls
+        .map(url => ({ url, publisher: publisherFromListUrl(url) }))
+        .filter(item => item.publisher);
+      return Array.from(new Map(raw.map(item => [item.publisher, item])).values());
+    }
+
+    async function clearParallelAlarms() {
+      await Promise.all(Object.values(parallelAlarmNames).map(name => chromeApi.alarms.clear(name)));
+      const state = await getWatcherState();
+      delete state.parallelLaneSchedules;
+      await saveWatcherState(state);
+    }
+
+    async function scheduleParallelLane(lane, opts, reason = 'parallel_lane_reschedule', initialOffsetMinutes = 0) {
+      const alarm = parallelAlarmNames[lane];
+      if (!alarm || !opts?.watcherEnabled || !opts?.watcherMultiPublisherEnabled) return;
+      const configured = configuredPublishers(opts);
+      const hasElsevier = configured.some(item => item.publisher === 'elsevier');
+      const secondaryCount = configured.filter(item => item.publisher !== 'elsevier').length;
+      const laneAvailable = lane === 'elsevier'
+        ? hasElsevier
+        : (lane === 'secondary1' ? secondaryCount >= 1 : secondaryCount >= 2);
+      if (!laneAvailable) {
+        await chromeApi.alarms.clear(alarm);
+        return;
+      }
+      const state = await getWatcherState();
+      const delay = Math.max(0.5, Number(randomIntervalMinutes(opts, state) || 1) + initialOffsetMinutes);
+      await chromeApi.alarms.create(alarm, { delayInMinutes: delay });
+      const scheduled = await chromeApi.alarms.get(alarm).catch(() => null);
+      const current = await getWatcherState();
+      current.parallelLaneSchedules = current.parallelLaneSchedules && typeof current.parallelLaneSchedules === 'object'
+        ? current.parallelLaneSchedules
+        : {};
+      current.parallelLaneSchedules[lane] = {
+        scheduledAt: scheduled?.scheduledTime || Date.now() + delay * 60 * 1000,
+        delayMinutes: delay,
+        reason
+      };
+      await saveWatcherState(current);
+      await appendWatcherTrace('parallel_lane_scheduled', { lane, reason, delayMinutes: Number(delay.toFixed(2)) });
+    }
+
+    async function refreshAllWatcherAlarms(reason = 'refresh') {
+      const opts = normalizeOptions(await depsRef.getOptions());
+      if (!opts.watcherMultiPublisherEnabled) {
+        await clearParallelAlarms();
+        return refreshAutoWatcherAlarm(true, reason);
+      }
+      await chromeApi.alarms.clear(alarmName);
+      await clearParallelAlarms();
+      if (!opts.watcherEnabled) return;
+      await scheduleParallelLane('elsevier', opts, reason, 0);
+      await scheduleParallelLane('secondary1', opts, reason, 0.5);
+      await scheduleParallelLane('secondary2', opts, reason, 1);
+    }
+
+    async function runParallelLane(lane) {
+      const operation = async () => {
+        const opts = normalizeOptions(await depsRef.getOptions());
+        if (!opts.watcherEnabled || !opts.watcherMultiPublisherEnabled) return { ok: false, reason: 'disabled' };
+        const configured = configuredPublishers(opts);
+        const state = await getWatcherState();
+        const paused = state.pausedPublisherLanes && typeof state.pausedPublisherLanes === 'object' ? state.pausedPublisherLanes : {};
+        const lastStarted = state.parallelPublisherLastStarted && typeof state.parallelPublisherLastStarted === 'object'
+          ? { ...state.parallelPublisherLastStarted }
+          : {};
+        let selection = null;
+        if (lane === 'elsevier') {
+          const candidate = configured.find(item => item.publisher === 'elsevier');
+          if (candidate && !paused.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selection = candidate;
+        } else {
+          selection = configured
+            .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
+            .sort((a, b) => Number(lastStarted[a.publisher] || 0) - Number(lastStarted[b.publisher] || 0))[0] || null;
+        }
+        let result = { ok: true, reason: 'parallel_lane_busy' };
+        if (selection) {
+          lastStarted[selection.publisher] = Date.now();
+          const current = await getWatcherState();
+          current.parallelPublisherLastStarted = lastStarted;
+          await saveWatcherState(current);
+          result = await runAutoWatcherOnce('alarm', {
+            parallelDispatch: true,
+            skipScheduleRefresh: true,
+            listUrls: [selection.url],
+            publisher: selection.publisher,
+            lane
+          });
+        }
+        return result;
+      };
+      const next = parallelScanChain.then(operation, operation);
+      const rescheduled = next.finally(async () => {
+        const latestOpts = normalizeOptions(await depsRef.getOptions());
+        await scheduleParallelLane(lane, latestOpts, `after_${lane}_run`);
+      });
+      parallelScanChain = rescheduled.catch(() => {});
+      return rescheduled;
+    }
+
+    async function runParallelPublisherDispatch(trigger = 'alarm') {
+      const opts = normalizeOptions(await depsRef.getOptions());
+      if (!opts?.watcherMultiPublisherEnabled) return runAutoWatcherOnce(trigger);
+      const configured = configuredPublishers(opts);
+      const initialState = await getWatcherState();
+      const lastStarted = initialState.parallelPublisherLastStarted && typeof initialState.parallelPublisherLastStarted === 'object'
+        ? { ...initialState.parallelPublisherLastStarted }
+        : {};
+      const paused = initialState.pausedPublisherLanes && typeof initialState.pausedPublisherLanes === 'object'
+        ? initialState.pausedPublisherLanes
+        : {};
+      const selections = [];
+      const elsevier = configured.find(item => item.publisher === 'elsevier');
+      if (elsevier && !paused.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selections.push(elsevier);
+      const secondary = configured
+        .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
+        .sort((a, b) => Number(lastStarted[a.publisher] || 0) - Number(lastStarted[b.publisher] || 0))
+        .slice(0, 2);
+      selections.push(...secondary);
+
+      const results = [];
+      for (const selection of selections) {
+        lastStarted[selection.publisher] = Date.now();
+        const currentState = await getWatcherState();
+        currentState.parallelPublisherLastStarted = { ...lastStarted };
+        await saveWatcherState(currentState);
+        results.push(await runAutoWatcherOnce(trigger, {
+          parallelDispatch: true,
+          skipScheduleRefresh: true,
+          listUrls: [selection.url],
+          publisher: selection.publisher
+        }));
+      }
+      return { ok: true, reason: selections.length ? 'parallel_dispatch_done' : 'parallel_dispatch_busy', results };
+    }
 
     function initAutoWatcher(nextDeps) {
       setDeps(nextDeps);
       startBadgeRefreshLoop();
 
       chromeApi.alarms.onAlarm.addListener(alarm => {
-        if (alarm.name === alarmName) runAutoWatcherOnce('alarm');
+        if (alarm.name === alarmName) runParallelPublisherDispatch('alarm').catch(() => {});
+        const lane = Object.keys(parallelAlarmNames).find(key => parallelAlarmNames[key] === alarm.name);
+        if (lane) runParallelLane(lane).catch(() => {});
       });
       // Badge no longer uses a periodic alarm (which woke the service worker every
       // minute even when idle). The badge is refreshed event-driven instead:
@@ -48,7 +206,7 @@
           state.lastStartupTime = Date.now();
           return saveWatcherState(state);
         }).catch(() => {});
-        refreshAutoWatcherAlarm(true, 'runtime_startup').catch(() => {});
+        refreshAllWatcherAlarms('runtime_startup').catch(() => {});
       });
 
       chromeApi.runtime.onInstalled.addListener(() => {
@@ -57,7 +215,7 @@
           state.lastStartupTime = Date.now();
           return saveWatcherState(state);
         }).catch(() => {});
-        refreshAutoWatcherAlarm(true, 'runtime_installed').catch(() => {});
+        refreshAllWatcherAlarms('runtime_installed').catch(() => {});
       });
 
       chromeApi.runtime.onSuspend.addListener(() => {
@@ -77,11 +235,14 @@
           if (changes.watcherEnabled && changes.watcherEnabled.newValue === true) {
             // PRIVATE_WATCHER_ONLY
             getWatcherState().then(state => {
-              if (state.cfChallengeStreak || state.pausedByCfChallenge || state.publisherCfChallengeStreak || state.pausedByPublisherCfChallenge) {
+              if (state.cfChallengeStreak || state.pausedByCfChallenge || state.publisherCfChallengeStreak || state.pausedByPublisherCfChallenge ||
+                  Object.keys(state.pausedPublisherLanes || {}).length) {
                 state.cfChallengeStreak = 0;
                 state.pausedByCfChallenge = false;
                 state.publisherCfChallengeStreak = 0;
                 state.pausedByPublisherCfChallenge = false;
+                state.publisherCfChallengeByPublisher = {};
+                state.pausedPublisherLanes = {};
                 return saveWatcherState(state);
               }
             }).catch(err => console.warn('[Ablesci PDF Watcher] Failed to reset CF streak on enable:', err));
@@ -89,6 +250,8 @@
 
           const SCHEDULE_AFFECTING_KEYS = [
             'watcherEnabled',
+            'watcherMultiPublisherEnabled',
+            'watcherListUrls',
             'watcherSpeedMode',
             'watcherMonthlyTarget',
             'watcherWorkdays',
@@ -115,7 +278,7 @@
               }).catch(() => {});
               return;
             }
-            refreshAutoWatcherAlarm(true, `storage_changed:${changedKeys}`).catch(() => {});
+            refreshAllWatcherAlarms(`storage_changed:${changedKeys}`).catch(() => {});
           }
         }
       });
@@ -123,7 +286,7 @@
       chromeApi.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg?.type === 'ablesciRunAutoWatcherNow') {
           const trigger = msg.trigger === 'alarm' ? 'alarm' : 'manual';
-          runAutoWatcherOnce(trigger)
+          runParallelPublisherDispatch(trigger)
             .then(sendResponse)
             .catch(err => sendResponse({ ok: false, reason: err?.message || String(err) }));
           return true;
@@ -153,7 +316,7 @@
         }
         if (msg?.type === 'ablesciClearAutoWatcherLogs') {
           Promise.all([clearBufferedWatcherLogs(), clearBufferedWatcherTrace()])
-            .then(() => chromeApi.storage.local.remove([autoWatcherLogKey, autoWatcherTraceKey, 'autoWatcherCandidateAudit', 'autoWatcherCandidateAuditIndex']))
+            .then(() => chromeApi.storage.local.remove([autoWatcherLogKey, autoWatcherTraceKey, 'autoWatcherAbnormalRecords', 'autoWatcherCandidateAudit', 'autoWatcherCandidateAuditIndex']))
             .then(() => sendResponse({ ok: true }));
           return true;
         }
@@ -162,7 +325,7 @@
 
       recoverStaleWatcherState('init').catch(() => {});
       trimStoredWatcherTraceLogs().catch(() => {});
-      refreshAutoWatcherAlarm(true, 'init').catch(() => {});
+      refreshAllWatcherAlarms('init').catch(() => {});
     }
 
     return { initAutoWatcher };

@@ -90,7 +90,11 @@
   }
 
   function hasRscAccessDeniedPage() {
-    return !!document.querySelector('.paywall__body, .paywall__container, .paywall__title, a[href*="/buyarticlepdf/"], .btn-icon--trolley');
+    if (document.querySelector('.paywall__body, .paywall__container, .paywall__title, a[href*="/buyarticlepdf/"], .btn-icon--trolley, .article-top-info-user-restricted-options')) {
+      return true;
+    }
+    const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ');
+    return /You do not currently have access to this content/i.test(text);
   }
 
   function hasRscNotFoundErrorPage() {
@@ -196,8 +200,8 @@
       sendRscMessage({
         articleUrl: location.href,
         accessDenied: true,
-        error: 'RSC 明确返回无正文订阅权限（Paywall）。',
-        source: 'rsc_paywall_page'
+        error: 'RSC 页面明确显示“You do not currently have access to this content”，已停止本次下载。',
+        source: 'rsc_access_denied_page'
       });
       stopObserver();
       return;

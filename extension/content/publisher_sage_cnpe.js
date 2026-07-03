@@ -7,6 +7,9 @@
   let settled = false;
   let observer = null;
   let stopTimer = null;
+  let blobCaptureInstalled = false;
+  let lastCapturedBlobUrl = '';
+  let downloadSequence = '';
 
   function stopObserver() {
     observer?.disconnect();
@@ -17,6 +20,32 @@
 
   function sendMessage(payload, onResponse) {
     common.sendPublisherMessage('cnpe', payload, onResponse);
+  }
+
+  function installBlobDownloadCapture() {
+    if (blobCaptureInstalled) return;
+    blobCaptureInstalled = true;
+    document.addEventListener('click', event => {
+      const anchor = event.target?.closest?.('a[download][href^="blob:"]');
+      if (!anchor) return;
+      const href = String(anchor.href || anchor.getAttribute('href') || '').trim();
+      if (!/^blob:https:\/\/sage\.cnpereading\.com\//i.test(href) || href === lastCapturedBlobUrl) return;
+      lastCapturedBlobUrl = href;
+      if (downloadSequence) {
+        const original = String(anchor.getAttribute('download') || 'paper.pdf').replace(/^\d{3}-/, '');
+        anchor.setAttribute('download', `${downloadSequence}-${original}`);
+      }
+      // The event is observed in the trusted publisher tab before Chrome emits
+      // downloads.onCreated. Do not cancel the site's click; the exact Blob UUID
+      // is only used as a task ownership token by the background listener.
+      sendMessage({
+        articleUrl: location.href,
+        pdfUrl: href,
+        clicked: true,
+        blobCaptured: true,
+        source: 'sage_cnpe_blob_download_capture'
+      });
+    }, true);
   }
 
   function pageText() {
@@ -78,6 +107,7 @@
         console.warn('[Ablesci PDF Watcher] SAGE domestic PDF listener was not armed', runtimeError || response);
         return;
       }
+      downloadSequence = String(response.downloadSequence || '').trim();
       setTimeout(() => button.click(), 0);
       stopObserver();
     });
@@ -124,6 +154,7 @@
 
   function start(timeoutMs = 120000) {
     if (location.hostname.toLowerCase() !== 'sage.cnpereading.com') return;
+    installBlobDownloadCapture();
     inspectPage();
     observer = new MutationObserver(() => inspectPage());
     observer.observe(document.documentElement, { childList: true, subtree: true });

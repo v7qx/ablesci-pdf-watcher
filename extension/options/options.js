@@ -308,6 +308,7 @@ const {
   importJournalAccessCache,
   clearJournalAccessCache,
   simulateAssist,
+  simulateConcurrentAssists,
   handleDocumentCopy,
   handleWindowBlur
 } = createOptionsActionsApi({
@@ -381,4 +382,5 @@ el('exportJournalAccessCache')?.addEventListener('click', exportJournalAccessCac
 el('importJournalAccessCache')?.addEventListener('click', importJournalAccessCache);
 el('clearJournalAccessCache')?.addEventListener('click', clearJournalAccessCache);
 el('btnDebugSimulate')?.addEventListener('click', simulateAssist);
+el('btnDebugSimulateBatch')?.addEventListener('click', simulateConcurrentAssists);
 el('watcherPublisherGenerate')?.addEventListener('click', generateListUrlsFromPublishers);

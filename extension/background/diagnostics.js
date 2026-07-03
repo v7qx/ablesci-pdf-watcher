@@ -189,7 +189,7 @@
         };
         const last = trace[trace.length - 1];
         if (last && last._signature && last._signature === traceSignature(next)) {
-          last.time = next.time;
+          Object.assign(last, Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined && value !== '')));
           last.repeatCount = Number(last.repeatCount || 1) + 1;
         } else {
           trace.push({

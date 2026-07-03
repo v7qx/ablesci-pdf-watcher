@@ -89,6 +89,9 @@ type Response struct {
 	CleanPageCount     int      `json:"clean_page_count,omitempty"`
 	CleanBackupPath    string   `json:"clean_backup_path,omitempty"`
 	CleanBackupCreated bool     `json:"clean_backup_created,omitempty"`
+	Text               string   `json:"text,omitempty"`
+	TextSource         string   `json:"text_source,omitempty"`
+	DocumentTitle      string   `json:"document_title,omitempty"`
 }
 
 func isTerminal() bool {
@@ -141,6 +144,8 @@ func run() error {
 		return writeResponse(Response{OK: true, Action: "pong"})
 	case "stat_pdf":
 		return handleStatPDF(req)
+	case "extract_first_page_text":
+		return handleExtractFirstPageText(req)
 	case "clean_pdf":
 		return handleCleanPDF(req)
 	case "upload_oss":
@@ -160,6 +165,126 @@ func run() error {
 	default:
 		return fmt.Errorf("unknown action: %s", req.Action)
 	}
+}
+
+func resolveCleanerPath(raw string) string {
+	if raw != "" {
+		p, _ := cleanCleanerExecutablePath(raw)
+		return p
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exePath)
+	for _, name := range []string{"zotero-pdf-toolbox.exe", "zotero-access-cleaner.exe"} {
+		if p, err := cleanCleanerExecutablePath(filepath.Join(dir, name)); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func findPDFToText(cleanerPath string) string {
+	candidates := []string{}
+	if cleanerPath != "" {
+		dir := filepath.Dir(cleanerPath)
+		candidates = append(candidates,
+			filepath.Join(dir, "tools", "poppler", "poppler-24.08.0", "Library", "bin", "pdftotext.exe"),
+			filepath.Join(dir, "tools", "poppler", "Library", "bin", "pdftotext.exe"),
+			filepath.Join(dir, "poppler", "Library", "bin", "pdftotext.exe"),
+			filepath.Join(dir, "poppler", "bin", "pdftotext.exe"),
+			filepath.Join(dir, "pdftotext.exe"),
+		)
+	}
+	for _, candidate := range candidates {
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	if path, err := exec.LookPath("pdftotext"); err == nil {
+		return path
+	}
+	return ""
+}
+
+func extractPDFInfoTitle(pdfToTextPath, pdfPath string) string {
+	tool := filepath.Join(filepath.Dir(pdfToTextPath), "pdfinfo.exe")
+	if !fileExists(tool) {
+		if path, err := exec.LookPath("pdfinfo"); err == nil {
+			tool = path
+		} else {
+			return ""
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tool, "-enc", "UTF-8", pdfPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
+	stdout := &cappedBuffer{max: 16 * 1024}
+	cmd.Stdout = stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "title:") {
+			return strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
+		}
+	}
+	return ""
+}
+
+type cappedBuffer struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *cappedBuffer) Write(p []byte) (int, error) {
+	originalLen := len(p)
+	remaining := w.max - w.buf.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = w.buf.Write(p)
+	}
+	return originalLen, nil
+}
+
+func (w *cappedBuffer) String() string { return w.buf.String() }
+
+func handleExtractFirstPageText(req Request) error {
+	path, err := cleanExistingPath(req.Path)
+	if err != nil {
+		return err
+	}
+	if err := ensureAllowedPDFPath(path); err != nil {
+		return err
+	}
+	if _, _, err := inspectPDF(path); err != nil {
+		return err
+	}
+	tool := findPDFToText(resolveCleanerPath(req.Extra["cleaner_path"]))
+	if tool == "" {
+		return errors.New("pdftotext not found")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tool, "-f", "1", "-l", "1", "-layout", "-enc", "UTF-8", path, "-")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
+	stdout := &cappedBuffer{max: 64 * 1024}
+	stderr := &cappedBuffer{max: 8 * 1024}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return errors.New("pdftotext timeout")
+		}
+		return fmt.Errorf("pdftotext failed: %s", strings.TrimSpace(stderr.String()))
+	}
+	text := strings.TrimSpace(stdout.String())
+	documentTitle := extractPDFInfoTitle(tool, path)
+	return writeResponse(Response{OK: true, Action: "extract_first_page_text", Text: text, TextSource: "pdftotext_first_page", DocumentTitle: documentTitle})
 }
 
 func readRequest() (Request, error) {

@@ -23,6 +23,9 @@
     buttonTextColor: '#ffffff',
     buttonPosition: 'start',
     watcherEnabled: false,
+    // Optional single-profile dispatcher. Disabled by default so existing
+    // single-random scheduling remains unchanged until explicitly enabled.
+    watcherMultiPublisherEnabled: false,
     // LOCKED: scheduler identity is force-set in normalizeOptions; kept here only
     // so storage has a value. The name 'quant' is historical. The interval itself
     // is now a uniform random sample around a speed-tier median (watcher/
@@ -192,6 +195,7 @@
       buttonPosition: 'start',
       hideScienceDirectNoAccessRows: opts.hideScienceDirectNoAccessRows === true,
       watcherSchedulerMode: schedulerMode,
+      watcherMultiPublisherEnabled: opts.watcherMultiPublisherEnabled === true,
       watcherSpeedMode: speedMode,
       ...intervals,
       watcherMaxCandidatesPerRun: 1,

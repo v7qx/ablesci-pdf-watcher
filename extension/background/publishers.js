@@ -100,8 +100,12 @@
   }
 
   function isAcsBookUrl(url) {
-    // ACS 整本书 / In Focus 电子书的总览页：/doi/book/10.1021/...，只提供预览样章，无法整本自动应助。
-    return /:\/\/pubs\.acs\.org\/doi\/book\//i.test(String(url || ''));
+    const value = String(url || '');
+    // Covers whole-book pages and ACS Symposium Series/book chapters such as
+    // /doi/abs/10.1021/bk-2023-1453.ch004.
+    return /:\/\/pubs\.acs\.org\/doi\/book\//i.test(value) ||
+      /:\/\/pubs\.acs\.org\/doi\/(?:abs\/|full\/|pdf\/|pdfdirect\/)?10\.1021\/bk-/i.test(value) ||
+      /:\/\/pubs\.acs\.org\/doi\/10\.1021\/bk-/i.test(value);
   }
 
   function isIeeeUrl(url) {
@@ -202,7 +206,19 @@
     } catch (_) {
       return null;
     }
-    if (!/^https?:$/i.test(u.protocol) || isDoiHost(u.hostname)) return null;
+    if (!/^https?:$/i.test(u.protocol)) return null;
+    if (isDoiHost(u.hostname)) {
+      let doiPath = '';
+      try { doiPath = decodeURIComponent(u.pathname || ''); } catch (_) { doiPath = u.pathname || ''; }
+      if (/^\/10\.1021\/bk-/i.test(doiPath)) {
+        return {
+          skip: true,
+          type: 'acs_book_chapter_doi',
+          reason: 'ACS book or Symposium Series chapter DOI is outside journal article scope'
+        };
+      }
+      return null;
+    }
 
     const sage = classifySageKnowledgeUrl(u.href);
     if (sage?.skip) return sage;
@@ -218,8 +234,8 @@
     if (isAcsBookUrl(u.href)) {
       return {
         skip: true,
-        type: 'acs_book_overview',
-        reason: 'ACS book overview page is outside current journal article resolver scope'
+        type: 'acs_book_or_chapter',
+        reason: 'ACS book or Symposium Series chapter is outside current journal article resolver scope'
       };
     }
 
@@ -327,6 +343,13 @@
     { hosts: ['computer.org', 'publications.computer.org'], platform: 'IEEE Computer Society CSDL' }
   ];
 
+  const PUBLISHER_REDIRECT_INTERMEDIARY_ALLOWLIST = {
+    // RSC DOI navigation can briefly visit its identity/access gateway before
+    // returning to pubs.rsc.org. This host is navigation-only: it is not added
+    // to PDF/download host matching and cannot make a download acceptable.
+    rsc: ['id.rsc.org', 'sso.rsc.org']
+  };
+
   function publisherForDoi(value) {
     const text = String(value || '').trim();
     const doiMatch = decodeURIComponent(text).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
@@ -375,6 +398,10 @@
       return { ok: false, status: 'skipped', reason: 'invalid_landing_url', publisher: key, doi: doi || '', finalUrl: finalUrl || '', host };
     }
     if (isDoiHost(host)) {
+      return { ok: true, status: 'pending_redirect', publisher: key, doi: doi || '', finalUrl, host };
+    }
+    const redirectHosts = PUBLISHER_REDIRECT_INTERMEDIARY_ALLOWLIST[key] || [];
+    if (redirectHosts.some(allowedHost => hostMatchesAllowedHost(host, allowedHost))) {
       return { ok: true, status: 'pending_redirect', publisher: key, doi: doi || '', finalUrl, host };
     }
     if (isAllowedLandingForPublisher(key, finalUrl)) {

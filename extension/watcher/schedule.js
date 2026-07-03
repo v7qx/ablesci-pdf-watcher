@@ -255,7 +255,9 @@
       const delay = randomIntervalMinutes(opts, state);
       state.nextScheduledAt = Date.now() + delay * 60 * 1000;
       state.currentSchedulerMode = opts.watcherSchedulerMode;
-      state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
+      state.currentExecutionModel = opts.watcherMultiPublisherEnabled
+        ? 'multi_publisher_random_interval'
+        : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
       state.lastAlarmRefreshReason = reason;
       if (calculateTargetState) {
         const targetState = calculateTargetState(state, opts);

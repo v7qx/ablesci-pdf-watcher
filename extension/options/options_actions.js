@@ -23,6 +23,8 @@
 
     let currentSimulatePort = null;
     let currentSimulateTabId = null;
+    const concurrentSimulatePorts = new Set();
+    const concurrentSimulateTabs = new Set();
     let lastJournalAccessSummary = null;
 
     function showText(id, msg, isErr) {
@@ -695,10 +697,8 @@
           };
         }
 
-        if (currentSimulateTabId) {
-          try { await chromeApi.tabs.remove(currentSimulateTabId); } catch (_) {}
-          currentSimulateTabId = null;
-        }
+        const simulateDetailTabId = currentSimulateTabId;
+        currentSimulateTabId = null;
         appendSimulateLog('progress', '正在连接插件后台任务队列...');
         const port = chromeApi.runtime.connect({ name: 'ablesci-pdf-upload' });
         currentSimulatePort = port;
@@ -713,6 +713,9 @@
 
         port.onMessage.addListener(msg => {
           if (!msg) return;
+          if (Number.isInteger(simulateDetailTabId)) {
+            chromeApi.tabs.sendMessage(simulateDetailTabId, { type: 'ablesciAutoWatcherProgress', msg }).catch(() => {});
+          }
           if (msg.type === 'progress') {
             appendSimulateLog('progress', msg.message || '');
           } else if (msg.type === 'done') {
@@ -783,6 +786,152 @@
       }
     }
 
+    function debugPublisherForPayload(payload = {}) {
+      const doi = String(payload.doi || '').toLowerCase();
+      if (/^10\.1016\//.test(doi)) return 'elsevier';
+      if (/^10\.1039\//.test(doi)) return 'rsc';
+      if (/^10\.1007\//.test(doi)) return 'springer';
+      if (/^10\.1002\//.test(doi)) return 'wiley';
+      if (/^10\.1021\//.test(doi)) return 'acs';
+      if (/^10\.1109\//.test(doi)) return 'ieee';
+      if (/^10\.1093\//.test(doi)) return 'oxford';
+      if (/^10\.1063\//.test(doi)) return 'aip';
+      if (/^10\.1088\//.test(doi)) return 'iop';
+      if (/^10\.1177\//.test(doi)) return 'sage';
+      if (/^10\.1038\//.test(doi)) return 'nature';
+      return String(payload.publisherName || 'other').trim().toLowerCase() || 'other';
+    }
+
+    async function extractConcurrentSimulationPayload(detailUrl, index, appendLog) {
+      const tab = await chromeApi.tabs.create({ url: detailUrl, active: false });
+      concurrentSimulateTabs.add(tab.id);
+      try {
+        await new Promise((resolve, reject) => {
+          let settled = false;
+          const timer = setTimeout(() => finish(new Error(`[${index}] 求助详情页加载超时`)), 45000);
+          function finish(err) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            chromeApi.tabs.onUpdated.removeListener(updated);
+            chromeApi.tabs.onRemoved.removeListener(removed);
+            err ? reject(err) : resolve();
+          }
+          function updated(tabId, changeInfo) {
+            if (tabId === tab.id && changeInfo.status === 'complete') finish();
+          }
+          function removed(tabId) {
+            if (tabId === tab.id) finish(new Error(`[${index}] 求助详情页标签已关闭`));
+          }
+          chromeApi.tabs.onUpdated.addListener(updated);
+          chromeApi.tabs.onRemoved.addListener(removed);
+          chromeApi.tabs.get(tab.id).then(current => {
+            if (current.status === 'complete') finish();
+          }).catch(finish);
+        });
+        let response = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            response = await chromeApi.tabs.sendMessage(tab.id, { type: 'ablesciExtractDetailPayload', debugSimulation: true });
+            if (response) break;
+          } catch (_) {}
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        if (!response?.ok) throw new Error(response?.error || `[${index}] 详情页信息采集失败`);
+        const payload = {
+          ...response.payload,
+          downloadOnly: true,
+          debugSimulation: true,
+          watcherMultiPublisherEnabled: true,
+          triggeredBy: 'auto_watcher'
+        };
+        payload.watcherPublisher = debugPublisherForPayload(payload);
+        appendLog('done', `[${index}] 采集完成：${payload.watcherPublisher.toUpperCase()} / ID=${payload.assistId || '-'} / DOI=${payload.doi || '-'}`);
+        return { payload, detailTabId: tab.id };
+      } catch (err) {
+        concurrentSimulateTabs.delete(tab.id);
+        await chromeApi.tabs.remove(tab.id).catch(() => {});
+        throw err;
+      }
+    }
+
+    async function simulateConcurrentAssists() {
+      const input = el('debugBatchAssistInput');
+      const btn = el('btnDebugSimulateBatch');
+      const logContainer = el('debugLogContainer');
+      if (!input || !btn || !logContainer) return;
+      const appendLog = (type, text) => {
+        const line = document.createElement('div');
+        line.textContent = `${type === 'error' ? '❌' : type === 'done' ? '✅' : '🔄'} ${text}`;
+        line.style.marginBottom = '6px';
+        line.style.color = type === 'error' ? '#b91c1c' : type === 'done' ? '#15803d' : '#0284c7';
+        logContainer.appendChild(line);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      };
+      if (btn.textContent === '停止并发模拟') {
+        for (const port of concurrentSimulatePorts) try { port.disconnect(); } catch (_) {}
+        for (const tabId of concurrentSimulateTabs) await chromeApi.tabs.remove(tabId).catch(() => {});
+        concurrentSimulatePorts.clear();
+        concurrentSimulateTabs.clear();
+        btn.textContent = '三任务模拟';
+        appendLog('error', '已停止并发模拟。');
+        return;
+      }
+      const urls = String(input.value || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+      if (!urls.length || urls.length > 3) {
+        alert('请输入 1–3 个求助详情链接，每行一个。');
+        return;
+      }
+      if (urls.some(value => {
+        try {
+          const url = new URL(value);
+          return !/(^|\.)ablesci\.com$/i.test(url.hostname) || !/^\/assist\/detail\/?$/i.test(url.pathname) || !url.searchParams.get('id');
+        } catch (_) { return true; }
+      })) {
+        alert('并发模拟只接受完整的 Ablesci 求助详情链接。');
+        return;
+      }
+      btn.textContent = '停止并发模拟';
+      logContainer.innerHTML = '';
+      logContainer.style.display = 'block';
+      try {
+        const payloads = [];
+        for (let i = 0; i < urls.length; i += 1) {
+          appendLog('progress', `[${i + 1}] 正在串行采集求助详情…`);
+          payloads.push(await extractConcurrentSimulationPayload(urls[i], i + 1, appendLog));
+        }
+        appendLog('progress', `已采集 ${payloads.length} 个任务，开始进入真实并发下载队列；始终不会上传。`);
+        let finished = 0;
+        payloads.forEach((entry, offset) => {
+          const index = offset + 1;
+          const { payload, detailTabId } = entry;
+          const port = chromeApi.runtime.connect({ name: 'ablesci-pdf-upload' });
+          concurrentSimulatePorts.add(port);
+          port.onMessage.addListener(msg => {
+            chromeApi.tabs.sendMessage(detailTabId, { type: 'ablesciAutoWatcherProgress', msg }).catch(() => {});
+            if (msg?.type === 'progress') appendLog('progress', `[${index}] ${msg.message || ''}`);
+            if (msg?.type === 'done' || msg?.type === 'error') {
+              const detail = [msg.message || '', msg.filename ? `文件=${msg.filename}` : '', msg.md5 ? `MD5=${msg.md5}` : ''].filter(Boolean).join('；');
+              appendLog(msg.type === 'done' ? 'done' : 'error', `[${index}] ${detail}`);
+              concurrentSimulatePorts.delete(port);
+              concurrentSimulateTabs.delete(detailTabId);
+              finished += 1;
+              try { port.disconnect(); } catch (_) {}
+              if (finished === payloads.length) {
+                btn.textContent = '三任务模拟';
+                appendLog('done', '全部并发模拟任务结束。请按编号核对 DOI、文件名、MD5和完成顺序。');
+              }
+            }
+          });
+          port.onDisconnect.addListener(() => concurrentSimulatePorts.delete(port));
+          port.postMessage({ type: 'startUpload', payload });
+        });
+      } catch (err) {
+        appendLog('error', err.message || String(err));
+        btn.textContent = '三任务模拟';
+      }
+    }
+
     function handleDocumentCopy(event) {
       const active = document.activeElement;
       const tag = String(active?.tagName || '').toLowerCase();
@@ -823,6 +972,7 @@
       importJournalAccessCache,
       clearJournalAccessCache,
       simulateAssist,
+      simulateConcurrentAssists,
       handleDocumentCopy,
       handleWindowBlur
     };

@@ -65,7 +65,12 @@
     }
 
     function nextDisplaySchedule(state = {}) {
-      const assistAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
+      const laneTimes = Object.values(state.parallelLaneSchedules || {})
+        .map(item => Number(item?.scheduledAt || 0))
+        .filter(value => Number.isFinite(value) && value > 0);
+      const assistAt = laneTimes.length
+        ? Math.min(...laneTimes)
+        : (state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '');
       return {
         nextRunAt: assistAt,
         assistCountdownAt: assistAt

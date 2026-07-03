@@ -1,6 +1,7 @@
 'use strict';
 
-// Serial upload task queue and port lifecycle handling.
+// Bounded upload task queue and port lifecycle handling. Legacy/manual tasks
+// stay serial; opt-in watcher tasks use one Elsevier slot plus two shared slots.
 (function initBackgroundUploadQueue(globalThis) {
   function createBackgroundUploadQueueApi(deps = {}) {
     const {
@@ -28,7 +29,7 @@
     } = deps;
 
     let taskQueue = [];
-    let activeTask = null;
+    const activeTasks = new Map();
     let nextTaskId = 1;
 
     // PRIVATE_WATCHER_ONLY
@@ -71,7 +72,9 @@
     function findDuplicateTask(payload) {
       const key = taskDedupeKey(payload);
       if (!key) return null;
-      if (activeTask && !activeTask.cancelled && activeTask.dedupeKey === key) return activeTask;
+      for (const activeTask of activeTasks.values()) {
+        if (!activeTask.cancelled && activeTask.dedupeKey === key) return activeTask;
+      }
       return taskQueue.find(task => task && !task.cancelled && task.dedupeKey === key) || null;
     }
 
@@ -87,19 +90,60 @@
       task.silentCancel = options.silent === true;
       removeQueuedTask(task);
       clearUploadTaskSnapshot(task).catch(() => {});
-      if (activeTask === task && task.abortController) {
+      if (activeTasks.has(task.id) && task.abortController) {
         try { task.abortController.abort(task.cancelReason); } catch (_) {}
       }
       cleanupOrphanPublisherTabs('task_cancelled').catch(() => {});
     }
 
-    function processQueue() {
-      if (activeTask) return;
-      while (taskQueue.length && taskQueue[0].cancelled) taskQueue.shift();
-      const task = taskQueue.shift();
-      if (!task) return;
+    function publisherKey(payload = {}) {
+      const explicit = String(payload.watcherPublisher || '').trim().toLowerCase();
+      if (explicit) return explicit;
+      try {
+        return String(new URL(payload.listUrl || '').searchParams.get('publisher') || '').trim().toLowerCase();
+      } catch (_) {
+        return '';
+      }
+    }
 
-      activeTask = task;
+    function canStartTask(task) {
+      if (!task || task.cancelled) return false;
+      const active = Array.from(activeTasks.values());
+      if (!task.parallel) return active.length === 0;
+      if (active.some(item => !item.parallel)) return false;
+      if (active.length >= 3) return false;
+      if (task.publisher && active.some(item => item.publisher === task.publisher)) return false;
+      const elsevier = task.publisher === 'elsevier';
+      if (elsevier) return !active.some(item => item.publisher === 'elsevier');
+      return active.filter(item => item.publisher !== 'elsevier').length < 2;
+    }
+
+    function nextStartableTask() {
+      while (taskQueue.length && taskQueue[0].cancelled) taskQueue.shift();
+      const index = taskQueue.findIndex(canStartTask);
+      if (index < 0) return null;
+      return taskQueue.splice(index, 1)[0];
+    }
+
+    function processQueue() {
+      let task = nextStartableTask();
+      while (task) {
+        startTask(task);
+        task = nextStartableTask();
+      }
+    }
+
+    function startTask(task) {
+      activeTasks.set(task.id, task);
+      task.payload.backgroundTaskId = task.id;
+      task.payload.queueStartedAt = new Date().toISOString();
+      const active = Array.from(activeTasks.values());
+      for (const current of active) {
+        current.payload.concurrentPeerAssistIds = active
+          .filter(other => other.id !== current.id)
+          .map(other => String(other.payload?.assistId || ''))
+          .filter(Boolean);
+      }
       const { port, payload, label, abortController } = task;
 
       (async () => {
@@ -281,7 +325,7 @@
         } finally {
           if (taskTimer) clearTimeout(taskTimer);
           await clearUploadTaskSnapshot(task);
-          if (activeTask === task) activeTask = null;
+          activeTasks.delete(task.id);
           cleanupOrphanPublisherTabs('task_finished').catch(() => {});
           processQueue();
         }
@@ -307,7 +351,7 @@
           skipped: true,
           skipReason: 'duplicate_enqueue_prevented'
         });
-        return;
+        return { accepted: false, reason: 'duplicate_enqueue_prevented', taskId: duplicate.id };
       }
       const task = {
         id: nextTaskId++,
@@ -320,8 +364,10 @@
         cancelReason: '',
         abortController: new AbortController()
       };
+      task.parallel = payload?.watcherMultiPublisherEnabled === true && payload?.triggeredBy === 'auto_watcher';
+      task.publisher = publisherKey(payload);
 
-      const hadActiveOrQueued = !!activeTask || taskQueue.length > 0;
+      const hadActiveOrQueued = activeTasks.size > 0 || taskQueue.length > 0;
       if (hadActiveOrQueued) {
         post(port, 'progress', '已排队：等待当前 PDF 任务完成；关闭本页可取消。');
       }
@@ -333,6 +379,7 @@
 
       taskQueue.push(task);
       processQueue();
+      return { accepted: true, taskId: task.id, publisher: task.publisher };
     }
 
     return {
@@ -340,7 +387,13 @@
       processQueue,
       cancelTask,
       hasActiveTask() {
-        return !!activeTask || taskQueue.length > 0;
+        return activeTasks.size > 0 || taskQueue.length > 0;
+      },
+      hasPublisherTask(publisher) {
+        const key = String(publisher || '').trim().toLowerCase();
+        if (!key) return false;
+        return Array.from(activeTasks.values()).some(task => task.publisher === key) ||
+          taskQueue.some(task => !task.cancelled && task.publisher === key);
       }
     };
   }

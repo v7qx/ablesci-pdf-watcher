@@ -28,7 +28,7 @@
       }
     }
 
-    async function recordPublisherCfChallenge(pageUrl = '') {
+    async function recordPublisherCfChallenge(pageUrl = '', publisher = '') {
       // PRIVATE_WATCHER_ONLY
       const opts = await getOptions();
       if (opts.watcherStopOnCfChallenge === false) {
@@ -37,15 +37,29 @@
       const stored = await chromeApi.storage.local.get([AUTO_WATCHER_STATE_KEY, 'watcherEnabled']);
       const state = stored[AUTO_WATCHER_STATE_KEY] || {};
       const threshold = Math.max(1, Number(opts.watcherCfPauseThreshold || defaultOptions.watcherCfPauseThreshold || 3));
-      state.publisherCfChallengeStreak = Number(state.publisherCfChallengeStreak || 0) + 1;
-      const reached = opts.watcherAdvancedSchedulerEnabled === true || state.publisherCfChallengeStreak >= threshold;
+      const publisherKey = String(publisher || '').trim().toLowerCase();
+      const isolated = opts.watcherMultiPublisherEnabled === true && !!publisherKey;
+      state.publisherCfChallengeByPublisher = state.publisherCfChallengeByPublisher && typeof state.publisherCfChallengeByPublisher === 'object'
+        ? state.publisherCfChallengeByPublisher
+        : {};
+      const streak = isolated
+        ? Number(state.publisherCfChallengeByPublisher[publisherKey] || 0) + 1
+        : Number(state.publisherCfChallengeStreak || 0) + 1;
+      if (isolated) state.publisherCfChallengeByPublisher[publisherKey] = streak;
+      else state.publisherCfChallengeStreak = streak;
+      const reached = opts.watcherAdvancedSchedulerEnabled === true || streak >= threshold;
       if (reached) {
-        state.pausedByPublisherCfChallenge = true;
-        await chromeApi.storage.local.set({
-          watcherEnabled: false,
-          [AUTO_WATCHER_STATE_KEY]: state
-        });
-        await chromeApi.alarms.clear('ablesciAutoWatcher');
+        if (isolated) {
+          state.pausedPublisherLanes = state.pausedPublisherLanes && typeof state.pausedPublisherLanes === 'object'
+            ? state.pausedPublisherLanes
+            : {};
+          state.pausedPublisherLanes[publisherKey] = true;
+          await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+        } else {
+          state.pausedByPublisherCfChallenge = true;
+          await chromeApi.storage.local.set({ watcherEnabled: false, [AUTO_WATCHER_STATE_KEY]: state });
+          await chromeApi.alarms.clear('ablesciAutoWatcher');
+        }
       } else {
         await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
       }
@@ -53,24 +67,33 @@
       let notified = false;
       if (opts.watcherCfNotificationEnabled !== false) {
         const message = reached
-          ? `连续 ${state.publisherCfChallengeStreak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`
-          : `检测到出版商验证页（第 ${state.publisherCfChallengeStreak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
+          ? (isolated
+              ? `${publisherKey} 连续 ${streak} 次遇到出版商验证页，已暂停该出版社通道。`
+              : `连续 ${streak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`)
+          : `检测到出版商验证页（第 ${streak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
         await notifyAccessEnvironmentAnomaly(message);
         notified = true;
       }
       return {
         paused: reached,
-        streak: state.publisherCfChallengeStreak,
+        streak,
         threshold,
         notified,
         pageUrl: urlHostPath(pageUrl || '')
       };
     }
 
-    async function clearPublisherCfChallengeState() {
+    async function clearPublisherCfChallengeState(publisher = '') {
       // PRIVATE_WATCHER_ONLY
       const stored = await chromeApi.storage.local.get(AUTO_WATCHER_STATE_KEY);
       const state = stored[AUTO_WATCHER_STATE_KEY] || {};
+      const publisherKey = String(publisher || '').trim().toLowerCase();
+      if (publisherKey && state.publisherCfChallengeByPublisher) {
+        delete state.publisherCfChallengeByPublisher[publisherKey];
+        if (state.pausedPublisherLanes) delete state.pausedPublisherLanes[publisherKey];
+        await chromeApi.storage.local.set({ [AUTO_WATCHER_STATE_KEY]: state });
+        return;
+      }
       if (!state.publisherCfChallengeStreak && !state.pausedByPublisherCfChallenge) return;
       state.publisherCfChallengeStreak = 0;
       state.pausedByPublisherCfChallenge = false;

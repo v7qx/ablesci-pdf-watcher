@@ -9,6 +9,13 @@
       maskId,
       saveDiagnostic
     } = deps;
+    let snapshotMutation = Promise.resolve();
+
+    function serializeSnapshotMutation(operation) {
+      const next = snapshotMutation.then(operation, operation);
+      snapshotMutation = next.catch(() => {});
+      return next;
+    }
 
     function compactTaskSnapshot(task, status = 'running') {
       const payload = task?.payload || {};
@@ -24,42 +31,76 @@
 
     async function saveUploadTaskSnapshot(task, status = 'running') {
       if (!task) return;
-      await chromeApi.storage.local.set({ [uploadTaskSnapshotKey]: compactTaskSnapshot(task, status) });
+      return serializeSnapshotMutation(async () => {
+        const stored = await chromeApi.storage.local.get(uploadTaskSnapshotKey);
+        const current = stored[uploadTaskSnapshotKey];
+        const tasks = current && current.tasks && typeof current.tasks === 'object'
+          ? { ...current.tasks }
+          : {};
+        tasks[String(task.id)] = compactTaskSnapshot(task, status);
+        await chromeApi.storage.local.set({
+          [uploadTaskSnapshotKey]: { version: 2, tasks }
+        });
+      });
     }
 
     async function clearUploadTaskSnapshot(task = null) {
-      try {
-        if (task) {
+      return serializeSnapshotMutation(async () => {
+        try {
           const stored = await chromeApi.storage.local.get(uploadTaskSnapshotKey);
           const current = stored[uploadTaskSnapshotKey] || {};
-          if (current.taskId && Number(current.taskId) !== Number(task.id)) return;
-        }
-        await chromeApi.storage.local.remove(uploadTaskSnapshotKey);
-      } catch (_) {}
+          if (!task) {
+            await chromeApi.storage.local.remove(uploadTaskSnapshotKey);
+            return;
+          }
+          if (current.tasks && typeof current.tasks === 'object') {
+            const tasks = { ...current.tasks };
+            delete tasks[String(task.id)];
+            if (Object.keys(tasks).length) {
+              await chromeApi.storage.local.set({ [uploadTaskSnapshotKey]: { version: 2, tasks } });
+            } else {
+              await chromeApi.storage.local.remove(uploadTaskSnapshotKey);
+            }
+            return;
+          }
+          if (!current.taskId || Number(current.taskId) === Number(task.id)) {
+            await chromeApi.storage.local.remove(uploadTaskSnapshotKey);
+          }
+        } catch (_) {}
+      });
     }
 
     async function recoverUploadTaskSnapshot(reason = 'service_worker_init') {
       const stored = await chromeApi.storage.local.get(uploadTaskSnapshotKey);
       const snapshot = stored[uploadTaskSnapshotKey];
       if (!snapshot || typeof snapshot !== 'object') return;
-      if (snapshot.status === 'recovered_cancelled') return;
-      await chromeApi.storage.local.set({
-        [uploadTaskSnapshotKey]: {
-          ...snapshot,
+      const staleTasks = snapshot.tasks && typeof snapshot.tasks === 'object'
+        ? Object.values(snapshot.tasks)
+        : [snapshot];
+      const recoveredTasks = {};
+      for (const stale of staleTasks) {
+        if (!stale || stale.status === 'recovered_cancelled') continue;
+        const recovered = {
+          ...stale,
           status: 'recovered_cancelled',
           recoveredAt: new Date().toISOString(),
           recoveryReason: reason
-        }
+        };
+        recoveredTasks[String(stale.taskId || Object.keys(recoveredTasks).length + 1)] = recovered;
+        await saveDiagnostic({
+          time: new Date().toISOString(),
+          stage: 'recovered-cancelled',
+          assistId: stale.assistId ? maskId(stale.assistId) : '',
+          detailUrlHostPath: stale.detailUrl || null,
+          journalName: stale.journalName || '',
+          error: 'service worker restarted; stale upload task was cancelled'
+        }).catch(() => {});
+      }
+      if (!Object.keys(recoveredTasks).length) return;
+      await chromeApi.storage.local.set({
+        [uploadTaskSnapshotKey]: { version: 2, tasks: recoveredTasks }
       });
-      await saveDiagnostic({
-        time: new Date().toISOString(),
-        stage: 'recovered-cancelled',
-        assistId: snapshot.assistId ? maskId(snapshot.assistId) : '',
-        detailUrlHostPath: snapshot.detailUrl || null,
-        journalName: snapshot.journalName || '',
-        error: 'service worker restarted; stale upload task was cancelled'
-      }).catch(() => {});
-      console.warn('[Ablesci PDF Watcher] recovered stale upload task snapshot', { taskId: snapshot.taskId, reason });
+      console.warn('[Ablesci PDF Watcher] recovered stale upload task snapshots', { count: Object.keys(recoveredTasks).length, reason });
     }
 
     return {

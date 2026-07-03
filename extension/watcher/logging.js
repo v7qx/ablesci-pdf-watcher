@@ -15,6 +15,7 @@
       sanitizeReportUrl,
       autoWatcherLogKey,
       autoWatcherTraceKey,
+      autoWatcherAbnormalKey,
       maxLogs,
       maxTraceLogs,
       traceFlushIntervalMs,
@@ -36,8 +37,20 @@
     let cachedPerfTraceEnabled = false;
     let perfOptionsLoadedAt = 0;
 
+    function isPersistentAbnormalLog(entry) {
+      const titleStatus = String(entry?.titleValidation?.status || '');
+      if (titleStatus && titleStatus !== 'matched') return true;
+      const reason = [entry?.reason || '', ...(Array.isArray(entry?.riskReasons) ? entry.riskReasons : [])].join(' ').toLowerCase();
+      return /doi_not_found|doi_resolution_failed|doi not found|doi resolution failed|invalid doi|doi 解析失败|doi 不存在|doi未找到|doi 未找到|pdf 文件小于|pdf 文件大于|smaller than|larger than/.test(reason);
+    }
+
     function nextDisplaySchedule(state = {}, opts = null) {
-      const unifiedAt = state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '';
+      const laneTimes = Object.values(state.parallelLaneSchedules || {})
+        .map(item => Number(item?.scheduledAt || 0))
+        .filter(value => Number.isFinite(value) && value > 0);
+      const unifiedAt = opts?.watcherMultiPublisherEnabled && laneTimes.length
+        ? Math.min(...laneTimes)
+        : (state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '');
       return {
         kind: 'run',
         time: unifiedAt,
@@ -256,7 +269,20 @@
           trigger: normalizeText(entry.trigger || '').slice(0, 60),
           sessionId: normalizeText(entry.sessionId || '').slice(0, 60),
           status: String(entry.status || 'unknown').slice(0, 20),
-          reason: normalizeText(entry.reason || '').slice(0, 200)
+          reason: normalizeText(entry.reason || '').slice(0, 500),
+          riskReasons: Array.isArray(entry.riskReasons) ? entry.riskReasons.map(value => normalizeText(value).slice(0, 500)).slice(0, 10) : [],
+          backgroundTaskId: normalizeText(entry.backgroundTaskId || '').slice(0, 120),
+          watcherPublisher: normalizeText(entry.watcherPublisher || '').slice(0, 120),
+          watcherLane: normalizeText(entry.watcherLane || '').slice(0, 60),
+          queueStartedAt: String(entry.queueStartedAt || '').slice(0, 60),
+          concurrentPeerAssistIds: Array.isArray(entry.concurrentPeerAssistIds) ? entry.concurrentPeerAssistIds.map(value => String(value).slice(0, 60)).slice(0, 10) : [],
+          downloadSequence: String(entry.downloadSequence || '').slice(0, 10),
+          downloadId: entry.downloadId ?? '',
+          downloadCaptureId: String(entry.downloadCaptureId || '').slice(0, 120),
+          downloadedFilename: normalizeText(entry.downloadedFilename || '').slice(0, 260),
+          downloadedMd5: String(entry.downloadedMd5 || '').slice(0, 64),
+          pdfCleanerResult: entry.pdfCleanerResult || null,
+          titleValidation: entry.titleValidation || null
         });
         if (watcherLogBuffer.length >= watcherLogFlushBatchSize) {
           await flushWatcherLogs();
@@ -280,7 +306,19 @@
           const stored = await chromeApi.storage.local.get(autoWatcherLogKey);
           const logs = Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [];
           const next = batch.slice().reverse().concat(logs).slice(0, maxLogs);
-          await chromeApi.storage.local.set({ [autoWatcherLogKey]: next });
+          const updates = { [autoWatcherLogKey]: next };
+          const abnormalCandidates = batch.slice().reverse().concat(logs).filter(isPersistentAbnormalLog);
+          if (abnormalCandidates.length && autoWatcherAbnormalKey) {
+            const abnormalStored = await chromeApi.storage.local.get(autoWatcherAbnormalKey);
+            const abnormalLogs = Array.isArray(abnormalStored[autoWatcherAbnormalKey]) ? abnormalStored[autoWatcherAbnormalKey] : [];
+            updates[autoWatcherAbnormalKey] = Array.from(new Map(
+              abnormalCandidates.concat(abnormalLogs).map(entry => [
+                `${entry.time || ''}|${entry.assistId || ''}|${entry.reason || ''}|${entry.titleValidation?.status || ''}`,
+                entry
+              ])
+            ).values()).slice(0, 500);
+          }
+          await chromeApi.storage.local.set(updates);
         });
       await watcherLogFlushPromise;
     }

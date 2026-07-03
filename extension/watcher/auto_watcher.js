@@ -6,6 +6,7 @@
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
+  const AUTO_WATCHER_ABNORMAL_KEY = 'autoWatcherAbnormalRecords';
   const JOURNAL_ACCESS_STATS_KEY = 'journalAccessStats';
   const JOURNAL_ACCESS_LOOKUP_KEY = 'journalAccessLookupIndex';
   const JOURNAL_SHORT_NAME_MAP_KEY = 'journalShortNameMap';
@@ -170,6 +171,7 @@
     get getOptions() { return deps?.getOptions?.bind(deps); },
     get sendNativeMessage() { return deps?.sendNativeMessage?.bind(deps); },
     get hasActiveTask() { return deps?.hasActiveTask?.bind(deps); },
+    get hasPublisherTask() { return deps?.hasPublisherTask?.bind(deps); },
     get enqueueUpload() { return deps?.enqueueUpload?.bind(deps); },
     get urlHostPath() { return deps?.urlHostPath?.bind(deps); },
     get defaultListUrls() { return deps?.defaultListUrls; }
@@ -249,6 +251,7 @@
     sanitizeReportUrl: (...args) => sanitizeReportUrl(...args),
     autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
     autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
+    autoWatcherAbnormalKey: AUTO_WATCHER_ABNORMAL_KEY,
     maxLogs: MAX_LOGS,
     maxTraceLogs: MAX_TRACE_LOGS,
     traceFlushIntervalMs: TRACE_FLUSH_INTERVAL_MS,
@@ -291,6 +294,7 @@
     autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
     autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
     autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,
+    autoWatcherAbnormalKey: AUTO_WATCHER_ABNORMAL_KEY,
     journalAccessStatsKey: JOURNAL_ACCESS_STATS_KEY,
     alarmName: ALARM_NAME,
     doiFailureSkipThreshold: DOI_FAILURE_SKIP_THRESHOLD
@@ -506,6 +510,8 @@
     clearBufferedWatcherTrace,
     trimStoredWatcherTraceLogs,
     notifyWatcherNeedsAttention,
+    normalizeOptions,
+    randomIntervalMinutes,
     stateRef
   });
 

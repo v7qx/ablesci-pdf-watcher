@@ -19,6 +19,7 @@
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
+      autoWatcherAbnormalKey,
       alarmName
     } = config;
 
@@ -204,7 +205,8 @@
       const stored = await chromeApi.storage.local.get([
         autoWatcherStateKey,
         autoWatcherLogKey,
-        autoWatcherTraceKey
+        autoWatcherTraceKey,
+        autoWatcherAbnormalKey
       ]);
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[date] || {};
@@ -217,6 +219,8 @@
       const logs = (Array.isArray(stored[autoWatcherLogKey]) ? stored[autoWatcherLogKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const traces = (Array.isArray(stored[autoWatcherTraceKey]) ? stored[autoWatcherTraceKey] : [])
+        .filter(log => formatBeijingDateTime(log.time, true) === date);
+      const abnormalLogs = (Array.isArray(stored[autoWatcherAbnormalKey]) ? stored[autoWatcherAbnormalKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const journalAccessStats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
         ? Object.values(state.journalAccessStats)
@@ -237,6 +241,16 @@
         if (result.error) acc.errors.push(`${status}: ${result.error}`);
         return acc;
       }, { cleaned: 0, removed: 0, noWatermark: 0, failed: 0, errors: [] });
+      const persistentAbnormalLogs = Array.from(new Map(
+        abnormalLogs.concat(logs).map(log => [
+          `${log.time || ''}|${log.assistId || ''}|${log.reason || ''}|${log.titleValidation?.status || ''}`,
+          log
+        ])
+      ).values());
+      function persistentAbnormalReason(log) {
+        const risks = Array.isArray(log.riskReasons) ? log.riskReasons.filter(Boolean) : [];
+        return risks.join('；') || log.reason || '';
+      }
       function cleanerStatusText(result) {
         if (!result || !result.enabled) return '';
         const status = String(result.status || 'unknown');
@@ -246,8 +260,10 @@
       }
 
       const csvHeader = [
-        'record_type', 'time', 'sessionId', 'assistId', 'doi', 'journalShortName', 'journalName', 'detailUrl', 'status', 'reason',
+        'record_type', 'time', 'sessionId', 'taskId', 'assistId', 'doi', 'journalShortName', 'journalName', 'detailUrl', 'status', 'reason',
+        'watcherPublisher', 'watcherLane', 'queueStartedAt', 'concurrentPeerAssistIds', 'downloadSequence', 'downloadId', 'downloadCaptureId', 'downloadedFilename', 'downloadedMd5',
         'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath', 'pdfCleanerCleanedPath',
+        'titleValidationStatus', 'titleValidationScore', 'titleValidationReason', 'titleMatchedTokens',
         'publisher',
         'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
         'targetError', 'activeTimeProgressRatio', 'availabilityFactor',
@@ -358,9 +374,10 @@
           trigger: lastAttempt.trigger || '',
           url: latestPickedListUrl
         }),
-        ...logs.map(log => reportRow('log', {
+        ...persistentAbnormalLogs.map(log => reportRow(abnormalLogs.includes(log) ? 'abnormal_log' : 'log', {
           time: formatBeijingDateTime(log.time),
           sessionId: log.sessionId || '',
+          taskId: log.backgroundTaskId || '',
           trigger: log.trigger || '',
           assistId: log.assistId || '',
           doi: log.doi || '',
@@ -369,13 +386,26 @@
           detailUrl: reportDetailValue(log),
           status: translateStep(log.status || '', isEn),
           reason: translateReason(log.reason || '', isEn),
+          watcherPublisher: log.watcherPublisher || '',
+          watcherLane: log.watcherLane || '',
+          queueStartedAt: log.queueStartedAt ? formatBeijingDateTime(log.queueStartedAt) : '',
+          concurrentPeerAssistIds: Array.isArray(log.concurrentPeerAssistIds) ? log.concurrentPeerAssistIds.join('|') : '',
+          downloadSequence: log.downloadSequence || '',
+          downloadId: log.downloadId || '',
+          downloadCaptureId: log.downloadCaptureId || '',
+          downloadedFilename: log.downloadedFilename || '',
+          downloadedMd5: log.downloadedMd5 || '',
           pdfCleanerStatus: log.pdfCleanerResult?.status || '',
           pdfCleanerMatched: log.pdfCleanerResult?.matched ?? '',
           pdfCleanerEngine: log.pdfCleanerResult?.engine || '',
           pdfCleanerElapsedMs: log.pdfCleanerResult?.elapsedMs ?? '',
           pdfCleanerError: log.pdfCleanerResult?.error || log.pdfCleanerResult?.errorCode || '',
           pdfCleanerOriginalPath: log.pdfCleanerResult?.preservedOriginalPath || '',
-          pdfCleanerCleanedPath: log.pdfCleanerResult?.preservedCleanedPath || ''
+          pdfCleanerCleanedPath: log.pdfCleanerResult?.preservedCleanedPath || '',
+          titleValidationStatus: log.titleValidation?.status || '',
+          titleValidationScore: log.titleValidation?.score ?? '',
+          titleValidationReason: log.titleValidation?.reason || '',
+          titleMatchedTokens: Array.isArray(log.titleValidation?.matchedTokens) ? log.titleValidation.matchedTokens.join('|') : ''
         })),
         ...traces
           .filter(trace => traceSkipSteps.has(String(trace.step || '')) && trace.details)
@@ -508,8 +538,8 @@
           : `- PDF 去水印错误: ${cleanerStats.errors.slice(0, 5).join(' | ') || cleanerStats.failed}`);
       }
 
-      const sizeInterceptedLogs = logs.filter(log => {
-        const r = String(log.reason || '');
+      const sizeInterceptedLogs = persistentAbnormalLogs.filter(log => {
+        const r = [log.reason || '', ...(Array.isArray(log.riskReasons) ? log.riskReasons : [])].join(' ');
         return r.includes('PDF 文件小于') || r.includes('PDF 文件大于') || r.includes('smaller than') || r.includes('larger than');
       });
       const sizeInterceptedLines = [];
@@ -527,7 +557,7 @@
               formatBeijingTimeOnly(log.time),
               log.doi || '',
               log.journalName || '',
-              translateReason(log.reason || '', isEn),
+              translateReason(persistentAbnormalReason(log), isEn),
               detailVal
             ]);
           }),
@@ -535,8 +565,8 @@
         );
       }
 
-      const doiNotFoundLogs = logs.filter(log => {
-        const r = String(log.reason || '');
+      const doiNotFoundLogs = persistentAbnormalLogs.filter(log => {
+        const r = [log.reason || '', ...(Array.isArray(log.riskReasons) ? log.riskReasons : [])].join(' ');
         const lower = r.toLowerCase();
         return lower.includes('doi_not_found') ||
           lower.includes('doi_resolution_failed') ||
@@ -563,7 +593,7 @@
               formatBeijingTimeOnly(log.time),
               log.doi || '',
               log.journalName || '',
-              translateReason(log.reason || '', isEn),
+              translateReason(persistentAbnormalReason(log), isEn),
               detailVal
             ]);
           }),
@@ -602,6 +632,32 @@
         );
       }
 
+      const titleValidationLogs = persistentAbnormalLogs.filter(log => {
+        const status = String(log.titleValidation?.status || '');
+        return status && status !== 'matched';
+      });
+      const titleValidationLines = [];
+      if (titleValidationLogs.length > 0) {
+        titleValidationLines.push(
+          isEn ? '## Upload Safety Validation Exceptions' : '## 上传前标题安全校验异常',
+          '',
+          isEn
+            ? '| Time | DOI | Journal | Status | Score | Reason | Detail |'
+            : '| 时间 | DOI | 期刊 (Journal) | 状态 (Status) | 分数 (Score) | 原因 (Reason) | 详情 (Detail) |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
+          ...titleValidationLogs.map(log => formatMarkdownTableRow([
+            formatBeijingTimeOnly(log.time),
+            log.doi || '',
+            log.journalName || '',
+            log.titleValidation?.status || '',
+            log.titleValidation?.score ?? '',
+            log.titleValidation?.reason || log.reason || '',
+            detailLink(reportDetailValue(log), isEn)
+          ])),
+          ''
+        );
+      }
+
       const md = [
         isEn ? `# Ablesci Watcher Daily Report ${date}` : `# 科研通值守日报 ${date}`,
         '',
@@ -611,6 +667,7 @@
         '',
         ...sizeInterceptedLines,
         ...doiNotFoundLines,
+        ...titleValidationLines,
         ...cleanerErrorLines,
         '## Skips And Decisions',
         '',

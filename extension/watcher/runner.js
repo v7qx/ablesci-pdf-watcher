@@ -339,7 +339,8 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
               assistId: context.key,
               durationMs,
               paused,
-              pdfCleanerResult: msg.pdfCleanerResult || null
+              pdfCleanerResult: msg.pdfCleanerResult || null,
+              titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }),
               updateProcessed(context.key, 'failed', msg.message || 'upload_failed', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
@@ -351,7 +352,13 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
                 trigger: context.trigger || '',
                 status: 'failed',
                 reason: msg.message || 'upload_failed',
-                pdfCleanerResult: msg.pdfCleanerResult || null
+                downloadedFilename: msg.filename || '',
+                downloadedMd5: msg.md5 || '',
+                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
+                downloadId: msg.downloadId || '',
+                downloadCaptureId: msg.downloadCaptureId || '',
+                pdfCleanerResult: msg.pdfCleanerResult || null,
+                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
@@ -390,7 +397,8 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
                 sessionId: context.sessionId || '',
                 assistId: context.key,
                 durationMs,
-                pdfCleanerResult: msg.pdfCleanerResult || null
+                pdfCleanerResult: msg.pdfCleanerResult || null,
+                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }),
               updateProcessed(context.key, 'failed', msg.message || 'blocked', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
@@ -402,7 +410,13 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
                 trigger: context.trigger || '',
                 status: 'failed',
                 reason: msg.message || 'blocked',
-                pdfCleanerResult: msg.pdfCleanerResult || null
+                downloadedFilename: msg.filename || '',
+                downloadedMd5: msg.md5 || '',
+                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
+                downloadId: msg.downloadId || '',
+                downloadCaptureId: msg.downloadCaptureId || '',
+                pdfCleanerResult: msg.pdfCleanerResult || null,
+                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
@@ -421,7 +435,8 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
                 sessionId: context.sessionId || '',
                 assistId: context.key,
                 durationMs,
-                pdfCleanerResult: msg.pdfCleanerResult || null
+                pdfCleanerResult: msg.pdfCleanerResult || null,
+                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }),
               updateProcessed(context.key, 'success', cleanReason, processedMeta(context.candidate, context.payload)),
               recordRiskEvent(context.opts || {}, cleanReason, 'success'),
@@ -432,7 +447,13 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
                 trigger: context.trigger || '',
                 status: 'success',
                 reason: cleanReason,
-                pdfCleanerResult: msg.pdfCleanerResult || null
+                downloadedFilename: msg.filename || '',
+                downloadedMd5: msg.md5 || '',
+                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
+                downloadId: msg.downloadId || '',
+                downloadCaptureId: msg.downloadCaptureId || '',
+                pdfCleanerResult: msg.pdfCleanerResult || null,
+                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }).then(writeDailyReports)
             ]);
             settle({ ok: true, reason: cleanReason, durationMs });
@@ -495,6 +516,13 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
 
     async function handleAllowedPayload(candidate, payload, opts, detailTabId, session = null, trigger = '') {
       payload.triggeredBy = 'auto_watcher';
+      let watcherPublisher = String(opts.watcherDispatchPublisher || candidate?.publisherName || payload?.publisherName || '').trim().toLowerCase();
+      try {
+        watcherPublisher = String(new URL(candidate?.listUrl || payload?.listUrl || '').searchParams.get('publisher') || watcherPublisher).trim().toLowerCase();
+      } catch (_) {}
+      payload.watcherPublisher = watcherPublisher;
+      payload.watcherLane = opts.watcherDispatchLane || '';
+      payload.watcherMultiPublisherEnabled = opts.watcherMultiPublisherEnabled === true;
       const key = getProcessedKey(candidate, payload);
       const source = candidateSource(candidate, payload);
       await appendWatcherTrace('candidate_payload_allowed', {
@@ -510,7 +538,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
         uploadConfirmRequired: false
       });
 
-      if (deps.hasActiveTask()) {
+      if (!opts.watcherMultiPublisherEnabled && deps.hasActiveTask()) {
         await appendWatcherTrace('candidate_skip_active_task', { reason: 'active_task', detailUrl: candidate.detailUrl, tabId: detailTabId, sessionId: session?.id || '', trigger: trigger || session?.trigger || '', source });
         await updateProcessed(key, 'skipped', 'active_task', processedMeta(candidate, payload));
         await incrementDaily('skipped', trigger || session?.trigger || '');
@@ -541,7 +569,11 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
         source,
         downloadOnly: payload.downloadOnly === true
       });
-      deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
+      const enqueueResult = deps.enqueueUpload(sessionPort?.port || makeWatcherPort(portContext), payload);
+      if (enqueueResult && enqueueResult.accepted === false) {
+        sessionPort?.port?.disconnect?.('enqueue_rejected');
+        return { handled: false, stopRun: false, removeQueue: true, reason: enqueueResult.reason || 'queue_rejected' };
+      }
       await incrementDaily('downloaded', trigger || session?.trigger || '');
       await updateProcessed(key, 'success', payload.downloadOnly ? 'queued_download_only' : 'queued_upload', processedMeta(candidate, payload));
       await appendWatcherLog({
@@ -557,6 +589,17 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
         await incrementDaily('notified', trigger || session?.trigger || '');
       }
       if (sessionPort) {
+        if (opts.watcherMultiPublisherEnabled) {
+          sessionPort.result.then(async result => {
+            if (!payload.downloadOnly && !opts.debugDownloadOnly) {
+              if (result.ok) {
+                await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
+              }
+              await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
+            }
+          }).catch(() => {});
+          return { handled: true, stopRun: false, reason: 'queued_parallel' };
+        }
         const result = await sessionPort.result;
         if (!payload.downloadOnly && !opts.debugDownloadOnly) {
           if (result.ok) {

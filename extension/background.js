@@ -290,7 +290,8 @@ const { downloadPdf } = createBackgroundDownloadAgentApi({
 const {
   enqueueUpload,
   attachRuntimeListeners,
-  hasActiveTask
+  hasActiveTask,
+  hasPublisherTask
 } = createBackgroundUploadApi({
   chromeApi: chrome,
   // PRIVATE_WATCHER_ONLY
@@ -356,6 +357,7 @@ globalThis.initAutoWatcher({
   enqueueUpload,
   sendNativeMessage,
   hasActiveTask,
+  hasPublisherTask,
   urlHostPath,
   defaultListUrls: DEFAULT_OPTIONS.watcherListUrls.slice()
 });

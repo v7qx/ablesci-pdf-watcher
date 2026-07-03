@@ -64,8 +64,14 @@
 
   function hasAcsBookPage() {
     if (common.currentPublisher() !== 'acs') return false;
-    // ACS 整本书 / In Focus 电子书总览页：/doi/book/... 只提供预览样章，无法整本自动应助。
+    // Whole books and ACS Symposium Series/book chapters are outside the
+    // journal-article resolver scope.
     if (/\/doi\/book\//i.test(location.pathname || '')) return true;
+    if (/\/doi\/(?:abs\/|full\/|pdf\/|pdfdirect\/)?10\.1021\/bk-/i.test(location.pathname || '')) return true;
+    if (/^10\.1021\/bk-/i.test(document.querySelector('meta[name="publication_doi"]')?.getAttribute('content') || '')) return true;
+    if (/ctype:string:Book Content/i.test(document.querySelector('meta[name="pbContext"]')?.getAttribute('content') || '')) return true;
+    if (/^chapter$/i.test(document.querySelector('input.pub-type')?.value || '')) return true;
+    if (document.querySelector('#returnToBook, .content-navigation__contentType')) return true;
     const ogType = document.querySelector('meta[property="og:type"]')?.getAttribute('content') || '';
     if (/^\s*book\s*$/i.test(ogType)) return true;
     // In Focus 预览样章控件只在整本书总览页出现。
@@ -327,8 +333,8 @@
       common.sendPublisherMessage('acs', {
         articleUrl: location.href,
         unsupported: true,
-        error: 'ACS 整本书（In Focus / 电子书）页面暂不支持自动应助，仅提供预览样章。',
-        source: 'acs_book_page'
+        error: 'ACS 整本书或 Symposium Series/book chapter 不属于期刊论文，已停止本次下载。',
+        source: 'acs_book_or_chapter_page'
       });
       stopObserver();
       return;

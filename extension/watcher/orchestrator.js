@@ -131,7 +131,7 @@
       }));
     }
 
-    function createRunContext(trigger) {
+    function createRunContext(trigger, execution = {}) {
       const startedAt = Date.now();
       return {
         trigger,
@@ -146,7 +146,8 @@
         scannedPublisher: '',
         scannedPage: '',
         parsedListPages: [],
-        backoffSkippedPages: []
+        backoffSkippedPages: [],
+        execution
       };
     }
 
@@ -237,7 +238,7 @@
       const stateForTargets = await getWatcherState();
       stateForTargets.optionsSnapshot = opts;
       await syncActualAssistCount(stateForTargets, opts);
-      if (trigger === 'alarm' && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
+      if (trigger === 'alarm' && !run.execution.parallelDispatch && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
         await appendWatcherTrace('run_skip_assist_not_due', {
           reason: 'assist_not_due',
           phase: 'target_decision',
@@ -249,7 +250,7 @@
         });
         return { stopRun: true, result: { ok: true, reason: 'assist_not_due' } };
       }
-      if (trigger !== 'manual') {
+      if (trigger !== 'manual' && !run.execution.parallelDispatch) {
         const rateLimit = checkShortTermRateLimit(stateForTargets);
         if (rateLimit.limited) {
           const reason = `rate_limited_${rateLimit.window}`;
@@ -418,7 +419,7 @@
         reason: result.reason || ''
       })).catch(() => {});
       await recordRunFinish(run.trigger, result).catch(() => {});
-      if (run.trigger !== 'manual' && run.opts) {
+      if (run.trigger !== 'manual' && run.opts && !run.execution.skipScheduleRefresh) {
         await scheduleNextAssistAfterRun(run.opts, result, run.trigger).catch(() => {});
         await refreshAlarmAfterRun(run.opts, result, run.attempt, run.trigger).catch(() => {});
       }
@@ -445,7 +446,7 @@
       stateRef.autoWatcherStartedAt = 0;
     }
 
-    async function runAutoWatcherOnce(trigger = 'alarm') {
+    async function runAutoWatcherOnce(trigger = 'alarm', execution = {}) {
       if (stateRef.autoWatcherRunning) {
         const runningSince = Number(stateRef.autoWatcherStartedAt || 0);
         const elapsedMs = Number.isFinite(runningSince) && runningSince > 0 ? Date.now() - runningSince : 0;
@@ -476,7 +477,7 @@
       }
       stateRef.autoWatcherRunning = true;
       stateRef.autoWatcherStartedAt = Date.now();
-      const run = createRunContext(trigger);
+      const run = createRunContext(trigger, execution);
       const { attempt } = run;
       const finish = result => finishRun(run, result);
       // Declared at function scope so the catch block can still read the last
@@ -489,6 +490,11 @@
         await emergencyStorageTrim().catch(() => {});
         await pruneWatcherState().catch(() => {});
         const opts = normalizeOptions(await depsRef.getOptions());
+        if (Array.isArray(execution.listUrls) && execution.listUrls.length) {
+          opts.watcherListUrls = execution.listUrls.slice();
+        }
+        opts.watcherDispatchPublisher = String(execution.publisher || '').trim().toLowerCase();
+        opts.watcherDispatchLane = String(execution.lane || '').trim();
         run.opts = opts;
         await recordRunStart(trigger, opts);
         await appendPerfCheckpoint(run, 'options_loaded', {
@@ -506,7 +512,7 @@
           await appendWatcherTrace('run_skip_disabled', { reason: 'disabled', trigger });
           return finish({ ok: false, reason: 'disabled' });
         }
-        if (depsRef.hasActiveTask()) {
+        if (!opts.watcherMultiPublisherEnabled && depsRef.hasActiveTask()) {
           await appendWatcherTrace('run_skip_active_task', { reason: 'active_task', trigger });
           return finish({ ok: false, reason: 'active_task' });
         }
