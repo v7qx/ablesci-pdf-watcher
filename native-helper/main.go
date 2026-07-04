@@ -185,16 +185,31 @@ func resolveCleanerPath(raw string) string {
 	return ""
 }
 
-func findPDFToText(cleanerPath string) string {
-	candidates := []string{}
+func findPopplerTool(cleanerPath, toolName string) string {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(toolName), ".exe") {
+		toolName += ".exe"
+	}
+	roots := []string{}
+	if helperDir, err := nativeHelperDir(); err == nil {
+		roots = append(roots, helperDir)
+	}
 	if cleanerPath != "" {
-		dir := filepath.Dir(cleanerPath)
+		roots = append(roots, filepath.Dir(cleanerPath))
+	}
+	candidates := []string{}
+	seenRoots := map[string]bool{}
+	for _, dir := range roots {
+		key := strings.ToLower(filepath.Clean(dir))
+		if seenRoots[key] {
+			continue
+		}
+		seenRoots[key] = true
 		candidates = append(candidates,
-			filepath.Join(dir, "tools", "poppler", "poppler-24.08.0", "Library", "bin", "pdftotext.exe"),
-			filepath.Join(dir, "tools", "poppler", "Library", "bin", "pdftotext.exe"),
-			filepath.Join(dir, "poppler", "Library", "bin", "pdftotext.exe"),
-			filepath.Join(dir, "poppler", "bin", "pdftotext.exe"),
-			filepath.Join(dir, "pdftotext.exe"),
+			filepath.Join(dir, "tools", "poppler", "poppler-24.08.0", "Library", "bin", toolName),
+			filepath.Join(dir, "tools", "poppler", "Library", "bin", toolName),
+			filepath.Join(dir, "poppler", "Library", "bin", toolName),
+			filepath.Join(dir, "poppler", "bin", toolName),
+			filepath.Join(dir, toolName),
 		)
 	}
 	for _, candidate := range candidates {
@@ -202,20 +217,15 @@ func findPDFToText(cleanerPath string) string {
 			return candidate
 		}
 	}
-	if path, err := exec.LookPath("pdftotext"); err == nil {
+	if path, err := exec.LookPath(toolName); err == nil {
 		return path
 	}
 	return ""
 }
 
-func extractPDFInfoTitle(pdfToTextPath, pdfPath string) string {
-	tool := filepath.Join(filepath.Dir(pdfToTextPath), "pdfinfo.exe")
-	if !fileExists(tool) {
-		if path, err := exec.LookPath("pdfinfo"); err == nil {
-			tool = path
-		} else {
-			return ""
-		}
+func extractPDFInfoTitle(tool, pdfPath string) string {
+	if tool == "" {
+		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -253,6 +263,27 @@ func (w *cappedBuffer) Write(p []byte) (int, error) {
 
 func (w *cappedBuffer) String() string { return w.buf.String() }
 
+func extractPDFPageText(tool, path string, firstPage, lastPage int, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tool,
+		"-f", strconv.Itoa(firstPage),
+		"-l", strconv.Itoa(lastPage),
+		"-layout", "-enc", "UTF-8", path, "-")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
+	stdout := &cappedBuffer{max: 128 * 1024}
+	stderr := &cappedBuffer{max: 8 * 1024}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", errors.New("pdftotext timeout")
+		}
+		return "", fmt.Errorf("pdftotext failed: %s", strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 func handleExtractFirstPageText(req Request) error {
 	path, err := cleanExistingPath(req.Path)
 	if err != nil {
@@ -264,27 +295,35 @@ func handleExtractFirstPageText(req Request) error {
 	if _, _, err := inspectPDF(path); err != nil {
 		return err
 	}
-	tool := findPDFToText(resolveCleanerPath(req.Extra["cleaner_path"]))
+	cleanerPath := resolveCleanerPath(req.Extra["cleaner_path"])
+	pdfInfoTool := findPopplerTool(cleanerPath, "pdfinfo")
+	documentTitle := extractPDFInfoTitle(pdfInfoTool, path)
+	tool := findPopplerTool(cleanerPath, "pdftotext")
 	if tool == "" {
-		return errors.New("pdftotext not found")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, tool, "-f", "1", "-l", "1", "-layout", "-enc", "UTF-8", path, "-")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
-	stdout := &cappedBuffer{max: 64 * 1024}
-	stderr := &cappedBuffer{max: 8 * 1024}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return errors.New("pdftotext timeout")
+		if documentTitle != "" {
+			return writeResponse(Response{OK: true, Action: "extract_first_page_text", TextSource: "pdf_metadata_only", DocumentTitle: documentTitle})
 		}
-		return fmt.Errorf("pdftotext failed: %s", strings.TrimSpace(stderr.String()))
+		return errors.New("pdftotext not found; install Poppler under the Native Helper tools/poppler directory or add it to PATH")
 	}
-	text := strings.TrimSpace(stdout.String())
-	documentTitle := extractPDFInfoTitle(tool, path)
-	return writeResponse(Response{OK: true, Action: "extract_first_page_text", Text: text, TextSource: "pdftotext_first_page", DocumentTitle: documentTitle})
+	text, err := extractPDFPageText(tool, path, 1, 1, 10*time.Second)
+	if err != nil {
+		if documentTitle != "" {
+			return writeResponse(Response{OK: true, Action: "extract_first_page_text", TextSource: "pdf_metadata_fallback", DocumentTitle: documentTitle})
+		}
+		return err
+	}
+	textSource := "pdftotext_first_page"
+	publisher := strings.ToLower(strings.TrimSpace(req.Extra["publisher"]))
+	doi := strings.ToLower(strings.TrimSpace(req.Extra["doi"]))
+	isRSC := publisher == "rsc" || strings.HasPrefix(doi, "10.1039/")
+	isAcceptedManuscript := regexp.MustCompile(`(?i)accepted\s+manuscript|royal\s+society\s+of\s+chemistry\s+peer\s+review\s+process`).MatchString(text)
+	if isRSC && isAcceptedManuscript {
+		if laterText, laterErr := extractPDFPageText(tool, path, 2, 3, 10*time.Second); laterErr == nil && laterText != "" {
+			text += "\n" + laterText
+			textSource = "pdftotext_rsc_accepted_manuscript_pages_1_3"
+		}
+	}
+	return writeResponse(Response{OK: true, Action: "extract_first_page_text", Text: text, TextSource: textSource, DocumentTitle: documentTitle})
 }
 
 func readRequest() (Request, error) {

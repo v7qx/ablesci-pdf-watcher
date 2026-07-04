@@ -539,6 +539,10 @@
           try { await chromeApi.tabs.remove(currentSimulateTabId); } catch (_) {}
           currentSimulateTabId = null;
         }
+        for (const port of concurrentSimulatePorts) try { port.disconnect(); } catch (_) {}
+        for (const tabId of concurrentSimulateTabs) await chromeApi.tabs.remove(tabId).catch(() => {});
+        concurrentSimulatePorts.clear();
+        concurrentSimulateTabs.clear();
         btn.textContent = '开始模拟';
         btn.disabled = false;
         appendSimulateLog('exception', '手动暂停了模拟；保留当前日志方便复制。');
@@ -550,8 +554,13 @@
         alert('请输入 DOI 或文献 URL');
         return;
       }
+      const inputValues = rawVal.split(/\s+/).filter(Boolean);
+      if (inputValues.length > 1) {
+        await simulateConcurrentAssists(inputValues);
+        return;
+      }
 
-      let sourceUrl = rawVal;
+      let sourceUrl = inputValues[0];
       if (!/^https?:\/\//i.test(rawVal)) {
         if (/^10\.\d{4,9}\//i.test(rawVal)) {
           sourceUrl = 'https://doi.org/' + rawVal;
@@ -855,11 +864,10 @@
       }
     }
 
-    async function simulateConcurrentAssists() {
-      const input = el('debugBatchAssistInput');
-      const btn = el('btnDebugSimulateBatch');
+    async function simulateConcurrentAssists(urls) {
+      const btn = el('btnDebugSimulate');
       const logContainer = el('debugLogContainer');
-      if (!input || !btn || !logContainer) return;
+      if (!btn || !logContainer) return;
       const appendLog = (type, text) => {
         const line = document.createElement('div');
         line.textContent = `${type === 'error' ? '❌' : type === 'done' ? '✅' : '🔄'} ${text}`;
@@ -868,18 +876,8 @@
         logContainer.appendChild(line);
         logContainer.scrollTop = logContainer.scrollHeight;
       };
-      if (btn.textContent === '停止并发模拟') {
-        for (const port of concurrentSimulatePorts) try { port.disconnect(); } catch (_) {}
-        for (const tabId of concurrentSimulateTabs) await chromeApi.tabs.remove(tabId).catch(() => {});
-        concurrentSimulatePorts.clear();
-        concurrentSimulateTabs.clear();
-        btn.textContent = '三任务模拟';
-        appendLog('error', '已停止并发模拟。');
-        return;
-      }
-      const urls = String(input.value || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
       if (!urls.length || urls.length > 3) {
-        alert('请输入 1–3 个求助详情链接，每行一个。');
+        alert('请输入 1–3 个求助详情链接。');
         return;
       }
       if (urls.some(value => {
@@ -891,7 +889,7 @@
         alert('并发模拟只接受完整的 Ablesci 求助详情链接。');
         return;
       }
-      btn.textContent = '停止并发模拟';
+      btn.textContent = '暂停模拟';
       logContainer.innerHTML = '';
       logContainer.style.display = 'block';
       try {
@@ -918,7 +916,7 @@
               finished += 1;
               try { port.disconnect(); } catch (_) {}
               if (finished === payloads.length) {
-                btn.textContent = '三任务模拟';
+                btn.textContent = '开始模拟';
                 appendLog('done', '全部并发模拟任务结束。请按编号核对 DOI、文件名、MD5和完成顺序。');
               }
             }
@@ -928,7 +926,7 @@
         });
       } catch (err) {
         appendLog('error', err.message || String(err));
-        btn.textContent = '三任务模拟';
+        btn.textContent = '开始模拟';
       }
     }
 
@@ -972,7 +970,6 @@
       importJournalAccessCache,
       clearJournalAccessCache,
       simulateAssist,
-      simulateConcurrentAssists,
       handleDocumentCopy,
       handleWindowBlur
     };

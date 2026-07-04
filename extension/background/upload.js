@@ -632,46 +632,50 @@
       stat.downloadSequence = payload.downloadSequence || stat.downloadSequence || '';
       stat.downloadId = stat.downloadId || item.id;
       stat.downloadCaptureId = stat.downloadCaptureId || item._ablesciCaptureId || '';
-      let titleValidation;
-      try {
-        const textResult = await sendNativeMessage(opts.nativeHostName, {
-          action: 'extract_first_page_text',
-          path: stat.path || item.filename,
-          extra: {
-            cleaner_path: opts.pdfCleanerCliPath || ''
+      if (opts.pdfTitleValidationEnabled === true) {
+        let titleValidation;
+        try {
+          const textResult = await sendNativeMessage(opts.nativeHostName, {
+            action: 'extract_first_page_text',
+            path: stat.path || item.filename,
+            extra: {
+              cleaner_path: opts.pdfCleanerCliPath || '',
+              publisher: payload.watcherPublisher || '',
+              doi: payload.doi || ''
+            }
+          }, nativeMessageLongTimeoutMs);
+          const documentTitle = usableDocumentTitle(textResult?.document_title || '');
+          if (documentTitle) {
+            const metadataValidation = compareTitleWithFirstPage(payload.title || '', documentTitle);
+            titleValidation = metadataValidation.status === 'matched'
+              ? { ...metadataValidation, reason: `pdf_metadata_${metadataValidation.reason}`, documentTitle }
+              : { ...metadataValidation, status: 'mismatch', reason: 'pdf_metadata_title_mismatch', documentTitle };
+          } else {
+            titleValidation = compareTitleWithFirstPage(payload.title || '', textResult?.text || '');
           }
-        }, nativeMessageLongTimeoutMs);
-        const documentTitle = usableDocumentTitle(textResult?.document_title || '');
-        if (documentTitle) {
-          const metadataValidation = compareTitleWithFirstPage(payload.title || '', documentTitle);
-          titleValidation = metadataValidation.status === 'matched'
-            ? { ...metadataValidation, reason: `pdf_metadata_${metadataValidation.reason}`, documentTitle }
-            : { ...metadataValidation, status: 'mismatch', reason: 'pdf_metadata_title_mismatch', documentTitle };
-        } else {
-          titleValidation = compareTitleWithFirstPage(payload.title || '', textResult?.text || '');
+        } catch (err) {
+          titleValidation = {
+            status: 'unverifiable',
+            score: 0,
+            matchedTokens: [],
+            expectedTokens: [],
+            reason: `first_page_text_error: ${formatTaskError(err)}`
+          };
         }
-      } catch (err) {
-        titleValidation = {
-          status: 'unverifiable',
-          score: 0,
-          matchedTokens: [],
-          expectedTokens: [],
-          reason: `first_page_text_error: ${formatTaskError(err)}`
-        };
-      }
-      payload.titleValidation = titleValidation;
-      stat.titleValidation = titleValidation;
-      if (titleValidation.status !== 'matched') {
-        payload.downloadOnly = true;
-        payload.riskReasons = Array.isArray(payload.riskReasons) ? payload.riskReasons : [];
-        payload.riskReasons.push(
-          titleValidation.status === 'mismatch'
-            ? `PDF 首页标题与求助标题明显不匹配（匹配分 ${titleValidation.score}）`
-            : `无法从 PDF 首页确认求助标题（${titleValidation.reason}）`
-        );
-        post(port, 'progress', `标题安全校验未通过：${payload.riskReasons[payload.riskReasons.length - 1]}；已改为仅下载。`);
-      } else {
-        post(port, 'progress', `标题安全校验通过：首页关键词匹配分 ${titleValidation.score}。`);
+        payload.titleValidation = titleValidation;
+        stat.titleValidation = titleValidation;
+        if (titleValidation.status !== 'matched') {
+          payload.downloadOnly = true;
+          payload.riskReasons = Array.isArray(payload.riskReasons) ? payload.riskReasons : [];
+          payload.riskReasons.push(
+            titleValidation.status === 'mismatch'
+              ? `PDF 首页标题与求助标题明显不匹配（匹配分 ${titleValidation.score}）`
+              : `无法从 PDF 首页确认求助标题（${titleValidation.reason}）`
+          );
+          post(port, 'progress', `标题安全校验未通过：${payload.riskReasons[payload.riskReasons.length - 1]}；已改为仅下载。`);
+        } else {
+          post(port, 'progress', `标题安全校验通过：首页关键词匹配分 ${titleValidation.score}。`);
+        }
       }
       const downloadOnlyReasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.slice() : [];
       const size = Number(stat.size || 0);

@@ -157,6 +157,18 @@
           <button id="copyDiagnostic" class="secondary" type="button">复制</button>
         </div>
       </div>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>上传前核对 PDF 标题</strong>
+          <span>默认关闭。开启后才调用本地 Poppler，标题无法确认或不匹配时仅下载、不上传。</span>
+        </div>
+        <div class="setting-control">
+          <label class="toggle" title="上传前核对 PDF 标题">
+            <input id="pdfTitleValidationEnabled" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
       <div class="setting-row" style="display: block;">
         <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
           <div class="setting-copy">
@@ -174,10 +186,6 @@
           <div class="debug-tool-input-row" style="display: flex; gap: 8px; align-items: center;">
             <input id="debugDoiInput" type="text" placeholder="输入求助详情链接、DOI 或文献 URL" style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; height: 32px; box-sizing: border-box;">
             <button id="btnDebugSimulate" class="secondary" type="button" style="height: 32px; padding: 0 16px; white-space: nowrap; line-height: 30px; font-size: 12px;">开始模拟</button>
-          </div>
-          <div class="debug-tool-input-row" style="display: flex; gap: 8px; align-items: stretch; margin-top: 8px;">
-            <textarea id="debugBatchAssistInput" rows="3" placeholder="并发模拟：每行一个求助详情链接，最多 3 个" style="flex: 1; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; box-sizing: border-box; resize: vertical;"></textarea>
-            <button id="btnDebugSimulateBatch" class="secondary" type="button" style="padding: 0 16px; white-space: nowrap; font-size: 12px;">三任务模拟</button>
           </div>
           <span style="display: block; margin-top: 7px; color: var(--text-muted); font-size: 11px;">详情链接模式会显示正常流程本应停止的原因，但继续测试下载、PDF 校验和去水印；始终不会上传。</span>
           <div id="debugLogContainer" style="margin-top: 12px; padding: 12px; background: #ffffff; border: 1px dashed var(--border); border-radius: 4px; display: none; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; color: var(--text-muted); line-height: 1.6;"></div>
