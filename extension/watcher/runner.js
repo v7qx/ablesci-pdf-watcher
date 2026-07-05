@@ -57,14 +57,16 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
 
     async function openHiddenTab(url, purpose = 'hidden') {
       await appendWatcherTrace('tab_open_request', { reason: purpose, url });
+      let tab = null;
       try {
-        const tab = await chromeApi.tabs.create({ url, active: false });
+        tab = await chromeApi.tabs.create({ url, active: false });
         await appendWatcherTrace('tab_opened', { reason: purpose, url: tab.url || url, tabId: tab.id, active: tab.active === true });
         const completedTab = await waitForTabComplete(tab.id);
         await appendWatcherTrace('tab_complete', { reason: purpose, url: completedTab?.url || tab.url || url, tabId: tab.id });
         return tab;
       } catch (err) {
-        await appendWatcherTrace('tab_open_failed', { reason: purpose, url, error: err?.message || String(err) });
+        await appendWatcherTrace('tab_open_failed', { reason: purpose, url, tabId: tab?.id || '', error: err?.message || String(err) });
+        if (tab?.id) await closeTabQuietly(tab.id, `${purpose}_load_failed`);
         throw err;
       }
     }
@@ -591,22 +593,18 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
       if (sessionPort) {
         if (opts.watcherMultiPublisherEnabled) {
           sessionPort.result.then(async result => {
-            if (!payload.downloadOnly && !opts.debugDownloadOnly) {
-              if (result.ok) {
-                await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
-              }
-              await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
+            if (result.ok) {
+              await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
             }
+            await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
           }).catch(() => {});
           return { handled: true, stopRun: false, reason: 'queued_parallel' };
         }
         const result = await sessionPort.result;
-        if (!payload.downloadOnly && !opts.debugDownloadOnly) {
-          if (result.ok) {
-            await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
-          }
-          await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
+        if (result.ok) {
+          await new Promise(resolve => setTimeout(resolve, AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS));
         }
+        await closeTabQuietly(detailTabId, result.ok ? 'auto_upload_done' : 'auto_upload_failed');
         if (!result.ok) {
           const isSkipReason = /跳过|无.*权限|没有.*权限|订阅权限|访问权限|不支持|unsupported|accessDenied|paywall|no_access|no-access|subscribe/i.test(result.reason || '');
           if (isSkipReason) {

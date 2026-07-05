@@ -105,7 +105,7 @@
     function compareTitleWithFirstPage(title, firstPageText) {
       const expected = normalizeTitleText(title);
       const actual = normalizeTitleText(firstPageText);
-      if (!expected || actual.length < 40) {
+      if (!expected || !actual) {
         return { status: 'unverifiable', score: 0, matchedTokens: [], expectedTokens: [], reason: 'missing_title_or_first_page_text' };
       }
       if (actual.includes(expected)) {
@@ -115,6 +115,9 @@
       const actualCompact = actual.replace(/\s+/g, '');
       if (expectedCompact.length >= 30 && actualCompact.includes(expectedCompact)) {
         return { status: 'matched', score: 1, matchedTokens: expected.split(' '), expectedTokens: expected.split(' '), reason: 'compact_full_title' };
+      }
+      if (actual.length < 40) {
+        return { status: 'unverifiable', score: 0, matchedTokens: [], expectedTokens: [], reason: 'missing_title_or_first_page_text' };
       }
       // Short standalone formula fragments such as "CH 3 NH 3" or "Fe 3 +"
       // are too layout-sensitive to score independently. The compact full-title
@@ -647,9 +650,22 @@
           const documentTitle = usableDocumentTitle(textResult?.document_title || '');
           if (documentTitle) {
             const metadataValidation = compareTitleWithFirstPage(payload.title || '', documentTitle);
-            titleValidation = metadataValidation.status === 'matched'
-              ? { ...metadataValidation, reason: `pdf_metadata_${metadataValidation.reason}`, documentTitle }
-              : { ...metadataValidation, status: 'mismatch', reason: 'pdf_metadata_title_mismatch', documentTitle };
+            if (metadataValidation.status === 'matched') {
+              titleValidation = { ...metadataValidation, reason: `pdf_metadata_${metadataValidation.reason}`, documentTitle };
+            } else {
+              const firstPageValidation = compareTitleWithFirstPage(payload.title || '', textResult?.text || '');
+              if (firstPageValidation.status === 'matched') {
+                titleValidation = {
+                  ...firstPageValidation,
+                  reason: 'first_page_overrode_pdf_metadata',
+                  documentTitle
+                };
+              } else if (metadataValidation.status === 'mismatch') {
+                titleValidation = { ...metadataValidation, reason: 'pdf_metadata_title_mismatch', documentTitle };
+              } else {
+                titleValidation = firstPageValidation;
+              }
+            }
           } else {
             titleValidation = compareTitleWithFirstPage(payload.title || '', textResult?.text || '');
           }
