@@ -319,11 +319,15 @@ func TestBuildPageCountArgsKeepsLegacyDryRun(t *testing.T) {
 func TestAllowedTextReadPathRequiresHelperDirOrExactAllowedPath(t *testing.T) {
 	helperDir := t.TempDir()
 	allowed := filepath.Join(t.TempDir(), "blacklist.txt")
+	allowedDir := t.TempDir()
 	if !isAllowedTextReadPath(filepath.Join(helperDir, "blacklist.txt"), helperDir, "") {
 		t.Fatal("expected helper-local blacklist to be allowed")
 	}
 	if !isAllowedTextReadPath(allowed, helperDir, allowed) {
 		t.Fatal("expected exact configured blacklist path to be allowed")
+	}
+	if !isAllowedTextReadPath(filepath.Join(allowedDir, "blacklist.txt"), helperDir, allowedDir) {
+		t.Fatal("expected blacklist.txt inside configured directory to be allowed")
 	}
 	if isAllowedTextReadPath(filepath.Join(t.TempDir(), "other.txt"), helperDir, allowed) {
 		t.Fatal("expected unrelated explicit txt path to be rejected")

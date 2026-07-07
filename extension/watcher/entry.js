@@ -8,7 +8,6 @@
       depsRef,
       setDeps,
       alarmName,
-      badgeRefreshAlarmName,
       autoWatcherStateKey,
       autoWatcherLogKey,
       autoWatcherTraceKey,
@@ -58,12 +57,31 @@
       await Promise.all(Object.values(parallelAlarmNames).map(name => chromeApi.alarms.clear(name)));
       const state = await getWatcherState();
       delete state.parallelLaneSchedules;
-      await saveWatcherState(state);
+      await chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
+    }
+
+    async function clearParallelLane(lane) {
+      const alarm = parallelAlarmNames[lane];
+      if (alarm) await chromeApi.alarms.clear(alarm);
+      const state = await getWatcherState();
+      if (state.parallelLaneSchedules && typeof state.parallelLaneSchedules === 'object') {
+        delete state.parallelLaneSchedules[lane];
+        if (!Object.keys(state.parallelLaneSchedules).length) {
+          delete state.parallelLaneSchedules;
+          await chromeApi.storage.local.set({ [autoWatcherStateKey]: state });
+        } else {
+          await saveWatcherState(state);
+        }
+      }
     }
 
     async function scheduleParallelLane(lane, opts, reason = 'parallel_lane_reschedule', initialOffsetMinutes = 0) {
       const alarm = parallelAlarmNames[lane];
-      if (!alarm || !opts?.watcherEnabled || !opts?.watcherMultiPublisherEnabled) return;
+      if (!alarm) return;
+      if (!opts?.watcherEnabled || !opts?.watcherMultiPublisherEnabled) {
+        await clearParallelLane(lane);
+        return;
+      }
       const configured = configuredPublishers(opts);
       const hasElsevier = configured.some(item => item.publisher === 'elsevier');
       const secondaryCount = configured.filter(item => item.publisher !== 'elsevier').length;
@@ -71,7 +89,7 @@
         ? hasElsevier
         : (lane === 'secondary1' ? secondaryCount >= 1 : secondaryCount >= 2);
       if (!laneAvailable) {
-        await chromeApi.alarms.clear(alarm);
+        await clearParallelLane(lane);
         return;
       }
       const state = await getWatcherState();
@@ -198,7 +216,7 @@
       // minute even when idle). The badge is refreshed event-driven instead:
       // on storage changes, after each run, and by the in-memory loop while the
       // worker is alive. Clear any periodic alarm left by older installs.
-      chromeApi.alarms.clear(badgeRefreshAlarmName).catch(() => {});
+      chromeApi.alarms.clear('ablesciBadgeRefresh').catch(() => {});
 
       chromeApi.runtime.onStartup.addListener(() => {
         recoverStaleWatcherState('runtime_startup').catch(() => {});

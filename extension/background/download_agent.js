@@ -477,6 +477,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
 
         function acceptCandidate(item, source) {
           if (settled || !item || seenIds.has(item.id)) return;
+          if (downloadId !== null) return;
           if (!downloadArmed) {
             tracePublisherStep('download-candidate-ignored', { source, reason: 'download_not_armed', downloadId: item.id });
             if (!seenIgnoredIds.has(item.id)) {

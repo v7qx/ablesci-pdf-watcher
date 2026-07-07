@@ -96,6 +96,7 @@
   "启用多出版社并发值守": "Enable multi-publisher concurrent watcher",
   "值守速度模式": "Watcher Speed Mode",
   "控制自动值守的运行速率。极速与快速模式下将获得更密集的应助响应。": "Controls the execution rate of the auto watcher. Faster modes run checks more frequently.",
+  "自适应 (默认，按月目标自动调速)": "Adaptive (default, auto-paces by monthly target)",
   "极速模式 (中位数 2 分钟)": "Fast Mode (Median 2 min)",
   "常规速度 (中位数 4 分钟)": "Normal Mode (Median 4 min)",
   "普通慢速 (中位数 6 分钟)": "Slow Mode (Median 6 min)",
@@ -121,10 +122,7 @@
   "异常文本": "Risk Text",
   "更正/Corrigendum": "Corrigendum",
   "求助人黑名单": "Requester Blacklist",
-  "黑名单文件路径": "Blacklist File Path",
-  "设置本地黑名单 .txt 文件的绝对路径（留空默认读取并生成“本地目录”下的 blacklist.txt）。多个 ID 用逗号、空格或换行分隔。": "Specify the absolute path of the local blacklist .txt file (leave empty to default to blacklist.txt under local directory). IDs separated by commas, spaces, or newlines.",
-  "可选。开启黑名单后，留空会读取并自动生成 Helper 本地目录下的 blacklist.txt；填写路径时若 .txt 不存在也会自动创建。读取失败时本次会跳过黑名单检查，不阻断应助。": "Optional. When enabled, leaving this empty reads and auto-creates blacklist.txt in the Helper local directory; a custom .txt path is also auto-created if missing. Read failures skip blacklist checking for the current task and do not block assisting.",
-  "例如：D:\\path\\to\\blacklist.txt": "e.g., D:\\path\\to\\blacklist.txt",
+  "可选本地 .txt 文件或同步目录。填目录时使用其中的 blacklist.txt；留空则使用 Helper 本地目录。多个 ID 用逗号、空格或换行分隔。": "Optional local .txt file or sync folder. If a folder is provided, blacklist.txt inside it is used; leaving it empty uses the Helper local directory. IDs can be separated by commas, spaces, or newlines.",
 
 
   "任务超时": "Task Timeout",

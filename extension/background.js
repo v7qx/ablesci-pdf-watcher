@@ -27,8 +27,6 @@ const {
   sanitizePathPart,
   normalizeSizeUnit,
   clampNumber,
-  normalizeSchedulerMode,
-  normalizeWatcherIntervals,
   normalizeWatcherListUrls,
   normalizeOptions
 } = globalThis.AblesciWatcherConfig;

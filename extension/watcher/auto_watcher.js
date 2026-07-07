@@ -2,7 +2,6 @@
 
 (function () {
   const ALARM_NAME = 'ablesciAutoWatcher';
-  const BADGE_REFRESH_ALARM_NAME = 'ablesciBadgeRefresh';
   const AUTO_WATCHER_STATE_KEY = 'autoWatcherState';
   const AUTO_WATCHER_LOG_KEY = 'autoWatcherLogs';
   const AUTO_WATCHER_TRACE_KEY = 'autoWatcherTraceLogs';
@@ -21,11 +20,6 @@
   const REPORT_DIR = 'ablesci-watcher-reports';
   const WATCHER_DAILY_LIMIT_MAX = 1000;
   const DOI_FAILURE_SKIP_THRESHOLD = 5;
-  const SESSION_MODES = {
-    slow: { median: 6, min: 4, max: 15, sizeWeights: [0, 1] },
-    normal: { median: 4, min: 2, max: 10, sizeWeights: [0, 1] },
-    fast: { median: 2, min: 1, max: 5, sizeWeights: [0, 1] }
-  };
 
   let deps = null;
   const stateRef = { autoWatcherRunning: false };
@@ -35,7 +29,6 @@
   const WATCHER_LOG_FLUSH_BATCH_SIZE = 20;
   const {
     clampNumber,
-    normalizeSchedulerMode,
     normalizeOptions: normalizeSharedOptions
   } = globalThis.AblesciWatcherConfig;
   const {
@@ -107,7 +100,6 @@
     stateKey: AUTO_WATCHER_STATE_KEY,
     todayKey,
     normalizeText,
-    normalizeSchedulerMode,
     activeRunRetentionDays: ACTIVE_RUN_RETENTION_DAYS,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     updateActionBadge: state => updateActionBadge(state),
@@ -120,9 +112,7 @@
   } = createWatcherPublisherCountsApi();
   const {
     monthDone,
-    lagThresholds,
     calculateTargetState,
-    calculateAdvancedTargetState,
     candidateSource
   } = createWatcherTargetApi({
     todayKey,
@@ -195,7 +185,6 @@
     normalizeWorkWindows,
     isInWorkSchedule,
     nextWorkDelayMinutes,
-    logNormalMinutes,
     maxSessionCandidates,
     dailyDownloadedFromState,
     sessionExecutionCap,
@@ -338,9 +327,6 @@
     updateActionBadge,
     clampNumber,
     todayKey,
-    sessionModes: SESSION_MODES,
-    logNormalMinutes,
-    lagThresholds,
     dailyDownloadedFromState,
     quotaResetDelayMinutes,
     riskSnapshot,
@@ -388,7 +374,6 @@
     enrichCandidateJournalFromMap
   });
   const { sessionSize } = createWatcherSessionApi({
-    sessionModes: SESSION_MODES,
     maxSessionCandidates,
     sessionExecutionCap,
     riskSnapshot
@@ -446,7 +431,6 @@
     resetCfChallengeStreak,
     isAssistDue,
     checkShortTermRateLimit,
-    calculateAdvancedTargetState,
     calculateTargetState,
     mergeFrozenTargetState,
     getDailyCount,
@@ -490,7 +474,6 @@
     depsRef,
     setDeps(nextDeps) { deps = nextDeps; },
     alarmName: ALARM_NAME,
-    badgeRefreshAlarmName: BADGE_REFRESH_ALARM_NAME,
     autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
     autoWatcherLogKey: AUTO_WATCHER_LOG_KEY,
     autoWatcherTraceKey: AUTO_WATCHER_TRACE_KEY,

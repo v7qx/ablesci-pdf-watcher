@@ -97,7 +97,7 @@
         if (res && res.ok && res.body) {
           const lines = res.body.split(/\r?\n/);
           for (let line of lines) {
-            line = line.trim();
+            line = line.replace(/^\uFEFF/, '').trim();
             if (!line || line.startsWith('#') || line.startsWith('//')) continue;
             const commentIdx = line.indexOf('#') >= 0 ? line.indexOf('#') : (line.indexOf('//') >= 0 ? line.indexOf('//') : -1);
             if (commentIdx >= 0) line = line.substring(0, commentIdx).trim();

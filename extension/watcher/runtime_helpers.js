@@ -53,14 +53,6 @@
       return null;
     }
 
-    function logNormalMinutes(median, min, max) {
-      const u1 = Math.max(1e-6, Math.random());
-      const u2 = Math.max(1e-6, Math.random());
-      const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-      const value = median * Math.exp(0.35 * normal);
-      return Math.min(max, Math.max(min, value));
-    }
-
     function maxSessionCandidates(opts) {
       return 1;
     }
@@ -194,7 +186,6 @@
       normalizeWorkWindows,
       isInWorkSchedule,
       nextWorkDelayMinutes,
-      logNormalMinutes,
       maxSessionCandidates,
       dailyDownloadedFromState,
       sessionExecutionCap,

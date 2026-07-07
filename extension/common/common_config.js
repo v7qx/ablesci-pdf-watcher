@@ -39,10 +39,8 @@
     watcherMaxIntervalMinutes: 30,
     // Speed mode: 'adaptive' (default) lets watcher/target.js pick fast/normal
     // from monthly-target lag + daily progress; fast/normal/slow pin a fixed tier.
-    // The chosen tier sets the random interval median. NOTE: the options UI only
-    // exposes fast/normal/slow, so the 'adaptive' default has no matching control —
-    // collapsing this to an explicit tier is a scheduler-behaviour change deferred
-    // to a browser-tested branch, not a no-op rename.
+    // The chosen tier sets the random interval median and is exposed in the
+    // options UI alongside the fixed modes.
     watcherSpeedMode: 'adaptive',
     watcherMaxCandidatesPerRun: 1,
     watcherMinNonSdSeekingCount: 200,
@@ -123,19 +121,6 @@
     return Math.min(max, Math.max(min, n));
   }
 
-  // FORCE scheduler mode to 'quant' and enable quant scheduler.
-  function normalizeSchedulerMode(opts) {
-    return 'quant';
-  }
-
-  function normalizeWatcherIntervals(opts) {
-    return {
-      watcherIntervalMinutes: 10,
-      watcherMinIntervalMinutes: 1,
-      watcherMaxIntervalMinutes: 30
-    };
-  }
-
   function normalizeWatcherListUrls(value) {
     const raw = Array.isArray(value) ? value : String(value || '').split(/\r?\n/);
     const urls = raw
@@ -152,14 +137,14 @@
     return urls.length ? urls : DEFAULT_OPTIONS.watcherListUrls.slice();
   }
 
-  function parseJournalAccessRules(raw) {
-    return { blocked: [], allowed: [], partial: [], unknown: [] };
-  }
-
   function normalizeOptions(raw = {}, uiNormalizers = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...(raw || {}) };
     const schedulerMode = 'quant';
-    const intervals = normalizeWatcherIntervals(opts);
+    const intervals = {
+      watcherIntervalMinutes: 10,
+      watcherMinIntervalMinutes: 1,
+      watcherMaxIntervalMinutes: 30
+    };
     const normalizeButtonLabel = typeof uiNormalizers.normalizeButtonLabel === 'function'
       ? uiNormalizers.normalizeButtonLabel
       : value => String(value || '').trim().slice(0, 20) || DEFAULT_OPTIONS.buttonLabel;
@@ -323,10 +308,7 @@
     sanitizePathPart,
     normalizeSizeUnit,
     clampNumber,
-    normalizeSchedulerMode,
-    normalizeWatcherIntervals,
     normalizeWatcherListUrls,
-    parseJournalAccessRules,
     normalizeOptions,
     validateOptions
   };

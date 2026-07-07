@@ -415,7 +415,7 @@
             const blacklistMap = new Map();
             const lines = res.body.split(/\r?\n/);
             for (let line of lines) {
-              line = line.trim();
+              line = line.replace(/^\uFEFF/, '').trim();
               if (!line || line.startsWith('#') || line.startsWith('//')) {
                 continue;
               }

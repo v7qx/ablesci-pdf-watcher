@@ -20,7 +20,6 @@
       resetCfChallengeStreak,
       isAssistDue,
       checkShortTermRateLimit,
-      calculateAdvancedTargetState,
       calculateTargetState,
       mergeFrozenTargetState,
       getDailyCount,
@@ -114,11 +113,6 @@
         'nextAssistStrategy',
         'nextAssistDelayMinutes',
         'nextAssistModelDelayMinutes',
-        'nextAssistGuardMinutes',
-        'nextAssistGuardApplied',
-        'nextAssistGuardLiftMinutes',
-        'nextAssistGuardWeight',
-        'nextAssistGuardMode',
         'nextAssistPlannedAt',
         'nextAssistPlanningData',
         'nextAssistPlan',
@@ -238,6 +232,8 @@
       const stateForTargets = await getWatcherState();
       stateForTargets.optionsSnapshot = opts;
       await syncActualAssistCount(stateForTargets, opts);
+      // Parallel publisher lanes are paced by their own independent Chrome
+      // alarms, so the single-lane due check is intentionally skipped there.
       if (trigger === 'alarm' && !run.execution.parallelDispatch && opts.watcherQuantSchedulerEnabled && !isAssistDue(stateForTargets)) {
         await appendWatcherTrace('run_skip_assist_not_due', {
           reason: 'assist_not_due',
@@ -250,6 +246,8 @@
         });
         return { stopRun: true, result: { ok: true, reason: 'assist_not_due' } };
       }
+      // Parallel lanes use per-lane randomized alarms as their short-term
+      // throttle; daily limit and risk-budget gates still apply below.
       if (trigger !== 'manual' && !run.execution.parallelDispatch) {
         const rateLimit = checkShortTermRateLimit(stateForTargets);
         if (rateLimit.limited) {
@@ -284,7 +282,7 @@
       const targetState = mergeFrozenTargetState(liveTargetState, frozenTargetState);
       Object.assign(stateForTargets, targetState);
       stateForTargets.lastAssistDecisionModelData = frozenTargetState ? 'frozen_pending_assist_plan' : 'live_schedule_state';
-      stateForTargets.lastAssistStrategy = opts.watcherQuantSchedulerEnabled ? 'calendar_target_lognormal' : 'fixed_interval';
+      stateForTargets.lastAssistStrategy = 'random_interval';
       stateForTargets.lastAssistDecisionAt = new Date().toISOString();
       stateForTargets.lastAssistDecision = {
         trigger,
@@ -304,7 +302,7 @@
       };
       await saveWatcherStateSafe(stateForTargets);
       await appendWatcherTrace('run_target_state', {
-        reason: opts.watcherQuantSchedulerEnabled ? 'calendar_target' : 'fixed_interval',
+        reason: 'calendar_target',
         phase: 'target_decision',
         trigger,
         runId: run.runId,

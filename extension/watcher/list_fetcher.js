@@ -37,6 +37,10 @@
       return htmlDecode(m ? (m[2] ?? m[3] ?? m[4] ?? '') : '');
     }
 
+    function escapeRegExp(value) {
+      return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     function cleanJournalAccessName(value) {
       return normalizeText(htmlDecode(value))
         .replace(/\s*\|\s*本地记录：(?:ScienceDirect|当前出版社)明确无订阅权限；过期后会自动重试\s*/g, '')
@@ -291,8 +295,9 @@
       const mapCandidatesStartedAt = Date.now();
       const candidates = items.map((item, index) => {
         const li = item.html;
+        const assistIdPattern = escapeRegExp(item.assistId);
         const detailHref =
-          attrValue(li.match(new RegExp(`<a\\\\b[^>]*href\\\\s*=\\\\s*"[^"]*/assist/detail\\\\?id=${item.assistId}[^"]*"[^>]*>`, 'i'))?.[0] || '', 'href') ||
+          attrValue(li.match(new RegExp(`<a\\b[^>]*href\\s*=\\s*"[^"]*/assist/detail\\?id=${assistIdPattern}[^"]*"[^>]*>`, 'i'))?.[0] || '', 'href') ||
           attrValue(li.match(/<a\b[^>]*href\s*=\s*"[^"]*\/assist\/detail\?id=[^"]*"[^>]*>/i)?.[0] || '', 'href');
         const detailUrl = absUrl(detailHref, url);
         const rowText = stripTags(li);

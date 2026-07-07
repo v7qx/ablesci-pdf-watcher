@@ -583,6 +583,11 @@ func handleReadTextFile(req Request) error {
 			return err
 		}
 		resolved = filepath.Clean(abs)
+		if info, statErr := os.Stat(resolved); statErr == nil && info.IsDir() {
+			resolved = filepath.Clean(filepath.Join(resolved, "blacklist.txt"))
+		} else if strings.ToLower(filepath.Ext(resolved)) != ".txt" {
+			resolved = filepath.Clean(filepath.Join(resolved, "blacklist.txt"))
+		}
 	}
 
 	// 仅允许读取 .txt 文件以防任意读取敏感系统文件
@@ -593,14 +598,10 @@ func handleReadTextFile(req Request) error {
 		return errors.New("text file path is outside allowed helper/configured path")
 	}
 
-	// Auto-create only the Helper's own default blacklist file (empty request
-	// path → helperDir/blacklist.txt). For an explicit, caller-supplied path we do
-	// NOT create the file — auto-creating at an arbitrary path is effectively a
-	// fixed-content write to any location, so it must already exist.
+	// Auto-create the blacklist template at the resolved path. A custom directory
+	// is resolved to <dir>/blacklist.txt above, so synced folders such as OneDrive
+	// can be used without hand-creating the file first.
 	if _, statErr := os.Stat(resolved); os.IsNotExist(statErr) {
-		if p != "" {
-			return fmt.Errorf("text file does not exist: %s", filepath.Base(resolved))
-		}
 		if err := os.MkdirAll(filepath.Dir(resolved), 0755); err != nil {
 			return err
 		}
@@ -645,7 +646,15 @@ func isAllowedTextReadPath(path string, helperDir string, allowedPath string) bo
 	if err != nil {
 		return false
 	}
-	return sameFilePath(filepath.Clean(path), filepath.Clean(abs))
+	cleanPath := filepath.Clean(path)
+	cleanAllowed := filepath.Clean(abs)
+	if sameFilePath(cleanPath, cleanAllowed) {
+		return true
+	}
+	if strings.ToLower(filepath.Ext(cleanAllowed)) != ".txt" {
+		return isPathInsideDir(cleanPath, cleanAllowed)
+	}
+	return false
 }
 
 // allowedTextDirs returns directories the Helper itself trusts for report/text

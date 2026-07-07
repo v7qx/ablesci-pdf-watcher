@@ -7,7 +7,6 @@
       stateKey,
       todayKey,
       normalizeText,
-      normalizeSchedulerMode,
       activeRunRetentionDays,
       appendWatcherTrace,
       updateActionBadge
@@ -345,8 +344,8 @@
         state.runStats[triggerMetricKey(trigger)] = Number(state.runStats[triggerMetricKey(trigger)] || 0) + 1;
         state.lastRunStartedAt = now;
         state.lastRunTrigger = trigger;
-        state.currentSchedulerMode = opts.watcherSchedulerMode || normalizeSchedulerMode(opts);
-        state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
+        state.currentSchedulerMode = opts.watcherSchedulerMode || 'quant';
+        state.currentExecutionModel = 'quant_rules';
         state.activeRunDays = state.activeRunDays || {};
         state.activeRunDays[key] = Number(state.activeRunDays[key] || 0) + 1;
         const keepAfter = Date.now() - activeRunRetentionDays * 24 * 60 * 60 * 1000;

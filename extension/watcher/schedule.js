@@ -12,9 +12,6 @@
       updateActionBadge,
       clampNumber,
       todayKey,
-      sessionModes,
-      logNormalMinutes,
-      lagThresholds,
       dailyDownloadedFromState,
       quotaResetDelayMinutes,
       nextWorkDelayMinutes,
@@ -23,6 +20,25 @@
       calculateTargetState
     } = config;
 
+    function clearNextAssistSchedule(state) {
+      // saveWatcherState merges incoming state over current storage, so top-level
+      // deletes would be revived. Assign blank values explicitly to migrate stale
+      // planned-assist fields, including legacy guard* fields from older builds.
+      state.nextAssistRunAt = '';
+      state.nextAssistReason = '';
+      state.nextAssistStrategy = '';
+      state.nextAssistDelayMinutes = '';
+      state.nextAssistModelDelayMinutes = '';
+      state.nextAssistGuardMinutes = '';
+      state.nextAssistGuardApplied = false;
+      state.nextAssistGuardLiftMinutes = '';
+      state.nextAssistGuardWeight = '';
+      state.nextAssistGuardMode = '';
+      state.nextAssistPlannedAt = '';
+      state.nextAssistPlanningData = null;
+      state.nextAssistPlan = null;
+    }
+
     function quotaHoldPlan(opts, state = {}) {
       const downloaded = dailyDownloadedFromState(state);
       if (Number(opts?.watcherDailyLimit || 0) > 0 && downloaded >= Number(opts.watcherDailyLimit || 0)) {
@@ -30,7 +46,6 @@
         return {
           minutes,
           modelDelayMinutes: minutes,
-          guardMinutes: 0,
           reason: 'daily_limit_reached',
           strategy: 'quota_hold',
           dailyDownloaded: downloaded,
@@ -88,12 +103,6 @@
         minutes,
         modelDelayMinutes: modelDelay,
         rawModelDelayMinutes: modelDelay,
-        guardMinutes: 0,
-        guardApplied: false,
-        guardLiftMinutes: 0,
-        guardWeight: 0,
-        guardMode: 'none',
-        hardFloorMinutes: 0,
         reason: cfBackoffApplied ? `${reason}_cf_backoff_${cfStreak}` : reason,
         strategy: 'random_interval',
         speedMode,
@@ -119,11 +128,6 @@
       state.nextAssistStrategy = plan.strategy;
       state.nextAssistDelayMinutes = Number(plan.minutes.toFixed(2));
       state.nextAssistModelDelayMinutes = Number((plan.modelDelayMinutes || plan.minutes).toFixed(2));
-      state.nextAssistGuardMinutes = Number((plan.guardMinutes || 0).toFixed(2));
-      state.nextAssistGuardApplied = plan.guardApplied === true;
-      state.nextAssistGuardLiftMinutes = Number((plan.guardLiftMinutes || 0).toFixed(2));
-      state.nextAssistGuardWeight = Number((plan.guardWeight || 0).toFixed(3));
-      state.nextAssistGuardMode = plan.guardMode || '';
       state.nextAssistPlannedAt = new Date().toISOString();
       state.nextAssistPlanningData = {
         plannedAt: state.nextAssistPlannedAt,
@@ -140,13 +144,6 @@
         todayTarget: plan.todayTarget ?? Number(state.todayTarget || 0),
         rawModelDelayMinutes: plan.rawModelDelayMinutes ? Number(plan.rawModelDelayMinutes.toFixed(2)) : '',
         modelDelayMinutes: plan.modelDelayMinutes ? Number(plan.modelDelayMinutes.toFixed(2)) : '',
-        guardMinutes: plan.guardMinutes ? Number(plan.guardMinutes.toFixed(2)) : '',
-        guardSource: plan.guardMinutes ? 'watcherMinIntervalMinutes' : '',
-        guardMode: plan.guardMode || '',
-        guardApplied: plan.guardApplied === true,
-        guardWeight: plan.guardWeight ? Number(plan.guardWeight.toFixed(3)) : '',
-        guardLiftMinutes: plan.guardLiftMinutes ? Number(plan.guardLiftMinutes.toFixed(2)) : '',
-        hardFloorMinutes: plan.hardFloorMinutes ? Number(plan.hardFloorMinutes.toFixed(2)) : '',
         finalDelayMinutes: Number(plan.minutes.toFixed(2))
       };
       updateActionBadge(state).catch(() => {});
@@ -159,19 +156,7 @@
       const reason = String(result?.reason || '');
       if (/assist_not_due|outside_work_schedule|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
       const state = await getWatcherState();
-      delete state.nextAssistRunAt;
-      delete state.nextAssistReason;
-      delete state.nextAssistStrategy;
-      delete state.nextAssistDelayMinutes;
-      delete state.nextAssistModelDelayMinutes;
-      delete state.nextAssistGuardMinutes;
-      delete state.nextAssistGuardApplied;
-      delete state.nextAssistGuardLiftMinutes;
-      delete state.nextAssistGuardWeight;
-      delete state.nextAssistGuardMode;
-      delete state.nextAssistPlannedAt;
-      delete state.nextAssistPlanningData;
-      delete state.nextAssistPlan;
+      clearNextAssistSchedule(state);
       const plan = ensureNextAssistSchedule(opts, state, `after_${reason || 'run'}`);
       await saveWatcherState(state);
       await appendWatcherTrace('assist_next_scheduled', {
@@ -180,10 +165,6 @@
         nextAssistRunAt: state.nextAssistRunAt || '',
         delayMinutes: state.nextAssistDelayMinutes || '',
         modelDelayMinutes: state.nextAssistModelDelayMinutes || '',
-        guardMinutes: state.nextAssistGuardMinutes || '',
-        guardApplied: state.nextAssistGuardApplied === true,
-        guardLiftMinutes: state.nextAssistGuardLiftMinutes || '',
-        guardWeight: state.nextAssistGuardWeight || '',
         strategy: state.nextAssistStrategy || '',
         plan: state.nextAssistPlan || {}
       });
@@ -216,19 +197,7 @@
       }
       if (!opts.watcherEnabled) {
         const state = await getWatcherState();
-        delete state.nextAssistRunAt;
-        delete state.nextAssistReason;
-        delete state.nextAssistStrategy;
-        delete state.nextAssistDelayMinutes;
-        delete state.nextAssistModelDelayMinutes;
-        delete state.nextAssistGuardMinutes;
-        delete state.nextAssistGuardApplied;
-        delete state.nextAssistGuardLiftMinutes;
-        delete state.nextAssistGuardWeight;
-        delete state.nextAssistGuardMode;
-        delete state.nextAssistPlannedAt;
-        delete state.nextAssistPlanningData;
-        delete state.nextAssistPlan;
+        clearNextAssistSchedule(state);
         state.nextScheduledAt = '';
         state.chromeAlarmScheduledAt = '';
         await saveWatcherState(state);
@@ -238,26 +207,14 @@
       }
       const state = await getWatcherState();
       if (String(reason || '').startsWith('storage_changed:')) {
-        delete state.nextAssistRunAt;
-        delete state.nextAssistReason;
-        delete state.nextAssistStrategy;
-        delete state.nextAssistDelayMinutes;
-        delete state.nextAssistModelDelayMinutes;
-        delete state.nextAssistGuardMinutes;
-        delete state.nextAssistGuardApplied;
-        delete state.nextAssistGuardLiftMinutes;
-        delete state.nextAssistGuardWeight;
-        delete state.nextAssistGuardMode;
-        delete state.nextAssistPlannedAt;
-        delete state.nextAssistPlanningData;
-        delete state.nextAssistPlan;
+        clearNextAssistSchedule(state);
       }
       const delay = randomIntervalMinutes(opts, state);
       state.nextScheduledAt = Date.now() + delay * 60 * 1000;
       state.currentSchedulerMode = opts.watcherSchedulerMode;
       state.currentExecutionModel = opts.watcherMultiPublisherEnabled
         ? 'multi_publisher_random_interval'
-        : (opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval');
+        : 'quant_rules';
       state.lastAlarmRefreshReason = reason;
       if (calculateTargetState) {
         const targetState = calculateTargetState(state, opts);
@@ -332,7 +289,7 @@
         state.nextAssistStrategy = 'rate_limited_retry';
         state.nextScheduledAt = clearTimeMs;
         state.currentSchedulerMode = opts.watcherSchedulerMode;
-        state.currentExecutionModel = opts.watcherQuantSchedulerEnabled ? 'quant_rules' : 'fixed_interval';
+        state.currentExecutionModel = 'quant_rules';
         state.lastAlarmRefreshReason = 'rate_limited_retry';
         await saveWatcherState(state);
         await chromeApi.alarms.clear(alarmName);
@@ -357,7 +314,7 @@
         if (!state.nextAssistRunAt) {
           state.nextAssistRunAt = attempt.nextAssistBefore;
           state.nextAssistReason = state.nextAssistReason || 'preserved_after_active_task';
-          state.nextAssistStrategy = state.nextAssistStrategy || 'calendar_target_lognormal';
+          state.nextAssistStrategy = state.nextAssistStrategy || 'random_interval';
         }
         const delay = await scheduleWakeForExistingAssist(opts, state, 'retry_after_active_task', 1);
         if (delay !== null) return delay;

@@ -281,6 +281,26 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
       }
     }
 
+    // Shared shape for the three queue-message log entries (error / blocked /
+    // done). Only status and reason differ between branches.
+    function buildWatcherLogEntry(context, msg, status, reason) {
+      return {
+        ...context.payload,
+        detailUrl: context.detailUrl,
+        sessionId: context.sessionId || '',
+        trigger: context.trigger || '',
+        status,
+        reason,
+        downloadedFilename: msg.filename || '',
+        downloadedMd5: msg.md5 || '',
+        downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
+        downloadId: msg.downloadId || '',
+        downloadCaptureId: msg.downloadCaptureId || '',
+        pdfCleanerResult: msg.pdfCleanerResult || null,
+        titleValidation: msg.titleValidation || context.payload?.titleValidation || null
+      };
+    }
+
     function makeWatcherPort(context) {
       const disconnectListeners = new Set();
       let disconnected = false;
@@ -330,6 +350,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
           if (Number.isInteger(context.detailTabId)) {
             chromeApi.tabs.sendMessage(context.detailTabId, { type: 'ablesciAutoWatcherProgress', msg }).catch(() => {});
           }
+          if (context.settled) return;
           if (msg.type === 'error') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             const paused = await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
@@ -347,21 +368,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
               updateProcessed(context.key, 'failed', msg.message || 'upload_failed', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
-              appendWatcherLog({
-                ...context.payload,
-                detailUrl: context.detailUrl,
-                sessionId: context.sessionId || '',
-                trigger: context.trigger || '',
-                status: 'failed',
-                reason: msg.message || 'upload_failed',
-                downloadedFilename: msg.filename || '',
-                downloadedMd5: msg.md5 || '',
-                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
-                downloadId: msg.downloadId || '',
-                downloadCaptureId: msg.downloadCaptureId || '',
-                pdfCleanerResult: msg.pdfCleanerResult || null,
-                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
-              }).then(writeDailyReports)
+              appendWatcherLog(buildWatcherLogEntry(context, msg, 'failed', msg.message || 'upload_failed')).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
           }
@@ -405,21 +412,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
               updateProcessed(context.key, 'failed', msg.message || 'blocked', processedMeta(context.candidate, context.payload)),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'blocked', 'blocked'),
-              appendWatcherLog({
-                ...context.payload,
-                detailUrl: context.detailUrl,
-                sessionId: context.sessionId || '',
-                trigger: context.trigger || '',
-                status: 'failed',
-                reason: msg.message || 'blocked',
-                downloadedFilename: msg.filename || '',
-                downloadedMd5: msg.md5 || '',
-                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
-                downloadId: msg.downloadId || '',
-                downloadCaptureId: msg.downloadCaptureId || '',
-                pdfCleanerResult: msg.pdfCleanerResult || null,
-                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
-              }).then(writeDailyReports)
+              appendWatcherLog(buildWatcherLogEntry(context, msg, 'failed', msg.message || 'blocked')).then(writeDailyReports)
             ]);
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
           } else if (msg.type === 'done') {
@@ -442,21 +435,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
               }),
               updateProcessed(context.key, 'success', cleanReason, processedMeta(context.candidate, context.payload)),
               recordRiskEvent(context.opts || {}, cleanReason, 'success'),
-              appendWatcherLog({
-                ...context.payload,
-                detailUrl: context.detailUrl,
-                sessionId: context.sessionId || '',
-                trigger: context.trigger || '',
-                status: 'success',
-                reason: cleanReason,
-                downloadedFilename: msg.filename || '',
-                downloadedMd5: msg.md5 || '',
-                downloadSequence: msg.downloadSequence || context.payload?.downloadSequence || '',
-                downloadId: msg.downloadId || '',
-                downloadCaptureId: msg.downloadCaptureId || '',
-                pdfCleanerResult: msg.pdfCleanerResult || null,
-                titleValidation: msg.titleValidation || context.payload?.titleValidation || null
-              }).then(writeDailyReports)
+              appendWatcherLog(buildWatcherLogEntry(context, msg, 'success', cleanReason)).then(writeDailyReports)
             ]);
             settle({ ok: true, reason: cleanReason, durationMs });
           }
@@ -496,7 +475,14 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
           resolve(value);
         };
         const timeoutMs = Math.max(60 * 1000, (Number(context.opts?.watcherTaskTimeoutMinutes || 10) + 1) * 60 * 1000);
-        timer = setTimeout(() => context.resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs }), timeoutMs);
+        timer = setTimeout(() => {
+          if (context.settled) return;
+          context.settled = true;
+          if (port && typeof port.disconnect === 'function') {
+            port.disconnect('auto_watcher_task_timeout');
+          }
+          context.resolve({ ok: false, reason: 'auto_watcher_task_timeout', durationMs: timeoutMs, stopRun: true });
+        }, timeoutMs);
       });
       port = makeWatcherPort(context);
       if (Number.isInteger(context.detailTabId)) {

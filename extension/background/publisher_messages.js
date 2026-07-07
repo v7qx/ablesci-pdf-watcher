@@ -570,6 +570,7 @@
         return true;
       }
       if (msg.publisher === 'iop' && msg.pdfUrl) {
+        markPublisherChallengePassed(pending);
         if (isSamePdfUrl(pending.lastNativePdfUrl, msg.pdfUrl)) {
           sendResponse({ ok: true, ignored: true, reason: 'same iop pdf url already handled' });
           return false;

@@ -45,12 +45,18 @@
     }
 
     function nextDisplaySchedule(state = {}, opts = null) {
+      const now = Date.now();
       const laneTimes = Object.values(state.parallelLaneSchedules || {})
         .map(item => Number(item?.scheduledAt || 0))
-        .filter(value => Number.isFinite(value) && value > 0);
+        .filter(value => Number.isFinite(value) && value > now);
+      const fallbackTimes = [state.nextAssistRunAt, state.chromeAlarmScheduledAt, state.nextScheduledAt]
+        .map(value => value ? new Date(value).getTime() : 0)
+        .filter(value => Number.isFinite(value) && value > now);
       const unifiedAt = opts?.watcherMultiPublisherEnabled && laneTimes.length
         ? Math.min(...laneTimes)
-        : (state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || '');
+        : (fallbackTimes.length
+          ? Math.min(...fallbackTimes)
+          : (state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || ''));
       return {
         kind: 'run',
         time: unifiedAt,

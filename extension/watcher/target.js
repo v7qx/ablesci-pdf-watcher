@@ -125,20 +125,10 @@
       };
     }
 
-    function lagThresholds(monthlyTarget) {
-      const target = Math.max(1, Number(monthlyTarget || 0));
-      return {
-        medium: Math.max(10, target * 0.04),
-        severe: Math.max(20, target * 0.12),
-        ahead: Math.max(10, target * 0.05)
-      };
-    }
-
     function speedModeFromTarget({ error, monthlyTarget, riskExhausted = false }) {
       if (riskExhausted) return 'normal';
-      const thresholds = lagThresholds(monthlyTarget);
-      if (error >= thresholds.severe) return 'fast';
-      if (error >= thresholds.medium) return 'normal';
+      const severeLag = Math.max(20, Math.max(1, Number(monthlyTarget || 0)) * 0.12);
+      if (error >= severeLag) return 'fast';
       return 'normal';
     }
 
@@ -220,10 +210,6 @@
       };
     }
 
-    function calculateAdvancedTargetState(state, opts) {
-      return calculateTargetState(state, opts);
-    }
-
     function candidateSource(candidate, payload = null) {
       return publisherAlias(payload?.publisherName || payload?.journalName || candidate?.publisherName || candidate?.journalShortName || candidate?.rowText || candidate?.title || '');
     }
@@ -238,10 +224,8 @@
       workTimeProgressRatio,
       monthRunCount,
       availabilitySnapshot,
-      lagThresholds,
       speedModeFromTarget,
       calculateTargetState,
-      calculateAdvancedTargetState,
       candidateSource
     };
   }

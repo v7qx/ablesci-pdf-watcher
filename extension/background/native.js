@@ -7,10 +7,6 @@
       defaultTimeoutMs
     } = deps;
 
-    function perfDateKey(date = new Date()) {
-      return date.toISOString().slice(0, 10);
-    }
-
     function compactPerfError(err) {
       return String(err?.message || err || '').replace(/\s+/g, ' ').slice(0, 240);
     }
@@ -86,48 +82,9 @@
     async function recordNativePerformance(hostName, message, entry) {
       // Kept for local debugging only. The option UI is hidden and normalized to
       // false; avoid honoring stale storage values from earlier debug sessions.
-      return;
-      try {
-        const action = message?.action || 'native_message';
-        if (action === 'append_text_file') return;
-        const stored = await chromeApi.storage.local.get({
-          watcherPerfTraceEnabled: false,
-          watcherPerfFileEnabled: false,
-          watcherReportDir: '',
-          autoWatcherTraceLogs: []
-        });
-        const traceEntry = {
-          time: new Date().toISOString(),
-          step: 'perf_native_message',
-          reason: entry.ok ? 'native_message_ok' : 'native_message_failed',
-          trigger: '',
-          sessionId: '',
-          tabId: '',
-          url: '',
-          urlHostPath: null,
-          details: entry
-        };
-        if (stored.watcherPerfTraceEnabled === true) {
-          const traceLogs = Array.isArray(stored.autoWatcherTraceLogs) ? stored.autoWatcherTraceLogs : [];
-          await chromeApi.storage.local.set({
-            autoWatcherTraceLogs: [traceEntry].concat(traceLogs).slice(0, 300)
-          }).catch(() => {});
-        }
-        if (stored.watcherPerfFileEnabled !== true) return;
-        const line = `${JSON.stringify({
-          time: traceEntry.time,
-          hostName,
-          ...entry
-        })}\n`;
-        chromeApi.runtime.sendNativeMessage(hostName, {
-          action: 'append_text_file',
-          dir: String(stored.watcherReportDir || ''),
-          filename: `performance/native-${perfDateKey()}.jsonl`,
-          content: line
-        }, () => {
-          void chromeApi.runtime.lastError;
-        });
-      } catch (_) {}
+      void hostName;
+      void message;
+      void entry;
     }
 
     function sendNativeMessage(hostName, message, timeoutMs = defaultTimeoutMs) {

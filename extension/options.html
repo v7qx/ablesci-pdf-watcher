@@ -146,6 +146,15 @@
       </div>
       <div class="setting-row">
         <div class="setting-copy">
+          <strong>求助人黑名单</strong>
+          <span>可选本地 .txt 文件或同步目录。填目录时使用其中的 blacklist.txt；留空则使用 Helper 本地目录。多个 ID 用逗号、空格或换行分隔。</span>
+        </div>
+        <div class="setting-control setting-control-wide">
+          <input id="watcherBlacklistPath" type="text">
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-copy">
           <strong>诊断信息</strong>
           <span>默认关闭。开启后才记录最近一次诊断和出版商链路。</span>
         </div>
@@ -320,6 +329,7 @@
         </div>
         <div class="setting-control">
           <select id="watcherSpeedMode" aria-label="值守速度模式">
+            <option value="adaptive">自适应 (默认，按月目标自动调速)</option>
             <option value="fast">极速模式 (中位数 2 分钟)</option>
             <option value="normal">常规速度 (中位数 4 分钟)</option>
             <option value="slow">普通慢速 (中位数 6 分钟)</option>
