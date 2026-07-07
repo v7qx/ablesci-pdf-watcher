@@ -318,9 +318,9 @@ func handleExtractFirstPageText(req Request) error {
 	isRSC := publisher == "rsc" || strings.HasPrefix(doi, "10.1039/")
 	isAcceptedManuscript := regexp.MustCompile(`(?i)accepted\s+manuscript|royal\s+society\s+of\s+chemistry\s+peer\s+review\s+process`).MatchString(text)
 	if isRSC && isAcceptedManuscript {
-		if laterText, laterErr := extractPDFPageText(tool, path, 2, 3, 10*time.Second); laterErr == nil && laterText != "" {
+		if laterText, laterErr := extractPDFPageText(tool, path, 2, 4, 10*time.Second); laterErr == nil && laterText != "" {
 			text += "\n" + laterText
-			textSource = "pdftotext_rsc_accepted_manuscript_pages_1_3"
+			textSource = "pdftotext_rsc_accepted_manuscript_pages_1_4"
 		}
 	}
 	return writeResponse(Response{OK: true, Action: "extract_first_page_text", Text: text, TextSource: textSource, DocumentTitle: documentTitle})
