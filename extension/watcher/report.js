@@ -270,6 +270,8 @@
         'riskUsed', 'riskLimit',
         'score', 'estimatedSuccessRate',
         'currentStrategy', 'nextAssistRunAt', 'nextAssistStrategy', 'nextAssistReason', 'nextAssistDelayMinutes',
+        // Legacy guard columns are kept for CSV compatibility. The scheduler no
+        // longer produces guard values, so these fields intentionally stay blank.
         'nextAssistModelDelayMinutes', 'nextAssistGuardMinutes', 'nextAssistGuardMode', 'nextAssistGuardLiftMinutes',
         'nextAssistGuardWeight', 'nextAssistPlannedAt', 'nextWakeAt', 'chromeAlarmScheduledAt',
         'lastAttemptStartedAt', 'lastAttemptFinishedAt', 'lastAttemptResult', 'lastAttemptObserveSnapshot',

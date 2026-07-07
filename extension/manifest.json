@@ -64,6 +64,8 @@
       ],
       "js": [
         "content/adapters.js",
+        "content/content_ablesci_ui.js",
+        "content/content_ablesci_i18n.js",
         "content/content_ablesci.js"
       ],
       "run_at": "document_idle"

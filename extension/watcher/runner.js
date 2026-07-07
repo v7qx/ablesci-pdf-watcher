@@ -240,7 +240,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
 
       await chromeApi.scripting.executeScript({
         target: { tabId },
-        files: ['content/adapters.js', 'content/content_ablesci.js']
+        files: ['content/adapters.js', 'content/content_ablesci_ui.js', 'content/content_ablesci_i18n.js', 'content/content_ablesci.js']
       });
       await new Promise(resolve => setTimeout(resolve, 500));
       return await sendDetailMessage(tabId);

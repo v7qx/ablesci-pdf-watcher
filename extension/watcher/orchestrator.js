@@ -227,6 +227,74 @@
       recordParsedListPage(scan, pagePick.pickedPage);
     }
 
+    function shuffledListUrls(listUrls = []) {
+      const shuffled = listUrls.slice();
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    }
+
+    async function detectMaxPageForUrl(run, urlToTry, trigger) {
+      const urlPageMeta = pageRangeMetaFromUrl(urlToTry);
+      if (!urlPageMeta?.needsMaxDetection) return null;
+      let detectedMaxPage = null;
+      try {
+        const detectUrl = new URL(urlToTry);
+        detectUrl.searchParams.delete('page_min');
+        detectUrl.searchParams.delete('page_max');
+        detectUrl.searchParams.set('page', String(urlPageMeta.pageMin));
+        const parsedPage1 = await parseListUrl(detectUrl.href, {
+          trigger,
+          publisher: urlPageMeta.publisher,
+          pickedPage: 1
+        });
+        if (parsedPage1 && !parsedPage1.isErrorPage && !parsedPage1.cfChallenge) {
+          detectedMaxPage = parsedPage1.listStats?.maxPage || urlPageMeta.pageMin;
+        }
+        await appendWatcherTrace('random_single_page_range_detected', {
+          reason: 'max_page_detected_from_pagination',
+          phase: 'single_random_run',
+          trigger,
+          runId: run.runId,
+          configuredUrl: urlToTry,
+          pageMin: urlPageMeta.pageMin,
+          detectedMaxPage,
+          publisher: urlPageMeta.publisher
+        });
+      } catch (_) {}
+      return detectedMaxPage;
+    }
+
+    async function appendListParsePerf(run, trigger, pagePick, parsed, parseStartedAt, parseFinishedAt) {
+      await appendWatcherTrace('perf_list_parse', {
+        reason: 'single_random_list_parse_done',
+        phase: 'single_random_run',
+        trigger,
+        runId: run.runId,
+        durationMs: parseFinishedAt - parseStartedAt,
+        pickedPage: pagePick.pickedPage,
+        parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+        maxPage: parsed?.listStats?.maxPage || ''
+      });
+    }
+
+    async function appendListPipelinePerf(run, trigger, pagePick, pickedListUrl, parsed, timings = {}, extra = {}) {
+      await appendWatcherTrace('perf_list_pipeline', {
+        reason: extra.reason || 'list_pipeline_done',
+        phase: 'single_random_run',
+        trigger,
+        runId: run.runId,
+        listUrl: pickedListUrl,
+        publisher: pagePick.publisher,
+        pickedPage: pagePick.pickedPage,
+        parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
+        ...extra,
+        ...timings
+      });
+    }
+
     async function prepareTargetPhase(run, opts) {
       const trigger = run.trigger;
       const stateForTargets = await getWatcherState();
@@ -402,20 +470,7 @@
         resultReason: result.reason || 'unknown'
       });
       await appendWatcherTrace('run_finish', { reason: 'finally', phase: 'run_finalize', trigger: run.trigger, runId: run.runId });
-      await setCurrentListScan?.(buildCurrentListScan({
-        trigger: run.trigger,
-        pickedListUrl: result.scannedUrl || run.attempt.pickedListUrl || '',
-        pagePick: {
-          publisher: result.scannedPublisher || run.attempt.scannedPublisher || run.attempt.publisher || '',
-          pickedPage: result.scannedPage || run.attempt.scannedPage || run.attempt.pickedPage || '',
-          pageOrder: run.attempt.pageOrder || '',
-          pageMin: run.attempt.pageMin || '',
-          pageMax: run.attempt.pageMax || ''
-        },
-        phase: 'finalizing',
-        status: 'running',
-        reason: result.reason || ''
-      })).catch(() => {});
+      await setRunFinalizeScan(run, result, 'finalizing', 'running', result.reason || '');
       await recordRunFinish(run.trigger, result).catch(() => {});
       if (run.trigger !== 'manual' && run.opts && !run.execution.skipScheduleRefresh) {
         await scheduleNextAssistAfterRun(run.opts, result, run.trigger).catch(() => {});
@@ -426,6 +481,12 @@
       try { await writeDailyReports(); } catch (_) {}
       await flushWatcherLogs().catch(() => {});
       await flushWatcherTrace().catch(() => {});
+      await setRunFinalizeScan(run, result, 'done', result.ok === true ? 'done' : 'failed', result.reason || 'unknown');
+      stateRef.autoWatcherRunning = false;
+      stateRef.autoWatcherStartedAt = 0;
+    }
+
+    async function setRunFinalizeScan(run, result, phase, status, reason) {
       await setCurrentListScan?.(buildCurrentListScan({
         trigger: run.trigger,
         pickedListUrl: result.scannedUrl || run.attempt.pickedListUrl || '',
@@ -436,12 +497,10 @@
           pageMin: run.attempt.pageMin || '',
           pageMax: run.attempt.pageMax || ''
         },
-        phase: 'done',
-        status: result.ok === true ? 'done' : 'failed',
-        reason: result.reason || 'unknown'
+        phase,
+        status,
+        reason
       })).catch(() => {});
-      stateRef.autoWatcherRunning = false;
-      stateRef.autoWatcherStartedAt = 0;
     }
 
     async function runAutoWatcherOnce(trigger = 'alarm', execution = {}) {
@@ -592,44 +651,13 @@
         const singleLastHandledReasonRef = { value: '' };
 
         // Shuffle URLs so retry doesn't always hit the same order
-        const shuffledUrls = [...singleRunListUrls];
-        for (let i = shuffledUrls.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffledUrls[i], shuffledUrls[j]] = [shuffledUrls[j], shuffledUrls[i]];
-        }
+        const shuffledUrls = shuffledListUrls(singleRunListUrls);
 
         for (let urlIdx = 0; urlIdx < MAX_URLS_TO_TRY && singleHandledCountRef.value === 0; urlIdx++) {
           const urlToTry = shuffledUrls[urlIdx];
 
           // If page_min is present but page_max is not, fetch page 1 first to detect the real max page from pagination.
-          const urlPageMeta = pageRangeMetaFromUrl(urlToTry);
-          let detectedMaxPage = null;
-          if (urlPageMeta && urlPageMeta.needsMaxDetection) {
-            try {
-              const detectUrl = new URL(urlToTry);
-              detectUrl.searchParams.delete('page_min');
-              detectUrl.searchParams.delete('page_max');
-              detectUrl.searchParams.set('page', String(urlPageMeta.pageMin));
-              const parsedPage1 = await parseListUrl(detectUrl.href, {
-                trigger,
-                publisher: urlPageMeta.publisher,
-                pickedPage: 1
-              });
-              if (parsedPage1 && !parsedPage1.isErrorPage && !parsedPage1.cfChallenge) {
-                detectedMaxPage = parsedPage1.listStats?.maxPage || urlPageMeta.pageMin;
-              }
-              await appendWatcherTrace('random_single_page_range_detected', {
-                reason: 'max_page_detected_from_pagination',
-                phase: 'single_random_run',
-                trigger,
-                runId: run.runId,
-                configuredUrl: urlToTry,
-                pageMin: urlPageMeta.pageMin,
-                detectedMaxPage,
-                publisher: urlPageMeta.publisher
-              });
-            } catch (_) {}
-          }
+          const detectedMaxPage = await detectMaxPageForUrl(run, urlToTry, trigger);
 
           for (let pageRetry = 0; pageRetry < MAX_PAGES_PER_URL && singleHandledCountRef.value === 0; pageRetry++) {
             const pagePick = randomizeAssistListUrlWithMeta(urlToTry, detectedMaxPage);
@@ -675,16 +703,7 @@
             });
             const parseFinishedAt = Date.now();
             recordScannedPage(scan, pickedListUrl, pagePick);
-            await appendWatcherTrace('perf_list_parse', {
-              reason: 'single_random_list_parse_done',
-              phase: 'single_random_run',
-              trigger,
-              runId: run.runId,
-              durationMs: parseFinishedAt - parseStartedAt,
-              pickedPage: pagePick.pickedPage,
-              parsedCount: Array.isArray(parsed?.candidates) ? parsed.candidates.length : 0,
-              maxPage: parsed?.listStats?.maxPage || ''
-            });
+            await appendListParsePerf(run, trigger, pagePick, parsed, parseStartedAt, parseFinishedAt);
 
             if (parsed.isErrorPage) {
               await appendWatcherLog({
@@ -719,20 +738,17 @@
             const sourceGateStartedAt = Date.now();
             const sourceGate = minSeekingGateForList(parsed, pickedListUrl, pagePick.publisher, opts);
             const sourceGateMs = Date.now() - sourceGateStartedAt;
+            const basePipelineTimings = {
+              normalizeMs,
+              initPageDataMs,
+              sourceGateMs
+            };
             if (!sourceGate.ok) {
-              await appendWatcherTrace('perf_list_pipeline', {
-                reason: 'list_pipeline_source_gate_skip',
-                phase: 'single_random_run',
-                trigger,
-                runId: run.runId,
-                listUrl: pickedListUrl,
-                publisher: pagePick.publisher,
-                pickedPage: pagePick.pickedPage,
-                parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-                normalizeMs,
-                initPageDataMs,
-                sourceGateMs,
+              await appendListPipelinePerf(run, trigger, pagePick, pickedListUrl, parsed, {
+                ...basePipelineTimings,
                 totalMs: Date.now() - listPipelineStartedAt
+              }, {
+                reason: 'list_pipeline_source_gate_skip',
               });
               await appendWatcherTrace('random_single_assist_source_gate_skip', {
                 reason: sourceGate.reason,
@@ -761,23 +777,15 @@
             const listFilterStartedAt = Date.now();
             const queueableCandidates = await queueableCandidatesFromList(candidates, opts, trigger, pagePick, singleBlacklistedIds);
             const listFilterMs = Date.now() - listFilterStartedAt;
-            await appendWatcherTrace('perf_list_pipeline', {
-              reason: 'list_pipeline_done',
-              phase: 'single_random_run',
-              trigger,
-              runId: run.runId,
-              listUrl: pickedListUrl,
-              publisher: pagePick.publisher,
-              pickedPage: pagePick.pickedPage,
-              parsedCount: Array.isArray(parsed.candidates) ? parsed.candidates.length : 0,
-              orderedCount: candidates.length,
-              queueableCount: queueableCandidates.length,
-              normalizeMs,
-              initPageDataMs,
-              sourceGateMs,
+            await appendListPipelinePerf(run, trigger, pagePick, pickedListUrl, parsed, {
+              ...basePipelineTimings,
               orderMs,
               listFilterMs,
               totalMs: Date.now() - listPipelineStartedAt
+            }, {
+              reason: 'list_pipeline_done',
+              orderedCount: candidates.length,
+              queueableCount: queueableCandidates.length,
             });
             await setCurrentListScan?.(buildCurrentListScan({
               pagePick,

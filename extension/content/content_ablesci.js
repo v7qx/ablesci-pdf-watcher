@@ -16,6 +16,10 @@
   };
   let currentUploadPort = null;
   let pageOptions = { ...DEFAULT_PAGE_OPTIONS };
+  const { styleText } = globalThis.AblesciContentUi.createContentUiApi({
+    buttonId: BTN_ID,
+    logId: LOG_ID
+  });
 
   function $(sel, root = document) { return root.querySelector(sel); }
 
@@ -80,35 +84,7 @@
     if ($('#ablesci-native-oneclick-style')) return;
     const style = document.createElement('style');
     style.id = 'ablesci-native-oneclick-style';
-    style.textContent = `
-      #${BTN_ID} {
-        margin-left: 5px !important;
-        margin-right: 5px !important;
-        background: var(--ablesci-btn-bg, #FF5722) !important;
-        border-color: var(--ablesci-btn-bg, #FF5722) !important;
-        color: var(--ablesci-btn-fg, #ffffff) !important;
-        font-weight: bold !important;
-        line-height: 22px !important;
-        height: 22px !important;
-        padding: 0 8px !important;
-        border-radius: 2px !important;
-        vertical-align: middle !important;
-      }
-      #${BTN_ID}:hover { color:var(--ablesci-btn-fg, #ffffff) !important; opacity:.86 !important; text-decoration:none !important; }
-      #${BTN_ID}.busy { background:#999 !important; border-color:#999 !important; cursor:wait !important; }
-      #${BTN_ID}.ok { background:#009688 !important; border-color:#009688 !important; }
-      #${BTN_ID}.warn { background:#e5e7eb !important; border-color:#cbd5e1 !important; color:#334155 !important; }
-      #${BTN_ID}.warn:hover { color:#334155 !important; }
-      #${BTN_ID}.err { background:#a94442 !important; border-color:#a94442 !important; }
-      #${LOG_ID} { display:none !important; }
-      .ablesci-native-layer-shade { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 2147483000; }
-      .ablesci-native-layer { position: fixed; left: 50%; top: 12%; transform: translateX(-50%); width: min(680px, calc(100vw - 48px)); background: #fff; border-radius: 2px; box-shadow: 1px 1px 50px rgba(0,0,0,.3); z-index: 2147483001; font-size: 14px; color: #222; }
-      .ablesci-native-layer-content { padding: 20px 28px; max-height: 62vh; overflow: auto; line-height: 1.65; }
-      .ablesci-native-layer-content a { color: #01AAED; }
-      .ablesci-native-layer-btn { padding: 12px 20px; border-top: 1px solid #eee; text-align: right; }
-      .ablesci-native-layer-btn button { min-width: 86px; height: 38px; border: none; border-radius: 4px; background: #1E9FFF; color: #fff; cursor: pointer; font-size: 14px; }
-      .ablesci-native-toast { position: fixed; left: 50%; top: 28%; transform: translateX(-50%); background: rgba(0,0,0,.78); color: #fff; z-index: 2147483001; padding: 10px 18px; border-radius: 3px; max-width: min(680px, calc(100vw - 48px)); line-height: 1.6; }
-    `;
+    style.textContent = styleText();
     document.head.appendChild(style);
   }
 
@@ -133,64 +109,9 @@
     return browserLang.startsWith('zh') ? 'zh' : 'en';
   }
 
-  const MESSAGE_MAP = {
-    '当前出版商无正文订阅权限，任务已跳过。': 'No subscription access, task skipped.',
-    '当前出版商页面显示无正文订阅权限，已跳过本次任务并记录期刊权限状态。': 'The publisher page shows no full-text subscription access. This task has been skipped and the journal permission status recorded.',
-    'ScienceDirect 需要登录或机构访问后才能继续。插件已保留这次为登录阻塞，不计入无权限期刊；完成登录后可重新触发。': 'ScienceDirect requires login or institutional access. The plugin has flagged this as login blocked, which is excluded from no-access journals; you can retry after logging in.',
-    '检测到出版商验证页，已中断本次任务并计入验证次数；达到阈值后会自动暂停低频值守。': 'Publisher verification page (Cloudflare) detected. Task aborted and challenge count incremented; auto watcher will pause if threshold is reached.',
-    'DOI 解析失败或不存在，已跳过本次任务。': 'DOI resolution failed or does not exist. Task skipped.',
-    '已排队：等待当前 PDF 任务完成；关闭本页可取消。': 'Queued: Waiting for current PDF task to complete; close this page to cancel.',
-    '已跳过': 'Skipped',
-    '当前任务已跳过': 'Current task skipped',
-    '上传成功': 'Upload Successful',
-    '上传失败': 'Upload Failed',
-    '仅下载完成': 'Downloaded Only'
-  };
-
-  function translateBackgroundMessage(msgText) {
-    if (getActiveLanguage() !== 'en') return msgText;
-    let trimmed = String(msgText || '').trim();
-    let prefix = '';
-    const prefixes = ['Failed: ', 'Failed：', '失败：', 'Warning: ', 'Warning：', '警告：', 'Success: ', 'Success：', '成功：'];
-    for (const p of prefixes) {
-      if (trimmed.startsWith(p)) {
-        prefix = p.replace('失败：', 'Failed: ')
-                  .replace('Failed：', 'Failed: ')
-                  .replace('警告：', 'Warning: ')
-                  .replace('Warning：', 'Warning: ')
-                  .replace('成功：', 'Success: ')
-                  .replace('Success：', 'Success: ');
-        trimmed = trimmed.substring(p.length).trim();
-        break;
-      }
-    }
-
-    let translated = MESSAGE_MAP[trimmed];
-    if (!translated) {
-      if (trimmed.startsWith('开始处理任务：')) {
-        translated = trimmed.replace('开始处理任务：', 'Starting task: ');
-      } else if (trimmed.startsWith('已排队：')) {
-        translated = 'Queued: Waiting for current PDF task to complete; close this page to cancel.';
-      } else if (trimmed.includes('无正文订阅权限')) {
-        translated = 'The publisher page shows no full-text subscription access. Task skipped.';
-      } else if (trimmed.includes('需要登录或机构访问')) {
-        translated = 'Login or institutional access required. Task marked as login blocked.';
-      } else if (trimmed.includes('检测到出版商验证页')) {
-        translated = 'Publisher verification page detected. Task aborted.';
-      } else if (trimmed.includes('已取消当前任务')) {
-        translated = 'Current task cancelled.';
-      } else if (trimmed.includes('超时')) {
-        translated = trimmed.replace('任务最长超时', 'Max task timeout')
-                            .replace('已超过', ' exceeded ')
-                            .replace('已超过', ' exceeded ')
-                            .replace('分钟', ' minutes')
-                            .replace('未触发下载超时', 'No download triggered timeout');
-      } else {
-        translated = trimmed;
-      }
-    }
-    return prefix + translated;
-  }
+  const { translateBackgroundMessage } = globalThis.AblesciContentI18n.createContentI18nApi({
+    getActiveLanguage
+  });
 
   function normalizeUiOptions(opts) {
     return {
@@ -798,36 +719,8 @@
 
     port.onMessage.addListener(msg => {
       if (!msg) return;
-      if (msg.type === 'progress') setStatus(translateBackgroundMessage(msg.message), 'busy');
-      if (msg.type === 'done') {
-        const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
-        const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush && !msg.pdfCleanerResult)
-          ? { ...msg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
-          : msg;
-
-        completionMsg.message = translateBackgroundMessage(completionMsg.message);
-        if (completionMsg.html) {
-          completionMsg.html = translateBackgroundMessage(completionMsg.html);
-        }
-
-        if (completionMsg.blocked) {
-          const skipLabel = isEn ? 'Skipped' : '已跳过';
-          setStatus(skipLabel, 'blocked', {
-            title: completionMsg.message || (isEn ? 'Current task skipped' : '当前任务已跳过'),
-            logText: ''
-          });
-        } else {
-          setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
-        }
-        if (!msg.downloadOnly) {
-          showSiteLikeCompletion(completionMsg);
-        }
-        if (currentUploadPort === port) currentUploadPort = null;
-        try { port.disconnect(); } catch (_) {}
-      }
-      if (msg.type === 'error') {
-        const defaultError = isEn ? 'Upload Failed' : '上传失败';
-        setStatus(translateBackgroundMessage(msg.message) || defaultError, 'err');
+      const finished = renderBackgroundMessage(msg);
+      if (finished) {
         if (currentUploadPort === port) currentUploadPort = null;
         try { port.disconnect(); } catch (_) {}
       }
@@ -841,6 +734,46 @@
     });
 
     port.postMessage({ type: 'startUpload', payload });
+  }
+
+  function renderBackgroundMessage(msg) {
+    if (!msg) return false;
+    const isEn = getActiveLanguage() === 'en';
+    if (msg.type === 'progress') {
+      setStatus(translateBackgroundMessage(msg.message), 'busy');
+      return false;
+    }
+    if (msg.type === 'done') {
+      const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
+      const completionMsg = (!msg.downloadOnly && !pageOptions.smartRecommendPush && !msg.pdfCleanerResult)
+        ? { ...msg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
+        : { ...msg };
+
+      completionMsg.message = translateBackgroundMessage(completionMsg.message);
+      if (completionMsg.html) {
+        completionMsg.html = translateBackgroundMessage(completionMsg.html);
+      }
+
+      if (completionMsg.blocked) {
+        const skipLabel = isEn ? 'Skipped' : '已跳过';
+        setStatus(skipLabel, 'blocked', {
+          title: completionMsg.message || (isEn ? 'Current task skipped' : '当前任务已跳过'),
+          logText: ''
+        });
+      } else {
+        setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
+      }
+      if (!msg.downloadOnly) {
+        showSiteLikeCompletion(completionMsg);
+      }
+      return true;
+    }
+    if (msg.type === 'error') {
+      const defaultError = isEn ? 'Upload Failed' : '上传失败';
+      setStatus(translateBackgroundMessage(msg.message) || defaultError, 'err');
+      return true;
+    }
+    return false;
   }
 
   function addButton(options = {}) {
@@ -919,36 +852,7 @@
     if (msg?.type === 'ablesciAutoWatcherProgress') {
       const innerMsg = msg.msg;
       if (!innerMsg) return;
-      const isEn = getActiveLanguage() === 'en';
-      if (innerMsg.type === 'progress') {
-        setStatus(translateBackgroundMessage(innerMsg.message), 'busy');
-      } else if (innerMsg.type === 'done') {
-        const defaultSuccess = isEn ? 'Upload Successful' : '上传成功';
-        const completionMsg = (!innerMsg.downloadOnly && !pageOptions.smartRecommendPush && !innerMsg.pdfCleanerResult)
-          ? { ...innerMsg, message: defaultSuccess, html: defaultSuccess, recomend: false, recommend: false }
-          : innerMsg;
-
-        completionMsg.message = translateBackgroundMessage(completionMsg.message);
-        if (completionMsg.html) {
-          completionMsg.html = translateBackgroundMessage(completionMsg.html);
-        }
-
-        if (completionMsg.blocked) {
-          const skipLabel = isEn ? 'Skipped' : '已跳过';
-          setStatus(skipLabel, 'blocked', {
-            title: completionMsg.message || (isEn ? 'Current task skipped' : '当前任务已跳过'),
-            logText: ''
-          });
-        } else {
-          setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
-        }
-        if (!innerMsg.downloadOnly) {
-          showSiteLikeCompletion(completionMsg);
-        }
-      } else if (innerMsg.type === 'error') {
-        const defaultError = isEn ? 'Upload Failed' : '上传失败';
-        setStatus(translateBackgroundMessage(innerMsg.message) || defaultError, 'err');
-      }
+      renderBackgroundMessage(innerMsg);
     }
   });
 
