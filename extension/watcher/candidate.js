@@ -274,13 +274,13 @@
         list_chinese_title: '列表页标题含中文字符，已提前跳过',
         detail_chinese_title: '详情页标题含中文字符，已跳过',
         detail_risk_text: '详情页命中风险文本，已跳过',
-        list_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (列表页)',
+        list_corrigendum: '已按设置跳过更正类求助 (列表页)',
         list_supplement: '已按设置跳过补充材料求助 (列表页)',
         list_book_chapter: '已按设置跳过书籍章节求助 (列表页)',
         list_patent_report: '已按设置跳过专利/报告类求助 (列表页)',
         list_too_fresh_assist: '刚发布不足 1 分钟，先跳过以降低抢单失败概率',
         list_blacklist_user: '求助人 ID 处于黑名单中，列表页直接跳过',
-        detail_corrigendum: '已按设置跳过 Corrigendum 更正类求助 (详情页)',
+        detail_corrigendum: '已按设置跳过更正类求助 (详情页)',
         detail_blacklist_user: '求助人 ID 处于黑名单中，已跳过',
         journal_blocked_rule: '命中本地期刊规则，列表页直接跳过'
       };
@@ -680,7 +680,7 @@
         return { ok: false, reason: 'list_too_fresh_assist' };
       }
       if (!/求助中|waiting|我要应助|可应助/i.test(textValue)) return { ok: false, reason: 'not_waiting' };
-      if (opts.watcherSkipCorrigendum && candidate.title && /^Corrigendum\s+to/i.test(String(candidate.title).trim())) {
+      if (opts.watcherSkipCorrigendum && candidate.title && isLikelyCorrigendumTitle(candidate.title)) {
         return { ok: false, reason: 'list_corrigendum' };
       }
       if (opts.watcherSkipSupplement && (candidate.documentType === 'supplement' || candidate.supplement || isLikelySupplementCandidate(candidate))) {
@@ -714,6 +714,12 @@
       return reason === 'explicit_no_subscription' ||
         reason === 'no_access' ||
         /does not subscribe to this content on ScienceDirect|ScienceDirect\s+明确返回无正文订阅权限|明确返回无正文订阅权限|当前出版商无正文订阅权限|无正文订阅权限|无正文访问权限|no\s+access|access\s+denied|no[-_\s]?access|subscribe/i.test(String(reason || ''));
+    }
+
+    function isLikelyCorrigendumTitle(title) {
+      const value = String(title || '').trim();
+      return /^(corrigendum|correction|erratum|addendum)\s+(to|for)\b/i.test(value) ||
+        /^retraction\s+(notice|of|to)\b/i.test(value);
     }
 
     async function recordJournalAccessBlocked(candidate, payload = null, reason = '') {
@@ -840,7 +846,7 @@
       if (opts.watcherSkipRejected && flags.rejectedHistory) return { ok: false, reason: 'detail_rejected_history' };
       if (opts.watcherSkipReported && flags.reportedWarning) return { ok: false, reason: 'detail_reported_warning' };
       if (opts.watcherSkipRemark && payload.hasRemark) return { ok: false, reason: 'detail_remark' };
-      if (opts.watcherSkipCorrigendum && payload.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
+      if (opts.watcherSkipCorrigendum && payload.title && isLikelyCorrigendumTitle(payload.title)) {
         return { ok: false, reason: 'detail_corrigendum' };
       }
       if (opts.watcherEnableBlacklist && payload.requesterId) {

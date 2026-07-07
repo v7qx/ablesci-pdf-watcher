@@ -120,7 +120,7 @@
   "书籍章节": "Book Chapter",
   "专利/报告": "Patent/Report",
   "异常文本": "Risk Text",
-  "更正/Corrigendum": "Corrigendum",
+  "更正类": "Corrections",
   "求助人黑名单": "Requester Blacklist",
   "可选本地 .txt 文件或同步目录。填目录时使用其中的 blacklist.txt；留空则使用 Helper 本地目录。多个 ID 用逗号、空格或换行分隔。": "Optional local .txt file or sync folder. If a folder is provided, blacklist.txt inside it is used; leaving it empty uses the Helper local directory. IDs can be separated by commas, spaces, or newlines.",
 
@@ -225,7 +225,7 @@
   "跳过书籍章节": "Skip book chapters",
   "跳过专利或报告类": "Skip patents or reports",
   "跳过异常文本": "Skip abnormal text",
-  "跳过更正类求助": "Skip corrigendum requests",
+  "跳过更正类求助": "Skip correction/erratum requests",
   "启用求助人黑名单": "Enable requester blacklist",
 
   // Watcher Status card metric grid hover tooltips

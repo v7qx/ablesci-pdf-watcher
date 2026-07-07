@@ -77,6 +77,12 @@
       return `${code}-${String(filename || 'paper.pdf').replace(/^\d{3}-/, '')}`;
     }
 
+    function isLikelyCorrigendumTitle(title) {
+      const value = String(title || '').trim();
+      return /^(corrigendum|correction|erratum|addendum)\s+(to|for)\b/i.test(value) ||
+        /^retraction\s+(notice|of|to)\b/i.test(value);
+    }
+
     const TITLE_MATCH_STOPWORDS = new Set([
       'about', 'after', 'among', 'analysis', 'associated', 'based', 'between', 'effect', 'effects',
       'from', 'into', 'novel', 'research', 'study', 'their', 'through', 'using', 'with', 'without',
@@ -379,21 +385,21 @@
       }
       const diag = makeDiagnosticBase(payload, opts);
 
-      // 1. 校验 Corrigendum 更正类求助
-      if (opts.watcherSkipCorrigendum && payload?.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
+      // 1. 校验更正类求助
+      if (opts.watcherSkipCorrigendum && payload?.title && isLikelyCorrigendumTitle(payload.title)) {
         if (debugSimulation) {
-          post(port, 'progress', '正常应助本应跳过 Corrigendum 更正类求助；模拟模式继续测试后续链路。');
+          post(port, 'progress', '正常应助本应跳过更正类求助；模拟模式继续测试后续链路。');
         } else {
-          await saveDiagnostic({ ...diag, stage: 'skipped-corrigendum', error: '已按设置跳过 Corrigendum 更正类求助' });
-          post(port, 'done', '已跳过 Corrigendum 更正类求助', {
-            html: '已按设置跳过 Corrigendum 更正类求助。',
+          await saveDiagnostic({ ...diag, stage: 'skipped-corrigendum', error: '已按设置跳过更正类求助' });
+          post(port, 'done', '已跳过更正类求助', {
+            html: '已按设置跳过更正类求助。',
             recomend: false,
             reload: false,
             downloadOnly: true,
             blocked: true,
             skipped: true,
             skipReason: 'corrigendum',
-            message: '已按设置跳过 Corrigendum 更正类求助'
+            message: '已按设置跳过更正类求助'
           });
           return;
         }

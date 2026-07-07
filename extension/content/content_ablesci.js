@@ -416,6 +416,12 @@
     return visibleText(primaryTitle) || visibleText(document.querySelector('.assist-title'));
   }
 
+  function isLikelyCorrigendumTitle(title) {
+    const value = String(title || '').trim();
+    return /^(corrigendum|correction|erratum|addendum)\s+(to|for)\b/i.test(value) ||
+      /^retraction\s+(notice|of|to)\b/i.test(value);
+  }
+
   function hasHanCharacters(value) {
     return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/u.test(String(value || ''));
   }
@@ -702,8 +708,8 @@
     let payload;
     try {
       payload = collectPayload();
-      if (pageOptions.watcherSkipCorrigendum && payload.title && /^Corrigendum\s+to/i.test(String(payload.title).trim())) {
-        throw new Error(isEn ? 'Skipped corrigendum requests.' : '已按设置跳过 Corrigendum 更正类求助');
+      if (pageOptions.watcherSkipCorrigendum && payload.title && isLikelyCorrigendumTitle(payload.title)) {
+        throw new Error(isEn ? 'Skipped correction/erratum requests.' : '已按设置跳过更正类求助');
       }
     } catch (err) {
       setStatus(err.message || String(err), 'err');
