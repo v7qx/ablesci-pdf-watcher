@@ -80,13 +80,13 @@ Get-AuthenticodeSignature .\native-host\dist\ablesci_pdf_helper.exe
 
 This feature is off by default and can be enabled under More Settings. It requires Poppler's `pdftotext.exe` and `pdfinfo.exe`; `build_helper.ps1` does not install them.
 
-Download the pinned [Poppler 24.08.0 Windows runtime](https://github.com/oschwartz10612/poppler-windows/releases/download/v24.08.0-0/Release-24.08.0-0.zip) (SHA256: `58A6F9AE269756231D2F9AA6CBA39D75FEC6DEACAF3C4A50683383B5F3D5A527`) and extract the complete archive under:
+Open the [Poppler Windows Release 26.02.0-0 page](https://github.com/oschwartz10612/poppler-windows/releases/tag/v26.02.0-0), download the `Release-26.02.0-0.zip` asset (SHA256: `993e4a94376ed712fafc7058d724ea0b943d118bbd2305cd9ed55174eb85cda5`), and extract the complete archive under:
 
 ```text
-%LOCALAPPDATA%\AblesciPdfWatcher\tools\poppler\poppler-24.08.0\
+%LOCALAPPDATA%\AblesciPdfWatcher\tools\poppler\poppler-26.02.0\
 ```
 
-Keep the adjacent DLLs and license files instead of copying only the EXEs. When title validation is disabled, Poppler is neither located nor invoked.
+Keep the adjacent DLLs and license files instead of copying only the EXEs. The helper also accepts the older `poppler-24.08.0` layout for existing installs. When title validation is disabled, Poppler is neither located nor invoked.
 
 ## Security Notes
 

@@ -94,6 +94,7 @@
         html: finalHtml,
         recomend: isRecommendResponse(res),
         reload: true,
+        uploadConfirmed: true,
         responseCode: res && res.code
       });
     }

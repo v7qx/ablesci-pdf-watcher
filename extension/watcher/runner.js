@@ -418,14 +418,21 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
             let cleanReason = msg.message || 'done';
-            if (cleanReason.includes('上传成功') || cleanReason.includes('已成功') || cleanReason.includes('应助成功') || cleanReason.includes('OSS 上传')) {
+            if (msg.uploadConfirmed === true || cleanReason.includes('上传成功') || cleanReason.includes('已成功') || cleanReason.includes('应助成功')) {
               cleanReason = '上传成功';
             }
+            const completionCounter = msg.downloadOnly === true || context.payload?.downloadOnly === true
+              ? incrementDaily('downloadedCompleted', context.trigger)
+              : (msg.uploadConfirmed === true
+                ? incrementDaily('uploaded', context.trigger)
+                : incrementDaily('uploadUnconfirmed', context.trigger));
             await Promise.allSettled([
               clearJournalAccessBlocked?.(context.candidate, context.payload),
-              context.payload?.downloadOnly !== true ? incrementDaily('uploaded', context.trigger) : Promise.resolve(),
+              completionCounter,
               appendWatcherTrace('queue_message_done', {
                 reason: cleanReason,
+                downloadOnly: msg.downloadOnly === true || context.payload?.downloadOnly === true,
+                uploadConfirmed: msg.uploadConfirmed === true,
                 detailUrl: context.detailUrl,
                 sessionId: context.sessionId || '',
                 assistId: context.key,

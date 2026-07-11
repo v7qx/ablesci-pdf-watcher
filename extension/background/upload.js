@@ -320,10 +320,18 @@
     function downloadOnlyDone(port, reasons, stat, pdfCleanerResult = null, pii = '', normalAction = '') {
       const reasonText = Array.isArray(reasons) && reasons.length ? reasons.join('；') : '当前任务需要人工核对';
       const cleanerHtml = pdfCleanerSummaryHtml(pdfCleanerResult);
+      const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
       const sequence = String(stat?.downloadSequence || '').trim();
+      const fullTitle = [
+        sequence ? `仅下载完成 ${sequence}` : '已仅下载并校验 PDF，未自动上传。',
+        `原因：${reasonText}`,
+        `文件：${stat?.filename || 'paper.pdf'}`,
+        cleanerText
+      ].filter(Boolean).join('；');
 
       post(port, 'done', sequence ? `仅下载完成 ${sequence}` : `已仅下载并校验 PDF，未自动上传。${reasonText}`, {
         html: `已仅下载并校验 PDF，未自动上传。<br>原因：${escapeHtml(reasonText)}<br>文件：${escapeHtml(stat?.filename || 'paper.pdf')}${cleanerHtml ? `<br>${cleanerHtml}` : ''}`,
+        title: fullTitle,
         recomend: false,
         reload: false,
         downloadOnly: true,
@@ -347,9 +355,15 @@
       const cleanerText = pdfCleanerSummaryText(pdfCleanerResult);
       const sequence = String(stat?.downloadSequence || '').trim();
       const message = sequence ? `仅下载完成 ${sequence}` : `调试模式已开启，未自动上传。准备上传文件：${truncatedName}${cleanerText ? `；${cleanerText}` : ''}`;
+      const fullTitle = [
+        sequence ? `仅下载完成 ${sequence}` : '调试模式已开启，未自动上传。',
+        `准备上传文件：${name}`,
+        cleanerText
+      ].filter(Boolean).join('；');
 
       post(port, 'done', message, {
         html: escapeHtml(message),
+        title: fullTitle,
         recomend: false,
         reload: false,
         downloadOnly: true,
@@ -371,14 +385,22 @@
     async function handleUpload(port, payload, signal = null, optsOverride = null) {
       throwIfAborted(signal);
       const debugSimulation = payload?.debugSimulation === true;
+      const literatureDownload = payload?.taskMode === 'literature_download';
       if (debugSimulation) {
         payload = {
           ...payload,
           downloadOnly: true
         };
       }
+      if (literatureDownload) {
+        payload = {
+          ...payload,
+          downloadOnly: true,
+          riskReasons: ['独立文献下载任务，不执行上传']
+        };
+      }
       const opts = optsOverride || await getOptions();
-      if (debugSimulation || opts.debugDownloadOnly === true || payload.downloadOnly === true) {
+      if (!literatureDownload && (debugSimulation || opts.debugDownloadOnly === true || payload.downloadOnly === true)) {
         const downloadSequence = await allocateDownloadSequence();
         payload.downloadSequence = downloadSequence;
         payload.suggestedFilename = prefixDownloadFilename(payload.suggestedFilename, downloadSequence);
@@ -386,7 +408,7 @@
       const diag = makeDiagnosticBase(payload, opts);
 
       // 1. 校验更正类求助
-      if (opts.watcherSkipCorrigendum && payload?.title && isLikelyCorrigendumTitle(payload.title)) {
+      if (!literatureDownload && opts.watcherSkipCorrigendum && payload?.title && isLikelyCorrigendumTitle(payload.title)) {
         if (debugSimulation) {
           post(port, 'progress', '正常应助本应跳过更正类求助；模拟模式继续测试后续链路。');
         } else {
@@ -406,7 +428,7 @@
       }
 
       // 2. 校验求助人黑名单 (异步读取本地黑名单文件)
-      if (opts.watcherEnableBlacklist && payload?.requesterId) {
+      if (!literatureDownload && opts.watcherEnableBlacklist && payload?.requesterId) {
         let isBlacklisted = false;
         let blacklistComment = '';
         try {
@@ -501,12 +523,14 @@
         });
         return;
       }
-      if (!payload?.assistId) throw new Error('缺少 assistId');
-      if (!payload?.csrfToken) throw new Error('缺少 csrfToken');
+      if (!literatureDownload && !payload?.assistId) throw new Error('缺少 assistId');
+      if (!literatureDownload && !payload?.csrfToken) throw new Error('缺少 csrfToken');
 
       if (payload.downloadOnly) {
-        const reasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.join('；') : '当前求助需要人工核对';
-        post(port, 'progress', `当前任务命中仅下载保护：${reasons}；下载完成后不会自动提交。`);
+        const reasons = Array.isArray(payload.riskReasons) && payload.riskReasons.length ? payload.riskReasons.join('；') : '当前任务仅下载';
+        post(port, 'progress', literatureDownload
+          ? `ScholarFlow 文献任务：${reasons}。`
+          : `当前任务命中仅下载保护：${reasons}；下载完成后不会自动提交。`);
       }
 
       await saveDiagnostic({ ...diag, stage: 'picked' });
@@ -520,7 +544,7 @@
         pii = extractScienceDirectPii(payload.pdfUrl || payload.pageUrl || item.url || item.finalUrl || '');
       }
 
-      if (!debugSimulation && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+      if (!debugSimulation && !literatureDownload && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
         await recordManualWatcherDaily('downloaded').catch(() => {});
       }
 
@@ -721,7 +745,7 @@
         ? `拦截并不上传（原因：${normalRiskReasons.join('；')}）`
         : '将自动执行上传流程';
 
-      if (opts.debugDownloadOnly) {
+      if (opts.debugDownloadOnly && !literatureDownload) {
         await saveDiagnostic({
           ...diag,
           stage: 'debug-download-only',
@@ -807,14 +831,17 @@
       if (opts.deleteAfterUpload) {
         await deleteUploadedFile(opts.nativeHostName, stat.path);
       }
-      if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
-        await recordManualWatcherDaily('uploaded').catch(() => {});
-      }
       if (parsed && parsed.msg) {
+        if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+          await recordManualWatcherDaily('uploaded').catch(() => {});
+        }
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState(payload?.watcherPublisher || '');
         postDoneFromSiteResponse(port, parsed, '上传成功', { ...doneExtraForCleaner(pdfCleanerResult), pii });
       } else {
+        if (port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+          await recordManualWatcherDaily('uploadUnconfirmed').catch(() => {});
+        }
         await saveDiagnostic({ ...diag, stage: 'uploaded', downloadItem: downloadMeta, fileSize: size });
         await clearPublisherCfChallengeState(payload?.watcherPublisher || '');
         const cleanerExtra = doneExtraForCleaner(pdfCleanerResult);
@@ -824,6 +851,7 @@
           html: `OSS 上传完成，请检查 Ablesci 页面状态。${cleanerHtml}`,
           recomend: false,
           reload: true,
+          uploadConfirmed: false,
           pii,
           ...cleanerExtra
         });

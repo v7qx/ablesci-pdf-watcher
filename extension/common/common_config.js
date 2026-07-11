@@ -1,7 +1,7 @@
 'use strict';
 
 (function () {
-  const WATCHER_DAILY_LIMIT_MAX = 1000;
+  const WATCHER_DAILY_LIMIT_MAX = 2000;
 
   const DEFAULT_OPTIONS = {
     nativeHostName: 'com.ablesci.pdf_watcher',

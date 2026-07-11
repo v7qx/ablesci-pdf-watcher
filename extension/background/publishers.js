@@ -569,7 +569,9 @@
       let matched = false;
       for (const sp of sourcePiis) {
         for (const ap of actualPiis) {
-          if (sp.substring(0, 10) === ap.substring(0, 10)) {
+          const normSp = sp.replace(/^[SB]/i, '');
+          const normAp = ap.replace(/^[SB]/i, '');
+          if (normSp.substring(0, 10) === normAp.substring(0, 10)) {
             matched = true;
             break;
           }

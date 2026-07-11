@@ -205,6 +205,7 @@ func findPopplerTool(cleanerPath, toolName string) string {
 		}
 		seenRoots[key] = true
 		candidates = append(candidates,
+			filepath.Join(dir, "tools", "poppler", "poppler-26.02.0", "Library", "bin", toolName),
 			filepath.Join(dir, "tools", "poppler", "poppler-24.08.0", "Library", "bin", toolName),
 			filepath.Join(dir, "tools", "poppler", "Library", "bin", toolName),
 			filepath.Join(dir, "poppler", "Library", "bin", toolName),
@@ -1575,6 +1576,7 @@ func envWithCleanerToolDirs(cleanerPath string) []string {
 		filepath.Join(cleanerDir, "bin"),
 		filepath.Join(cleanerDir, "qpdf"),
 		filepath.Join(cleanerDir, "qpdf", "bin"),
+		filepath.Join(cleanerDir, "tools", "poppler", "poppler-26.02.0", "Library", "bin"),
 		filepath.Join(cleanerDir, "tools", "poppler", "poppler-24.08.0", "Library", "bin"),
 		filepath.Join(cleanerDir, "tools", "mupdf", "mupdf-1.24.0-windows"),
 	}

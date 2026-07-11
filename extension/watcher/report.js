@@ -211,7 +211,52 @@
       const state = stored[autoWatcherStateKey] || {};
       const daily = state.daily?.[date] || {};
       const chromeAlarm = await chromeApi.alarms.get(alarmName).catch(() => null);
-      const chromeAlarmScheduledAt = chromeAlarm?.scheduledTime ? new Date(chromeAlarm.scheduledTime).toISOString() : (state.chromeAlarmScheduledAt || '');
+      const nowMs = Date.now();
+      function futureTimeMs(value) {
+        const parsed = typeof value === 'number' ? value : (value ? new Date(value).getTime() : 0);
+        return Number.isFinite(parsed) && parsed > nowMs ? parsed : 0;
+      }
+      const laneSchedules = Object.entries(state.parallelLaneSchedules || {})
+        .map(([lane, item]) => ({
+          lane,
+          item: item || {},
+          time: futureTimeMs(item?.scheduledAt)
+        }))
+        .filter(entry => entry.time > 0)
+        .sort((a, b) => a.time - b.time);
+      const mainAlarmMs = futureTimeMs(chromeAlarm?.scheduledTime);
+      const storedAlarmMs = futureTimeMs(state.chromeAlarmScheduledAt);
+      const storedWakeMs = futureTimeMs(state.nextScheduledAt);
+      const mainAssistMs = futureTimeMs(state.nextAssistRunAt);
+      const wakeCandidates = [mainAlarmMs, storedAlarmMs, storedWakeMs, ...laneSchedules.map(entry => entry.time)]
+        .filter(value => value > 0);
+      const nextWakeMs = wakeCandidates.length ? Math.min(...wakeCandidates) : 0;
+      const nextLane = laneSchedules[0] || null;
+      const nextScheduleStrategy = mainAssistMs
+        ? String(state.nextAssistStrategy || '')
+        : (nextLane ? 'parallel_lane' : '');
+      function nextScheduleReasonText() {
+        if (mainAssistMs) {
+          if (state.nextAssistStrategy === 'rate_limited_retry') {
+            const plan = state.nextAssistPlan || {};
+            const window = String(plan.rateLimitWindow || '').trim();
+            const count = Number(plan.rateLimitCount || 0);
+            const limit = Number(plan.rateLimitLimit || 0);
+            const detail = window
+              ? `${window}窗口${count > 0 && limit > 0 ? `（${count}/${limit}）` : ''}`
+              : '滑动窗口';
+            return isEn
+              ? `Local ${detail} rate limit; retry after the window clears`
+              : `本地${detail}频控，窗口解除后重试`;
+          }
+          return translateReason(state.nextAssistReason || '', isEn);
+        }
+        if (nextLane) {
+          const reason = translateReason(nextLane.item.reason || 'parallel_lane_reschedule', isEn);
+          return isEn ? `${nextLane.lane}: ${reason}` : `${nextLane.lane}：${reason}`;
+        }
+        return isEn ? 'No valid future schedule' : '无有效的未来计划';
+      }
       const lastAttempt = state.lastAttempt || {};
       const latestPickedListUrl = lastAttempt.pickedListUrl || state.lastPickedListUrl || '';
       const latestPickedPage = lastAttempt.pickedPage ?? state.lastPickedPage ?? '';
@@ -223,7 +268,7 @@
       const abnormalLogs = (Array.isArray(stored[autoWatcherAbnormalKey]) ? stored[autoWatcherAbnormalKey] : [])
         .filter(log => formatBeijingDateTime(log.time, true) === date);
       const journalAccessStats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
-        ? Object.values(state.journalAccessStats)
+        ? Object.entries(state.journalAccessStats).map(([cacheKey, entry]) => ({ cacheKey, ...(entry || {}) }))
         : [];
       const cleanerResults = logs
         .map(log => log.pdfCleanerResult)
@@ -296,8 +341,8 @@
         nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
         nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
         nextAssistPlannedAt: state.nextAssistPlannedAt ? formatBeijingDateTime(state.nextAssistPlannedAt) : '',
-        nextWakeAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : ''),
-        chromeAlarmScheduledAt: chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : '',
+        nextWakeAt: nextWakeMs ? formatBeijingDateTime(nextWakeMs) : '',
+        chromeAlarmScheduledAt: (mainAlarmMs || storedAlarmMs) ? formatBeijingDateTime(mainAlarmMs || storedAlarmMs) : '',
         lastAttemptStartedAt: lastAttempt.startedAt ? formatBeijingDateTime(lastAttempt.startedAt) : '',
         lastAttemptFinishedAt: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
         lastAttemptResult: translateReason(lastAttempt.resultReason || '', isEn),
@@ -315,8 +360,10 @@
         pageFrontHit: lastAttempt.frontHit === true ? 'true' : '',
         pageAlpha: lastAttempt.alpha ?? ''
       };
-      function reportRow(type, values = {}) {
-        const row = { record_type: type, ...baseReportFields, ...values };
+      function reportRow(type, values = {}, options = {}) {
+        const row = options.includeWatcherSnapshot === true
+          ? { record_type: type, ...baseReportFields, ...values }
+          : { record_type: type, ...values };
         return csvHeader.map(key => row[key] ?? '');
       }
       const traceSkipSteps = new Set([
@@ -354,24 +401,24 @@
           time: formatBeijingDateTime(new Date()),
           status: state.currentExecutionModel || state.schedulerModelMode || 'simple',
           reason: `runs=${Number(daily.totalRuns || 0)} auto=${Number(daily.autoRuns || 0)} manual=${Number(daily.manualRuns || 0)} checked=${Number(daily.checked || 0)} downloaded=${Number(daily.downloaded || 0)} failed=${Number(daily.failed || 0)}`
-        }),
+        }, { includeWatcherSnapshot: true }),
         reportRow('assist_strategy', {
           time: state.lastAssistDecisionAt ? formatBeijingDateTime(state.lastAssistDecisionAt) : formatBeijingDateTime(new Date()),
           status: state.lastAssistStrategy || '',
           reason: reportJson(state.lastAssistDecision || {})
-        }),
+        }, { includeWatcherSnapshot: true }),
         reportRow('next_assist', {
           time: state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : '',
           status: state.nextAssistStrategy || '',
           reason: reportJson(state.nextAssistPlan || {})
-        }),
+        }, { includeWatcherSnapshot: true }),
         reportRow('last_attempt', {
           time: lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : '',
           status: translateReason(lastAttempt.resultReason || '', isEn),
           reason: reportJson(lastAttempt || {}),
           trigger: lastAttempt.trigger || '',
           url: latestPickedListUrl
-        }),
+        }, { includeWatcherSnapshot: true }),
         ...persistentAbnormalLogs.map(log => reportRow(abnormalLogs.includes(log) ? 'abnormal_log' : 'log', {
           time: formatBeijingDateTime(log.time),
           sessionId: log.sessionId || '',
@@ -428,13 +475,14 @@
           }),
         ...journalAccessStats.map(entry => reportRow('journal_access_cache', {
           time: entry.lastAt ? formatBeijingDateTime(entry.lastAt) : '',
-          assistId: entry.lastAssistId || '',
           journalShortName: entry.shortName || '',
           status: 'cached',
           reason: entry.reason || '',
           publisher: entry.publisher || '',
           details: reportJson({
+            cacheKey: entry.cacheKey || '',
             hitCount: Number(entry.hitCount || 0) || 0,
+            lastAssistId: entry.lastAssistId || '',
             expiresAt: entry.expiresAt || ''
           })
         }))
@@ -488,15 +536,17 @@
         `- 当月应助任务 (预计 / 实际 / 差额): ${Number(state.expectedDone || 0)} / ${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.targetError || state.lag || 0)}`,
         `- 今日应助目标数: ${Number(state.todayTarget || 0)}`
       ]) : (isEn ? [
-        `- Checked Candidate Count: ${Number(daily.checked || 0)}`,
-        `- Downloaded or Queued Count: ${Number(daily.downloaded || 0)}`,
-        `- Successfully Uploaded Count: ${Number(daily.uploaded || 0)}`,
+        `- List Page Scan Count: ${Number(daily.checked || 0)}`,
+        `- Queue Accepted Count: ${Number(daily.downloaded || 0)}`,
+        `- Download-only Completed Count: ${Number(daily.downloadedCompleted || 0)}`,
+        `- Site-confirmed Upload Count: ${Number(daily.uploaded || 0)}`,
+        `- Uploads Awaiting Site Confirmation: ${Number(daily.uploadUnconfirmed || 0)}`,
         `- Skipped Candidate Count: ${Number(daily.skipped || 0)}`,
         `- Failed Task Count: ${Number(daily.failed || 0)}`,
         `- Notifications Sent: ${Number(daily.notified || 0)}`,
-        `- Next Wake Time: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
-        `- Next Assist Attempt Time: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
-        `- Next Assist Strategy & Reason: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
+        `- Next Valid Wake Time: ${nextWakeMs ? formatBeijingDateTime(nextWakeMs) : 'None'}`,
+        `- Next Main Assist Attempt Time: ${mainAssistMs ? formatBeijingDateTime(mainAssistMs) : 'None'}`,
+        `- Next Assist Strategy & Reason: ${nextScheduleStrategy || 'none'} / ${nextScheduleReasonText()}`,
         `- Run Count (Auto / Manual): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- Latest Attempt Time: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- Latest Attempt Trigger: ${lastAttempt.trigger || ''}`,
@@ -509,15 +559,17 @@
         `- Details File: ${monthDir}/watcher-data-${date}.jsonl`,
         `- Trace Event Count: ${traces.length}`
       ] : [
-        `- 已检查候选数: ${Number(daily.checked || 0)}`,
-        `- 下载或排队数: ${Number(daily.downloaded || 0)}`,
-        `- 成功上传数: ${Number(daily.uploaded || 0)}`,
+        `- 列表页扫描次数: ${Number(daily.checked || 0)}`,
+        `- 队列接受任务数: ${Number(daily.downloaded || 0)}`,
+        `- 仅下载完成数: ${Number(daily.downloadedCompleted || 0)}`,
+        `- 网站确认上传完成数: ${Number(daily.uploaded || 0)}`,
+        `- 已传 OSS、等待网站确认数: ${Number(daily.uploadUnconfirmed || 0)}`,
         `- 已跳过候选数: ${Number(daily.skipped || 0)}`,
         `- 失败任务数: ${Number(daily.failed || 0)}`,
         `- 发送通知数: ${Number(daily.notified || 0)}`,
-        `- 下一次唤醒时间: ${chromeAlarmScheduledAt ? formatBeijingDateTime(chromeAlarmScheduledAt) : (state.nextScheduledAt ? formatBeijingDateTime(state.nextScheduledAt) : '')}`,
-        `- 下一次应助尝试时间: ${state.nextAssistRunAt ? formatBeijingDateTime(state.nextAssistRunAt) : ''}`,
-        `- 下一次应助策略及原因: ${state.nextAssistStrategy || ''} / ${translateReason(state.nextAssistReason || '', isEn)}`,
+        `- 下一次有效唤醒时间: ${nextWakeMs ? formatBeijingDateTime(nextWakeMs) : '无'}`,
+        `- 下一次主应助尝试时间: ${mainAssistMs ? formatBeijingDateTime(mainAssistMs) : '无'}`,
+        `- 下一次应助策略及原因: ${nextScheduleStrategy || 'none'} / ${nextScheduleReasonText()}`,
         `- 运行次数 (自动 / 手动): ${Number(daily.autoRuns || 0)} / ${Number(daily.manualRuns || 0)}`,
         `- 最近一次尝试时间: ${lastAttempt.finishedAt ? formatBeijingDateTime(lastAttempt.finishedAt) : ''}`,
         `- 最近一次尝试触发方式: ${lastAttempt.trigger || ''}`,
@@ -564,6 +616,10 @@
       }
 
       const doiNotFoundLogs = persistentAbnormalLogs.filter(log => {
+        // Historical versions could derive this truncated Cochrane route from
+        // the visible article URL even though the request supplied no DOI.
+        // Keep the diagnostic log, but do not present it as a real DOI failure.
+        if (/^10\.1002\/central\/?$/i.test(String(log.doi || '').trim())) return false;
         const r = [log.reason || '', ...(Array.isArray(log.riskReasons) ? log.riskReasons : [])].join(' ');
         const lower = r.toLowerCase();
         return lower.includes('doi_not_found') ||

@@ -277,6 +277,10 @@
       const reason = String(result?.reason || '');
       if (reason.startsWith('rate_limited_')) {
         const state = await getWatcherState();
+        const rateLimit = result?.rateLimit && typeof result.rateLimit === 'object'
+          ? result.rateLimit
+          : {};
+        const rateLimitWindow = String(rateLimit.window || reason.slice('rate_limited_'.length) || '');
         let delay = nextRateLimitClearDelayMinutes ? nextRateLimitClearDelayMinutes(state) : 0;
         if (delay <= 0) {
           delay = 1;
@@ -287,6 +291,16 @@
         state.nextAssistRunAt = new Date(clearTimeMs).toISOString();
         state.nextAssistReason = 'rate_limited_retry';
         state.nextAssistStrategy = 'rate_limited_retry';
+        state.nextAssistDelayMinutes = Number(delay.toFixed(2));
+        state.nextAssistPlannedAt = new Date().toISOString();
+        state.nextAssistPlan = {
+          strategy: 'rate_limited_retry',
+          reason: 'rate_limited_retry',
+          rateLimitWindow,
+          rateLimitCount: Number(rateLimit.count || 0),
+          rateLimitLimit: Number(rateLimit.limit || 0),
+          finalDelayMinutes: Number(delay.toFixed(2))
+        };
         state.nextScheduledAt = clearTimeMs;
         state.currentSchedulerMode = opts.watcherSchedulerMode;
         state.currentExecutionModel = 'quant_rules';
@@ -303,6 +317,9 @@
         updateActionBadge(state).catch(() => {});
         await appendWatcherTrace('alarm_scheduled_rate_limited_retry', {
           reason: 'rate_limited_retry',
+          rateLimitWindow,
+          rateLimitCount: Number(rateLimit.count || 0),
+          rateLimitLimit: Number(rateLimit.limit || 0),
           delayMinutes: Number(delay.toFixed(2)),
           nextScheduledAt: new Date(state.nextScheduledAt).toISOString(),
           nextAssistRunAt: state.nextAssistRunAt

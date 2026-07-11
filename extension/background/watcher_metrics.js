@@ -56,7 +56,9 @@
         daily.downloaded = Number(daily.downloaded || 0);
         daily.downloadedAuto = Number(daily.downloadedAuto || 0);
         daily.downloadedManual = Number(daily.downloadedManual || 0);
+        daily.downloadedCompleted = Number(daily.downloadedCompleted || 0);
         daily.uploaded = Number(daily.uploaded || 0);
+        daily.uploadUnconfirmed = Number(daily.uploadUnconfirmed || 0);
         daily.skipped = Number(daily.skipped || 0);
         daily.failed = Number(daily.failed || 0);
         daily.notified = Number(daily.notified || 0);

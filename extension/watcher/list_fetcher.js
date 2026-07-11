@@ -185,7 +185,8 @@
     function extractJournalShortName(liHtml) {
       const original = liHtml.match(/data-ablesci-original-title\s*=\s*"([^"]+)"/i);
       if (original) return cleanJournalAccessName(original[1]);
-      const titleLink = liHtml.match(/<a\b[^>]*title\s*=\s*"查看详情"[^>]*>[\s\S]*?<\/a>/i)?.[0] || liHtml;
+      const titleBlock = liHtml.match(/<h2\b[^>]*class\s*=\s*"[^"]*\bassist-list-title\b[^"]*"[^>]*>[\s\S]*?<\/h2>/i)?.[0] || '';
+      const titleLink = titleBlock || liHtml.match(/<a\b[^>]*title\s*=\s*"查看详情"[^>]*>[\s\S]*?<\/a>/i)?.[0] || liHtml;
       const spanRe = /(<span\b[^>]*\btitle\s*=\s*"([^"]+)"[^>]*>)([\s\S]*?)<\/span>/gi;
       let m;
       while ((m = spanRe.exec(titleLink))) {

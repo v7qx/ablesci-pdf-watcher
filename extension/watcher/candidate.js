@@ -329,8 +329,9 @@
         if (/求助|违规|举报|高分|置顶|悬赏|文献类型|Book|Chapter|Supplement/i.test(value)) return false;
         return true;
       }
-      function extractJournalShortNameFromAnchor(anchor) {
-        const spans = Array.from(anchor?.querySelectorAll('span[title]') || []);
+      function extractJournalShortNameFromRow(row, anchor) {
+        const titleBlock = row?.querySelector?.('.assist-list-title');
+        const spans = Array.from((titleBlock || anchor)?.querySelectorAll('span[title]') || []);
         for (const span of spans) {
           if (!isJournalBadgeSpan(span)) continue;
           const value = span.getAttribute('data-ablesci-original-title') || span.getAttribute('title') || text(span);
@@ -513,7 +514,7 @@
           requesterId = requesterAnchor?.getAttribute('data-id') || new URL(requesterHref, location.href).searchParams.get('id') || '';
         } catch (_) {}
         const publisherName = row.querySelector('.paper-publisher img[title]')?.getAttribute('title') || '';
-        const journalShortName = extractJournalShortNameFromAnchor(detailAnchor);
+        const journalShortName = extractJournalShortNameFromRow(row, detailAnchor);
         const typeText = documentTypeTextFromRow(row);
         const documentType = normalizeDocumentTypeLocal(typeText);
         const doi = doiFrom(rowText);
@@ -694,11 +695,15 @@
       }
       const accessBlocked = journalAccessEntryForCandidate(candidate, state);
       if (accessBlocked) {
+        const publisherKey = journalAccessPublisherKey(candidate);
+        const cacheKey = journalAccessCacheKey(publisherKey, accessBlocked.key);
         return {
           ok: false,
           reason: 'journal_blocked_rule',
           journalAccess: {
             key: accessBlocked.key,
+            cacheKey,
+            publisher: publisherKey,
             shortName: cleanJournalAccessName(accessBlocked.entry.shortName || candidate.journalShortName || ''),
             lastAt: accessBlocked.entry.lastAt || '',
             expiresAt: accessBlocked.entry.expiresAt || '',
@@ -783,10 +788,19 @@
     async function clearJournalAccessBlocked(candidate, payload = null) {
       const publisherKey = journalAccessPublisherKey(candidate, payload);
       if (!isCacheableJournalAccessPublisher(publisherKey)) return false;
-      const shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
+      let shortName = cleanJournalAccessName(candidate?.journalShortName || payload?.journalShortName || '');
+      const state = await getWatcherState();
+      if (!shortName && payload?.journalName) {
+        const fullKey = normalizeJournalKey(payload.journalName);
+        const map = journalShortNameMapFromState(state);
+        const matched = Object.values(map).find(entry => {
+          if (!entry || typeof entry !== 'object') return false;
+          return journalRuleNames(entry).some(name => normalizeJournalKey(name) === fullKey);
+        });
+        shortName = cleanJournalAccessName(matched?.short || '');
+      }
       const key = normalizeJournalKey(shortName);
       if (!key) return false;
-      const state = await getWatcherState();
       const stats = journalAccessStatsFromState(state);
       const cacheKey = journalAccessCacheKey(publisherKey, key);
       const existing = stats[cacheKey] || (publisherKey === 'sciencedirect' ? stats[key] : {}) || {};

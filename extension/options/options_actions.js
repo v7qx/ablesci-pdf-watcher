@@ -174,6 +174,54 @@
       return openLocalStorageDirFromNative();
     }
 
+    function isPlainObject(value) {
+      return value && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function compactExportValue(value) {
+      if (Array.isArray(value)) {
+        const compacted = value
+          .map(item => compactExportValue(item))
+          .filter(item => item !== undefined);
+        return compacted.length ? compacted : undefined;
+      }
+      if (isPlainObject(value)) {
+        const compacted = {};
+        for (const [key, item] of Object.entries(value)) {
+          const next = compactExportValue(item);
+          if (next !== undefined) compacted[key] = next;
+        }
+        return Object.keys(compacted).length ? compacted : undefined;
+      }
+      if (value === '' || value === null || value === undefined) return undefined;
+      return value;
+    }
+
+    function compactExportObject(value, fallback = null) {
+      const compacted = compactExportValue(value);
+      return compacted === undefined ? fallback : compacted;
+    }
+
+    function scheduleSummaryFromState(state = {}, opts = {}) {
+      const parallelLaneSchedules = compactExportObject(state.parallelLaneSchedules || null, null);
+      const legacySingleSchedule = compactExportObject({
+        nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
+        nextAssistRunAt: state.nextAssistRunAt || '',
+        nextAssistStrategy: state.nextAssistStrategy || '',
+        nextAssistReason: state.nextAssistReason || '',
+        nextAssistDelayMinutes: state.nextAssistDelayMinutes || '',
+        nextAssistModelDelayMinutes: state.nextAssistModelDelayMinutes || '',
+        nextAssistPlan: state.nextAssistPlan || null,
+        nextAssistPlannedAt: state.nextAssistPlannedAt || '',
+        chromeAlarmScheduledAt: state.chromeAlarmScheduledAt || ''
+      }, null);
+      return compactExportObject({
+        mode: opts.watcherMultiPublisherEnabled ? 'parallel_lanes' : 'single_alarm',
+        parallelLaneSchedules,
+        legacySingleSchedule
+      }, null);
+    }
+
     async function copyAutoWatcherConfig() {
       const opts = await loadOptions();
       const stored = await chromeApi.storage.local.get([
@@ -202,6 +250,11 @@
           today: state.daily?.[todayKeyBeijing()] || null,
           currentSchedulerMode: state.currentSchedulerMode || '',
           currentExecutionModel: state.currentExecutionModel || '',
+          schedule: scheduleSummaryFromState(state, opts),
+          parallelLaneSchedules: compactExportObject(state.parallelLaneSchedules || null, null),
+          parallelPublisherLastStarted: compactExportObject(state.parallelPublisherLastStarted || null, null),
+          pausedPublisherLanes: compactExportObject(state.pausedPublisherLanes || null, null),
+          publisherSeekingCountCache: compactExportObject(state.publisherSeekingCountCache || null, null),
           nextScheduledAt: state.nextScheduledAt ? new Date(state.nextScheduledAt).toISOString() : '',
           nextAssistRunAt: state.nextAssistRunAt || '',
           nextAssistStrategy: state.nextAssistStrategy || '',
@@ -251,9 +304,9 @@
             full: typeof value === 'object' ? value.full || '' : String(value || '')
           }))
         },
-        latestWatcherLog: logs[0] || null,
-        latestTraceLogs: traceLogs.slice(0, 80),
-        latestDiagnostic: diagnostic ? {
+        latestWatcherLog: compactExportObject(logs[0] || null, null),
+        latestTraceLogs: traceLogs.slice(0, 80).map(item => compactExportObject(item, {})).filter(item => Object.keys(item).length),
+        latestDiagnostic: compactExportObject(diagnostic ? {
           time: diagnostic.time || '',
           stage: diagnostic.stage || '',
           assistId: diagnostic.assistId || '',
@@ -264,7 +317,7 @@
           pickedUrl: diagnostic.pickedUrl || null,
           source: diagnostic.source || '',
           error: diagnostic.error || ''
-        } : null
+        } : null, null)
       };
 
       const text = JSON.stringify(payload, null, 2);

@@ -759,15 +759,18 @@
       if (completionMsg.html) {
         completionMsg.html = translateBackgroundMessage(completionMsg.html);
       }
+      const completionTitle = translateBackgroundMessage(completionMsg.title || completionMsg.message || defaultSuccess);
 
       if (completionMsg.blocked) {
         const skipLabel = isEn ? 'Skipped' : '已跳过';
         setStatus(skipLabel, 'blocked', {
-          title: completionMsg.message || (isEn ? 'Current task skipped' : '当前任务已跳过'),
+          title: completionTitle || (isEn ? 'Current task skipped' : '当前任务已跳过'),
           logText: ''
         });
       } else {
-        setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok');
+        setStatus(completionMsg.message || defaultSuccess, completionMsg.downloadOnly ? 'downloadOnly' : 'ok', {
+          title: completionTitle
+        });
       }
       if (!msg.downloadOnly) {
         showSiteLikeCompletion(completionMsg);

@@ -39,7 +39,6 @@
       </div>
     </section>
 
-
     <details class="card">
       <summary>上传规则</summary>
       <div class="setting-row">
@@ -141,7 +140,7 @@
           <span>按 PDF 下载/应助尝试计数，0 表示不限制。用于防止异常时连续下载。</span>
         </div>
         <div class="setting-control setting-control-compact">
-          <input id="watcherDailyLimit" class="compact-number" type="number" min="0" max="1000" step="1" value="10" aria-label="每日应助上限">
+          <input id="watcherDailyLimit" class="compact-number" type="number" min="0" max="2000" step="1" value="10" aria-label="每日应助上限">
         </div>
       </div>
       <div class="setting-row">
@@ -202,8 +201,44 @@
       </div>
     </details>
 
-    <details class="card">
-      <summary>PDF 去水印 (Experimental)</summary>
+    <details class="card experiment-tools-card">
+      <summary>实验工具</summary>
+      <details class="setting-details experiment-tool-section">
+        <summary>DOI 批量下载</summary>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>导入 DOI 清单</strong>
+            <span>支持 JSONL、JSON、CSV、TSV 和 TXT；自动识别常见字段并按出版社分槽下载。始终仅下载，不会求助或上传。</span>
+          </div>
+          <div class="setting-control setting-control-wide doi-file-picker">
+            <input id="scholarFlowFile" type="file" accept=".jsonl,.json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values,text/plain">
+            <button id="scholarFlowImport" class="secondary" type="button">导入</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>批量任务</strong>
+            <span>页面关闭时停止；重新打开设置页后可继续。ScienceDirect、Wiley、其他出版社各用一个槽，槽内间隔固定为 2 分钟，等待期间可手动跳过。</span>
+          </div>
+          <div class="setting-control doi-batch-actions">
+            <button id="scholarFlowStart" type="button">开始/继续</button>
+            <button id="scholarFlowSkipWait" class="secondary" type="button">跳过等待</button>
+            <button id="scholarFlowPause" class="secondary" type="button">完成当前项后暂停</button>
+            <button id="scholarFlowExport" class="secondary" type="button">导出结果</button>
+            <button id="scholarFlowReset" class="secondary" type="button">清空任务</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>状态</strong>
+            <span id="scholarFlowStatus">尚未导入任务。</span>
+            <span>PDF 保存到 Downloads/DOIPDF/files/期刊，命名为 record_id_title.pdf；完整结果写入 index，失败和无权限记录另写入 issues。</span>
+          </div>
+        </div>
+        <div id="scholarFlowLog" class="doi-batch-log"></div>
+      </details>
+      <details class="setting-details experiment-tool-section">
+        <summary>PDF 去水印</summary>
       <div class="setting-row">
         <div class="setting-copy">
           <strong>启用 PDF 去水印</strong>
@@ -268,6 +303,7 @@
           </select>
         </div>
       </div>
+      </details>
     </details>
 
     <details class="card" open>
@@ -536,6 +572,7 @@
 <script src="options/options_native.js"></script>
 <script src="options/options_status.js"></script>
 <script src="options/options_actions.js"></script>
+<script src="options/options_literature.js"></script>
 <script src="options/options_i18n.js"></script>
 <script src="options/options.js"></script>
 </body>

@@ -329,7 +329,18 @@
             trigger,
             runId: run.runId
           });
-          return { stopRun: true, result: { ok: false, reason } };
+          return {
+            stopRun: true,
+            result: {
+              ok: false,
+              reason,
+              rateLimit: {
+                window: rateLimit.window,
+                count: rateLimit.count,
+                limit: rateLimit.limit
+              }
+            }
+          };
         }
       }
       const liveTargetState = !opts.watcherQuantSchedulerEnabled
@@ -478,7 +489,7 @@
       }
       await restoreManualScheduleSnapshot(run).catch(() => {});
       await recordAttemptFinish(run.attempt, result).catch(() => {});
-      try { await writeDailyReports(); } catch (_) {}
+      try { await writeDailyReports(); } catch (err) { console.warn('[Ablesci Auto Watcher] daily report failed', err); }
       await flushWatcherLogs().catch(() => {});
       await flushWatcherTrace().catch(() => {});
       await setRunFinalizeScan(run, result, 'done', result.ok === true ? 'done' : 'failed', result.reason || 'unknown');

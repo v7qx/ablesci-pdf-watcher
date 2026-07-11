@@ -17,6 +17,10 @@
     doi = doi.replace(/getrightsandcontent$/i, '');
     doi = doi.replace(/[)\].,;，。]+$/, '');
     if (doi.includes('...') || doi.includes('…')) return null;
+    // Known publisher route segments are not DOI suffixes by themselves. For
+    // example, Cochrane article URLs contain /doi/10.1002/central/CN-...;
+    // a truncated visible URL must not turn 10.1002/central into a DOI.
+    if (/^10\.1002\/central\/?$/i.test(doi)) return null;
     return doi;
   }
 
@@ -28,10 +32,43 @@
     try { return new URL(url).hostname.toLowerCase(); } catch (_) { return ''; }
   }
 
+  function isSupportedPublisherUrl(url) {
+    let parsed;
+    try {
+      parsed = new URL(String(url || ''));
+    } catch (_) {
+      return false;
+    }
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    const exactHosts = new Set([
+      'www.sciencedirect.com',
+      'sciencedirect.com',
+      'linkinghub.elsevier.com',
+      'pdf.sciencedirectassets.com',
+      'pubs.rsc.org',
+      'books.rsc.org',
+      'xlink.rsc.org',
+      'link.springer.com',
+      'pubs.acs.org',
+      'onlinelibrary.wiley.com',
+      'academic.oup.com',
+      'pubs.aip.org',
+      'aip.scitation.org',
+      'scitation.org',
+      'ieeexplore.ieee.org',
+      'www.nature.com',
+      'nature.com',
+      'sage.cnpereading.com',
+      'iopscience.iop.org'
+    ]);
+    return exactHosts.has(host) || host.endsWith('.onlinelibrary.wiley.com');
+  }
+
   function trustedDirectPdfHref(url) {
     if (!/^https?:\/\//i.test(url || '')) return null;
     const h = hostOf(url);
-    if (!h || h.includes('ablesci.com') || h === 'doi.org' || h === 'dx.doi.org') return null;
+    if (!h || h.includes('ablesci.com') || h === 'doi.org' || h === 'dx.doi.org' || !isSupportedPublisherUrl(url)) return null;
     return url;
   }
 
@@ -43,6 +80,11 @@
     if (/^https?:\/\/(?:dx\.)?doi\.org\//i.test(url) && doi) {
       return `https://doi.org/${doi}`;
     }
+
+    // Do not promote arbitrary assist links to download targets. Publisher
+    // navigation is limited to the same domains that the extension currently
+    // injects and maintains.
+    if (!isSupportedPublisherUrl(url)) return null;
 
     const sd = url.match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/([^/?#]+))(?:\/(?:pdfft|pdf)(?:[?#].*)?|[?#].*)?$/i);
     if (sd) {
@@ -139,7 +181,9 @@
       }
     }
 
-    return extractDoi(doc.body ? doc.body.innerText : '');
+    // Do not scan the whole page. The article URL can contain DOI-shaped path
+    // fragments even when Ablesci explicitly says that no DOI was supplied.
+    return null;
   }
 
   function makePdfFilename(doc) {
@@ -155,6 +199,7 @@
     pickPdfUrlFromDocument,
     getFullDoiFromDocument,
     makePdfFilename,
-    convertKnownUrlToPdf
+    convertKnownUrlToPdf,
+    isSupportedPublisherUrl
   };
 })();

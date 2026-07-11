@@ -18,7 +18,7 @@
   const MAX_SESSION_CANDIDATES = 10;
   const ACTIVE_RUN_RETENTION_DAYS = 62;
   const REPORT_DIR = 'ablesci-watcher-reports';
-  const WATCHER_DAILY_LIMIT_MAX = 1000;
+  const WATCHER_DAILY_LIMIT_MAX = 2000;
   const DOI_FAILURE_SKIP_THRESHOLD = 5;
 
   let deps = null;

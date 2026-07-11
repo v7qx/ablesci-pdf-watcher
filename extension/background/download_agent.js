@@ -312,7 +312,10 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
       const restorePreviousTabAfterDownloadStart = options.restorePreviousTabAfterDownloadStart === true;
       const revealAfterMs = Number(options.revealAfterMs || 0);
       const signal = options.signal || null;
-      const directDownloadFilenameRel = options.filenameRel || makeDownloadFilename('', options.payload?.suggestedFilename || 'paper.pdf');
+      const directDownloadFilenameRel = options.filenameRel || makeDownloadFilename(
+        options.payload?.downloadSubdir || '',
+        options.payload?.suggestedFilename || 'paper.pdf'
+      );
 
       return await new Promise(async (resolve, reject) => {
         let tabId = null;
@@ -334,6 +337,9 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         const pollTimeouts = new Set();
         const articleUrl = ensureHttpUrl(publisherArticleUrlFromPdfUrl(pdfUrl) || pdfUrl, '出版商页面 URL');
         const payloadSummary = {
+          taskMode: options.payload?.taskMode || '',
+          downloadSubdir: options.payload?.downloadSubdir || '',
+          suggestedFilename: options.payload?.suggestedFilename || '',
           assistId: options.payload?.assistId || '',
           doi: options.payload?.doi || '',
           journalName: options.payload?.journalName || '',
@@ -347,6 +353,11 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         };
         const expectedPublisher = publisherForUrl(articleUrl) || publisherForUrl(pdfUrl) || publisherForDoi?.(payloadSummary.doi || pdfUrl) || '';
         const startedAfter = new Date(Date.now() - 2000).toISOString();
+        // onCreated and the fallback poller may observe the same download more
+        // than once. Keep per-task seen sets so a candidate is accepted or
+        // reported as ignored only once. Without these sets the event callback
+        // throws before it can resolve the completed download, leaving the
+        // caller waiting even though Chrome has already saved the PDF.
         const seenIds = new Set();
         const seenIgnoredIds = new Set();
 
@@ -595,14 +606,21 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         }
 
         function claimDownloadFilename(item) {
-          const sequence = String(payloadSummary.downloadSequence || '').trim();
-          if (!sequence) return '';
           const exactTabOwner = tabId !== null && Number.isInteger(item.tabId) && item.tabId === tabId;
           const trustedUrlOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && sameDownloadUrlPath(item, sourceUrlForMatching);
           const trustedReferrerOwner = tabId !== null && (!Number.isInteger(item.tabId) || item.tabId < 0) && (
             sameDownloadReferrerPath(item, articleUrl) || sameDownloadReferrerPath(item, sourceUrlForMatching)
           );
           if (!exactTabOwner && !trustedUrlOwner && !trustedReferrerOwner) return '';
+
+          if (payloadSummary.taskMode === 'literature_download') {
+            const suggested = String(payloadSummary.suggestedFilename || '').trim();
+            const original = String(item.filename || 'paper.pdf').split(/[\\/]/).pop();
+            return makeDownloadFilename(payloadSummary.downloadSubdir || '', suggested || original);
+          }
+
+          const sequence = String(payloadSummary.downloadSequence || '').trim();
+          if (!sequence) return '';
           const original = String(item.filename || 'paper.pdf').split(/[\\/]/).pop().replace(/^\d{3}-/, '') || 'paper.pdf';
           return `${sequence}-${original}`;
         }
@@ -727,6 +745,21 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
             throw err;
           }
 
+          if (!isDoiUrl(articleUrl) && !expectedPublisher) {
+            const landingCheck = {
+              ok: false,
+              status: 'skipped',
+              reason: 'unsupported_landing_host',
+              publisher: '',
+              doi: payloadSummary.doi || '',
+              finalUrl: articleUrl,
+              host: hostnameOf(articleUrl)
+            };
+            tracePublisherStep('publisher_landing_rejected_pre_open', landingCheck);
+            console.warn('[publisher-landing] skipped unsupported host', landingCheck);
+            throw makeLandingError(landingCheck);
+          }
+
           if (expectedPublisher && !isDoiUrl(articleUrl)) {
             const landingCheck = validatePublisherLanding?.({
               publisher: expectedPublisher,
@@ -826,7 +859,7 @@ const DEFAULT_NO_DOWNLOAD_TIMEOUT_MS = 120 * 1000;
         err.failureReason = 'publisher_unsupported';
         throw err;
       }
-      const filenameRel = makeDownloadFilename('', suggestedFilename);
+      const filenameRel = makeDownloadFilename(opts.payloadContext?.downloadSubdir || '', suggestedFilename);
       const mode = opts.downloadMode || 'auto';
       const revealAfterMs = 0;
       let noDownloadTimeoutMs = Math.max(1000, Number(opts.watcherNoDownloadTimeoutMinutes || defaultOptions.watcherNoDownloadTimeoutMinutes) * 60 * 1000);

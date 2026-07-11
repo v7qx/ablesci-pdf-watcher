@@ -299,7 +299,9 @@
           downloaded: 0,
           downloadedAuto: 0,
           downloadedManual: 0,
+          downloadedCompleted: 0,
           uploaded: 0,
+          uploadUnconfirmed: 0,
           skipped: 0,
           failed: 0,
           notified: 0
@@ -335,7 +337,16 @@
         const key = todayKey();
         const now = new Date().toISOString();
         state.daily = state.daily || {};
-        state.daily[key] = state.daily[key] || { checked: 0, downloaded: 0, uploaded: 0, skipped: 0, failed: 0, notified: 0 };
+        state.daily[key] = state.daily[key] || {
+          checked: 0,
+          downloaded: 0,
+          downloadedCompleted: 0,
+          uploaded: 0,
+          uploadUnconfirmed: 0,
+          skipped: 0,
+          failed: 0,
+          notified: 0
+        };
         const daily = state.daily[key];
         daily.totalRuns = Number(daily.totalRuns || 0) + 1;
         daily[triggerMetricKey(trigger)] = Number(daily[triggerMetricKey(trigger)] || 0) + 1;

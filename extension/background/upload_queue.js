@@ -182,7 +182,7 @@
             'assist_closed',
             'tab_drag_locked'
           ]);
-          if (!normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
+          if (payload?.taskMode !== 'literature_download' && !normalSkipReasons.has(failureReason) && port.name === 'ablesci-pdf-upload' && typeof recordManualWatcherDaily === 'function') {
             await recordManualWatcherDaily('failed').catch(() => {});
           }
 
@@ -319,7 +319,10 @@
                 (err?.responseMeta ? `\n响应信息: ${JSON.stringify(err.responseMeta)}` : ''),
                 err
               );
-              post(port, 'error', formatTaskError(err), cleanerExtra);
+              post(port, 'error', formatTaskError(err), {
+                failureReason: failureReason || 'failed',
+                ...cleanerExtra
+              });
             }
           }
         } finally {
@@ -364,7 +367,8 @@
         cancelReason: '',
         abortController: new AbortController()
       };
-      task.parallel = payload?.watcherMultiPublisherEnabled === true && payload?.triggeredBy === 'auto_watcher';
+      task.parallel = payload?.taskMode === 'literature_download' ||
+        (payload?.watcherMultiPublisherEnabled === true && payload?.triggeredBy === 'auto_watcher');
       task.publisher = publisherKey(payload);
 
       const hadActiveOrQueued = activeTasks.size > 0 || taskQueue.length > 0;

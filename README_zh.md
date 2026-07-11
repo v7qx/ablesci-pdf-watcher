@@ -80,13 +80,13 @@ Get-AuthenticodeSignature .\native-host\dist\ablesci_pdf_helper.exe
 
 该功能默认关闭，可在“更多设置”中开启。开启后需要Poppler的`pdftotext.exe`和`pdfinfo.exe`；`build_helper.ps1`不会安装它们。
 
-下载固定版[Poppler 24.08.0 Windows运行时](https://github.com/oschwartz10612/poppler-windows/releases/download/v24.08.0-0/Release-24.08.0-0.zip)（SHA256：`58A6F9AE269756231D2F9AA6CBA39D75FEC6DEACAF3C4A50683383B5F3D5A527`），完整解压到：
+打开 [Poppler Windows Release 26.02.0-0 页面](https://github.com/oschwartz10612/poppler-windows/releases/tag/v26.02.0-0)，在 Assets 中下载 `Release-26.02.0-0.zip`（SHA256：`993e4a94376ed712fafc7058d724ea0b943d118bbd2305cd9ed55174eb85cda5`），完整解压到：
 
 ```text
-%LOCALAPPDATA%\AblesciPdfWatcher\tools\poppler\poppler-24.08.0\
+%LOCALAPPDATA%\AblesciPdfWatcher\tools\poppler\poppler-26.02.0\
 ```
 
-不要只复制EXE，需保留同目录DLL和许可证文件。关闭标题核对时不会查找或调用Poppler。
+不要只复制EXE，需保留同目录DLL和许可证文件。Helper 仍兼容旧的 `poppler-24.08.0` 目录；关闭标题核对时不会查找或调用Poppler。
 
 ## 安全边界
 

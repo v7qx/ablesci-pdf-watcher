@@ -56,7 +56,7 @@
         ? Math.min(...laneTimes)
         : (fallbackTimes.length
           ? Math.min(...fallbackTimes)
-          : (state.nextAssistRunAt || state.chromeAlarmScheduledAt || state.nextScheduledAt || ''));
+          : '');
       return {
         kind: 'run',
         time: unifiedAt,

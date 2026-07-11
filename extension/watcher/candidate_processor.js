@@ -45,6 +45,24 @@
       return sourceKeyFromUrl(candidate.listUrl || pagePick.configuredUrl || pagePick.pickedListUrl || '');
     }
 
+    async function recordJournalAccessListHit(journalAccess = {}, candidate = {}) {
+      const cacheKey = String(journalAccess.cacheKey || '').trim();
+      if (!cacheKey) return false;
+      const state = await getWatcherState();
+      const stats = state.journalAccessStats && typeof state.journalAccessStats === 'object' && !Array.isArray(state.journalAccessStats)
+        ? state.journalAccessStats
+        : {};
+      const entry = stats[cacheKey];
+      if (!entry || typeof entry !== 'object') return false;
+      entry.hitCount = Math.max(0, Number(entry.hitCount || 0) || 0) + 1;
+      entry.lastAt = new Date().toISOString();
+      entry.lastAssistId = candidate.assistId || entry.lastAssistId || '';
+      stats[cacheKey] = entry;
+      state.journalAccessStats = stats;
+      await saveWatcherStateSafe(state);
+      return true;
+    }
+
     function processedMeta(candidate = {}, payload = {}, pagePick = {}, page = '') {
       payload = payload && typeof payload === 'object' ? payload : {};
       return {
@@ -88,6 +106,7 @@
         }
         skippedReasonCounts[listAllowed.reason] = Number(skippedReasonCounts[listAllowed.reason] || 0) + 1;
         if (listAllowed.reason === 'journal_blocked_rule') {
+          await recordJournalAccessListHit(listAllowed.journalAccess, candidate).catch(() => false);
           journalBlockedSummary.count += 1;
           if (candidate.assistId) journalBlockedSummary.examples.add(candidate.assistId);
           const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
@@ -166,6 +185,7 @@
             await updateProcessed(candidateKey, 'skipped', listAllowed.reason, processedMeta(candidate, null, pagePick, candidatePage));
           }
           if (listAllowed.reason === 'journal_blocked_rule') {
+            await recordJournalAccessListHit(listAllowed.journalAccess, candidate).catch(() => false);
             journalBlockedSummary.count += 1;
             if (candidate.assistId) journalBlockedSummary.examples.add(candidate.assistId);
             const shortName = listAllowed.journalAccess?.shortName || candidate.journalShortName || '';
