@@ -47,36 +47,6 @@
       handlePublisherRuntimeMessage,
       recordManualWatcherDaily
     } = deps;
-    const DOWNLOAD_SEQUENCE_KEY = 'watcherDownloadSequence';
-    let downloadSequenceMutation = Promise.resolve();
-
-    function beijingDateKey() {
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
-      }).format(new Date());
-    }
-
-    function allocateDownloadSequence() {
-      const operation = async () => {
-        const today = beijingDateKey();
-        const stored = await chromeApi.storage.local.get(DOWNLOAD_SEQUENCE_KEY);
-        const current = stored[DOWNLOAD_SEQUENCE_KEY] || {};
-        const value = current.date === today ? Math.max(1, Math.min(999, Number(current.next || 1))) : 1;
-        const code = String(value).padStart(3, '0');
-        await chromeApi.storage.local.set({
-          [DOWNLOAD_SEQUENCE_KEY]: { date: today, next: value >= 999 ? 1 : value + 1 }
-        });
-        return code;
-      };
-      const next = downloadSequenceMutation.then(operation, operation);
-      downloadSequenceMutation = next.catch(() => {});
-      return next;
-    }
-
-    function prefixDownloadFilename(filename, code) {
-      return `${code}-${String(filename || 'paper.pdf').replace(/^\d{3}-/, '')}`;
-    }
-
     function isLikelyCorrigendumTitle(title) {
       const value = String(title || '').trim();
       return /^(corrigendum|correction|erratum|addendum)\s+(to|for)\b/i.test(value) ||
@@ -400,11 +370,6 @@
         };
       }
       const opts = optsOverride || await getOptions();
-      if (!literatureDownload && (debugSimulation || opts.debugDownloadOnly === true || payload.downloadOnly === true)) {
-        const downloadSequence = await allocateDownloadSequence();
-        payload.downloadSequence = downloadSequence;
-        payload.suggestedFilename = prefixDownloadFilename(payload.suggestedFilename, downloadSequence);
-      }
       const diag = makeDiagnosticBase(payload, opts);
 
       // 1. 校验更正类求助

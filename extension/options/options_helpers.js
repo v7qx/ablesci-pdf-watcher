@@ -2,11 +2,7 @@
 
 (function () {
   function createOptionsHelpersApi(deps = {}) {
-    const {
-      defaultOptions,
-      normalizeWorkdaysSet,
-      normalizeWorkWindowsDetailed
-    } = deps;
+    const { defaultOptions } = deps;
 
     function normalizeButtonLabel(value) {
       const s = String(value || '').trim();
@@ -54,14 +50,6 @@
       const hours = Math.floor(minutes / 60);
       const minRem = minutes % 60;
       return isEn ? `${hours}h ${String(minRem).padStart(2, '0')}m` : `${hours}时${String(minRem).padStart(2, '0')}分`;
-    }
-
-    function normalizeWorkdays(value) {
-      return normalizeWorkdaysSet(value, defaultOptions.watcherWorkdays);
-    }
-
-    function normalizeWorkWindows(value) {
-      return normalizeWorkWindowsDetailed(value, defaultOptions.watcherWorkWindows);
     }
 
     function nextDisplaySchedule(state = {}) {
@@ -127,8 +115,6 @@
       normalizeButtonPosition,
       formatBeijingDateTime,
       countdownText,
-      normalizeWorkdays,
-      normalizeWorkWindows,
       nextDisplaySchedule,
       todayKeyBeijing,
       sanitizeUrlForExport,

@@ -79,14 +79,11 @@
     watcherCfPauseThreshold: 6,
     watcherQuantSchedulerEnabled: true,
     watcherRiskBudgetLimit: 10,
-    watcherWorkdays: '1,2,3,4,5',
-    watcherWorkWindows: '09:00-12:00\n13:30-18:00',
     watcherMonthlyTarget: 2000,
     watcherMinDailyTarget: 0,
     watcherMaxDailyTarget: WATCHER_DAILY_LIMIT_MAX,
     watcherMaxPerSession: 1,
     watcherAllowZeroSession: false,
-    watcherUseCalendarProgress: true,
     watcherLanguage: 'auto',
     pdfCleanerEnabled: false,
     pdfCleanerCliPath: '',
@@ -157,8 +154,8 @@
 
     const speedMode = ['adaptive', 'slow', 'normal', 'fast'].includes(raw.watcherSpeedMode) ? raw.watcherSpeedMode : 'adaptive';
     // LOCKED defaults: the fields force-assigned below are intentionally not
-    // user-configurable. The product is "one random assist per run inside work
-    // hours", so download/upload flow, the single-candidate/single-session caps,
+    // user-configurable. The product is "one random assist per run whenever the
+    // browser is active", so download/upload flow and the single-candidate/session caps,
     // the skip rules, fixed timeouts and the (vestigially named) quant scheduler
     // flag are pinned to safe values regardless of stored input. They are kept in
     // DEFAULT_OPTIONS for storage shape only and are deliberately absent from the
@@ -217,14 +214,11 @@
       watcherCfPauseThreshold: clampNumber(opts.watcherCfPauseThreshold, DEFAULT_OPTIONS.watcherCfPauseThreshold, 1, 10),
       watcherQuantSchedulerEnabled: true,
       watcherRiskBudgetLimit: clampNumber(opts.watcherRiskBudgetLimit, DEFAULT_OPTIONS.watcherRiskBudgetLimit, 1, 100),
-      watcherWorkdays: String(opts.watcherWorkdays || DEFAULT_OPTIONS.watcherWorkdays).trim(),
-      watcherWorkWindows: String(opts.watcherWorkWindows || DEFAULT_OPTIONS.watcherWorkWindows).trim(),
       watcherMonthlyTarget: clampNumber(opts.watcherMonthlyTarget, DEFAULT_OPTIONS.watcherMonthlyTarget, 0, 5000),
       watcherMinDailyTarget: 0,
       watcherMaxDailyTarget: WATCHER_DAILY_LIMIT_MAX,
       watcherMaxPerSession: 1,
       watcherAllowZeroSession: opts.watcherAllowZeroSession === true,
-      watcherUseCalendarProgress: opts.watcherUseCalendarProgress !== false,
       watcherLanguage: ['auto', 'zh', 'en'].includes(opts.watcherLanguage) ? opts.watcherLanguage : 'auto',
       pdfCleanerEnabled: opts.pdfCleanerEnabled === true,
       pdfCleanerCliPath: String(opts.pdfCleanerCliPath || '').trim(),

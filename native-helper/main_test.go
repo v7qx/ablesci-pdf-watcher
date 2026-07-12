@@ -2,14 +2,42 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestRunHiddenCommandHelperProcess(t *testing.T) {
+	if os.Getenv("ABLESCI_TEST_HELPER_PROCESS") != "1" {
+		return
+	}
+	time.Sleep(5 * time.Second)
+	os.Exit(0)
+}
+
+func TestRunHiddenCommandHonorsTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	cmd := exec.Command(os.Args[0], "-test.run=TestRunHiddenCommandHelperProcess")
+	cmd.Env = append(os.Environ(), "ABLESCI_TEST_HELPER_PROCESS=1")
+	started := time.Now()
+	err := runHiddenCommand(ctx, cmd)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("timed out command was not terminated promptly: %s", elapsed)
+	}
+}
 
 func TestMarkerDownloadDirsFromBytesIncludesLegacyAndProfiles(t *testing.T) {
 	legacy := filepath.Join(t.TempDir(), "legacy-downloads")
@@ -267,6 +295,45 @@ func TestBuildCleanerArgsKeepsLegacyAccessCleanerFlags(t *testing.T) {
 	}
 }
 
+func TestEnsureCleanedFileSortsAfterBackupOnlyChangesTimes(t *testing.T) {
+	dir := t.TempDir()
+	cleanedPath := filepath.Join(dir, "paper.pdf")
+	backupPath := filepath.Join(dir, "paper.original.pdf")
+	cleanedContent := []byte("%PDF-1.4\ncleaned-content")
+	if err := os.WriteFile(cleanedPath, cleanedContent, 0644); err != nil {
+		t.Fatalf("write cleaned PDF: %v", err)
+	}
+	if err := os.WriteFile(backupPath, []byte("%PDF-1.4\noriginal-content"), 0644); err != nil {
+		t.Fatalf("write backup PDF: %v", err)
+	}
+	backupTime := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(backupPath, backupTime, backupTime); err != nil {
+		t.Fatalf("set backup time: %v", err)
+	}
+
+	if err := ensureCleanedFileSortsAfterBackup(cleanedPath, backupPath); err != nil {
+		t.Fatalf("refresh cleaned PDF time: %v", err)
+	}
+	cleanedInfo, err := os.Stat(cleanedPath)
+	if err != nil {
+		t.Fatalf("stat cleaned PDF: %v", err)
+	}
+	backupInfo, err := os.Stat(backupPath)
+	if err != nil {
+		t.Fatalf("stat backup PDF: %v", err)
+	}
+	if !cleanedInfo.ModTime().After(backupInfo.ModTime()) {
+		t.Fatalf("cleaned PDF must sort after backup: cleaned=%s backup=%s", cleanedInfo.ModTime(), backupInfo.ModTime())
+	}
+	after, err := os.ReadFile(cleanedPath)
+	if err != nil {
+		t.Fatalf("read cleaned PDF: %v", err)
+	}
+	if !bytes.Equal(after, cleanedContent) {
+		t.Fatal("cleaned PDF contents changed while refreshing modification time")
+	}
+}
+
 func TestBuildPageCountArgsUsesToolboxDryRun(t *testing.T) {
 	args := buildPageCountArgs(
 		filepath.Join("C:", "Tools", "zotero-pdf-toolbox.exe"),
@@ -334,11 +401,10 @@ func TestAllowedTextReadPathRequiresHelperDirOrExactAllowedPath(t *testing.T) {
 	}
 }
 
-func TestValidateOSSHostAllowsAliyunPublicEndpoints(t *testing.T) {
+func TestValidateOSSHostAllowsProductionBucket(t *testing.T) {
 	hosts := []string{
 		"https://ables1.oss-cn-shanghai.aliyuncs.com/",
-		"https://ables2.oss-cn-beijing.aliyuncs.com",
-		"https://bucket-name.oss-accelerate.aliyuncs.com/",
+		"https://ABLES1.OSS-CN-SHANGHAI.ALIYUNCS.COM/",
 	}
 	for _, host := range hosts {
 		if err := validateOSSHost(host); err != nil {
@@ -357,11 +423,26 @@ func TestValidateOSSHostRejectsUnsafeEndpoints(t *testing.T) {
 		"https://user:pass@ables1.oss-cn-shanghai.aliyuncs.com/",
 		"https://example.com/",
 		"https://evil.aliyuncs.com/",
+		"https://ables2.oss-cn-beijing.aliyuncs.com/",
+		"https://bucket-name.oss-accelerate.aliyuncs.com/",
+		"https://ables1.oss-cn-shanghai.aliyuncs.com./",
+		"https://ables1.oss-cn-shanghai.aliyuncs.com.evil.example/",
 	}
 	for _, host := range hosts {
 		if err := validateOSSHost(host); err == nil {
 			t.Fatalf("expected %s to be rejected", host)
 		}
+	}
+}
+
+func TestRedactCleanerArgsRemovesLocalPaths(t *testing.T) {
+	args := redactCleanerArgs([]string{"--input", `C:\Users\person\Downloads\paper.pdf`, "--summary-json", `/tmp/summary.json`, "--engine", "qpdf"})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "person") || strings.Contains(joined, "Downloads") || strings.Contains(joined, "/tmp") {
+		t.Fatalf("local path leaked from cleaner args: %s", joined)
+	}
+	if !strings.Contains(joined, "--engine qpdf") {
+		t.Fatalf("non-sensitive cleaner option was lost: %s", joined)
 	}
 }
 

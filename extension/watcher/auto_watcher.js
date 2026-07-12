@@ -31,13 +31,7 @@
     clampNumber,
     normalizeOptions: normalizeSharedOptions
   } = globalThis.AblesciWatcherConfig;
-  const {
-    normalizeWorkdaysSet,
-    normalizeWorkWindowsDetailed,
-    weekdayNumber,
-    beijingMinutesNow,
-    isInWorkSchedule: isInWorkScheduleBySet
-  } = globalThis.AblesciWatcherWorktime;
+  const { beijingMinutesNow } = globalThis.AblesciWatcherWorktime;
   const {
     formatBeijingDateTime,
     formatBeijingTimeOnly,
@@ -119,8 +113,6 @@
     normalizeText,
     clampNumber,
     formatBeijingDateTime,
-    beijingMinutesNow,
-    weekdayNumber,
     riskSnapshot: (state, opts) => riskSnapshot(state, opts),
     publisherAlias
   });
@@ -176,15 +168,10 @@
     getWatcherState,
     saveWatcherState,
     appendWatcherTrace: (...args) => appendWatcherTrace(...args),
-    updateActionBadge: (...args) => updateActionBadge(...args),
-    nextWorkDelayMinutes: (...args) => nextWorkDelayMinutes(...args)
+    updateActionBadge: (...args) => updateActionBadge(...args)
   });
   const {
     normalizeOptions,
-    normalizeWorkdays,
-    normalizeWorkWindows,
-    isInWorkSchedule,
-    nextWorkDelayMinutes,
     maxSessionCandidates,
     dailyDownloadedFromState,
     sessionExecutionCap,
@@ -201,11 +188,7 @@
     normalizeSharedOptions,
     clampNumber,
     normalizeListUrls,
-    normalizeWorkdaysSet,
-    normalizeWorkWindowsDetailed,
-    isInWorkScheduleBySet,
     beijingMinutesNow,
-    weekdayNumber,
     normalizeText,
     nativeConfigTimeoutMs: NATIVE_CONFIG_TIMEOUT_MS,
     countdownText,
@@ -330,7 +313,6 @@
     dailyDownloadedFromState,
     quotaResetDelayMinutes,
     riskSnapshot,
-    nextWorkDelayMinutes,
     targetStateSnapshot,
     nextRateLimitClearDelayMinutes,
     calculateTargetState
@@ -426,7 +408,6 @@
     monthDone,
     appendWatcherTrace: (step, details) => appendWatcherTrace(step, details),
     recordCfChallenge,
-    isInWorkSchedule,
     formatBeijingDateTime,
     resetCfChallengeStreak,
     isAssistDue,

@@ -10,11 +10,7 @@
       normalizeSharedOptions,
       clampNumber,
       normalizeListUrls,
-      normalizeWorkdaysSet,
-      normalizeWorkWindowsDetailed,
-      isInWorkScheduleBySet,
       beijingMinutesNow,
-      weekdayNumber,
       normalizeText,
       countdownText,
       formatBeijingDateTime,
@@ -22,35 +18,14 @@
       dailyCounterSnapshot
     } = config;
 
-    function normalizeWorkdays(value) {
-      return normalizeWorkdaysSet(value);
-    }
-
-    function normalizeWorkWindows(value) {
-      return normalizeWorkWindowsDetailed(value);
-    }
-
     function normalizeOptions(opts) {
       const shared = normalizeSharedOptions(opts || {});
       return {
         ...shared,
         watcherEnabled: shared.watcherEnabled === true,
         watcherListUrls: normalizeListUrls(shared.watcherListUrls, depsRef.defaultListUrls),
-        watcherWorkdays: normalizeWorkdays(shared.watcherWorkdays),
-        watcherWorkWindows: normalizeWorkWindows(shared.watcherWorkWindows),
         watcherMaxPerSession: 1
       };
-    }
-
-    function isInWorkSchedule() {
-      // Work-time (weekday / hour-window) gating was removed: the watcher runs on
-      // its random interval whenever the browser is up. Always "in schedule".
-      return true;
-    }
-
-    function nextWorkDelayMinutes() {
-      // Work-time gating removed — never delay to a work window.
-      return null;
     }
 
     function maxSessionCandidates(opts) {
@@ -73,13 +48,6 @@
     function quotaResetDelayMinutes(opts, date = new Date()) {
       const nowMinute = beijingMinutesNow(date);
       const minutesUntilMidnight = 24 * 60 - nowMinute;
-      if (opts?.watcherUseCalendarProgress || !opts?.watcherQuantSchedulerEnabled) return Math.max(1, minutesUntilMidnight + Math.random() * 5);
-      for (let d = 1; d <= 8; d += 1) {
-        const next = new Date(date.getTime() + d * 24 * 60 * 60 * 1000);
-        if (!opts.watcherWorkdays.has(weekdayNumber(next))) continue;
-        const firstStart = opts.watcherWorkWindows.map(w => w.start).sort((a, b) => a - b)[0] ?? 0;
-        return Math.max(1, minutesUntilMidnight + (d - 1) * 24 * 60 + firstStart + Math.random() * 10);
-      }
       return Math.max(1, minutesUntilMidnight + Math.random() * 5);
     }
 
@@ -96,7 +64,7 @@
         hourTarget: state.hourTarget ?? 0,
         targetError: state.targetError ?? state.lag ?? 0,
         lag: state.lag ?? state.targetError ?? 0,
-        workTimeProgressRatio: state.workTimeProgressRatio || 0,
+        calendarProgressRatio: state.calendarProgressRatio || 0,
         activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
         availabilityFactor: state.availabilityFactor || 1,
         riskUsed: state.riskUsed || 0,
@@ -182,10 +150,6 @@
 
     return {
       normalizeOptions,
-      normalizeWorkdays,
-      normalizeWorkWindows,
-      isInWorkSchedule,
-      nextWorkDelayMinutes,
       maxSessionCandidates,
       dailyDownloadedFromState,
       sessionExecutionCap,

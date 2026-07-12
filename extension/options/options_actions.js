@@ -274,7 +274,7 @@
           lastRunResult: state.lastRunResult || null,
           runStats: state.runStats || {},
           schedulerModelMode: state.schedulerModelMode || '',
-          workTimeProgressRatio: state.workTimeProgressRatio || 0,
+          calendarProgressRatio: state.calendarProgressRatio || 0,
           activeTimeProgressRatio: state.activeTimeProgressRatio || 0,
           availabilityFactor: state.availabilityFactor || 1,
           expectedDone: state.expectedDone || 0,

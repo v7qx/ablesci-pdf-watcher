@@ -57,9 +57,6 @@
       const downloaded = Math.max(0, Number(daily.downloaded || 0));
       const schedule = nextDisplaySchedule(state);
       advancedStatusCache = { state, schedule, isEnabled };
-      setText('advancedWorkProgress', `${Math.round(Number(state.workTimeProgressRatio || 0) * 100)}%`);
-      setText('advancedActiveProgress', `${Math.round(Number(state.activeTimeProgressRatio || state.workTimeProgressRatio || 0) * 100)}%`);
-      setText('advancedAvailability', `${Math.round(Number(state.availabilityFactor || 1) * 100)}%`);
       setText('advancedExpectedActual', `${Number(state.actualDone || state.monthDone || 0)} / ${Number(state.expectedDone || 0)}`);
       
       let syncText = '-';

@@ -21,11 +21,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
-
-const createNoWindow = 0x08000000
 
 // maxDebugLogBytes bounds the size of optional debug/diagnostic logs such as
 // ablesci_cleaner_debug.log. When a log grows past this,
@@ -230,11 +227,10 @@ func extractPDFInfoTitle(tool, pdfPath string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, tool, "-enc", "UTF-8", pdfPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
+	cmd := exec.Command(tool, "-enc", "UTF-8", pdfPath)
 	stdout := &cappedBuffer{max: 16 * 1024}
 	cmd.Stdout = stdout
-	if err := cmd.Run(); err != nil {
+	if err := runHiddenCommand(ctx, cmd); err != nil {
 		return ""
 	}
 	for _, line := range strings.Split(stdout.String(), "\n") {
@@ -267,16 +263,15 @@ func (w *cappedBuffer) String() string { return w.buf.String() }
 func extractPDFPageText(tool, path string, firstPage, lastPage int, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, tool,
+	cmd := exec.Command(tool,
 		"-f", strconv.Itoa(firstPage),
 		"-l", strconv.Itoa(lastPage),
 		"-layout", "-enc", "UTF-8", path, "-")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow}
 	stdout := &cappedBuffer{max: 128 * 1024}
 	stderr := &cappedBuffer{max: 8 * 1024}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := runHiddenCommand(ctx, cmd); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", errors.New("pdftotext timeout")
 		}
@@ -445,9 +440,10 @@ func handleCopyPDF(req Request) error {
 	// 调试日志：确认是否被拉起复制文件
 	if isCleanerDebugEnabled(req) {
 		debugLogPath := filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log")
+		removeDebugFileOlderThan(debugLogPath, 7*24*time.Hour)
 		rotateLogIfTooLarge(debugLogPath, maxDebugLogBytes)
-		copyLog := fmt.Sprintf("CopyPDF Called: Path=%s Suffix=%s MoveToDir=%s Filename=%s\n", req.Path, req.Extra["suffix"], req.MoveToDir, req.Filename)
-		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		copyLog := fmt.Sprintf("CopyPDF Called: File=%s Suffix=%s Target=%s\n", filepath.Base(req.Path), req.Extra["suffix"], filepath.Base(req.MoveToDir))
+		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if f != nil {
 			_, _ = f.WriteString(copyLog)
 			f.Close()
@@ -1139,14 +1135,10 @@ func countPagesWithToolbox(cleanerPath, pdfPath string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, cleanerPath, args...)
+	cmd := exec.Command(cleanerPath, args...)
 	cmd.Env = envWithCleanerToolDirs(cleanerPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
-	}
 
-	_ = cmd.Run()
+	_ = runHiddenCommand(ctx, cmd)
 
 	summaryData, err := os.ReadFile(summaryPath)
 	if err != nil {
@@ -1318,27 +1310,10 @@ func validateOSSHost(host string) error {
 }
 
 func isAllowedAliyunOSSEndpoint(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if h == "" || strings.Contains(h, "_") {
-		return false
-	}
-	if strings.Contains(h, ".oss-internal.") ||
-		strings.Contains(h, "-internal.aliyuncs.com") ||
-		strings.Contains(h, ".vpc100-oss-") {
-		return false
-	}
-	labels := strings.Split(h, ".")
-	if len(labels) < 4 {
-		return false
-	}
-	if labels[len(labels)-2] != "aliyuncs" || labels[len(labels)-1] != "com" {
-		return false
-	}
-	endpoint := labels[len(labels)-3]
-	if endpoint == "oss" {
-		return true
-	}
-	return strings.HasPrefix(endpoint, "oss-") && !strings.Contains(endpoint, "internal")
+	// Ablesci's upload-request currently uses this production bucket. Keep the
+	// Native Helper as an exact last-line allowlist instead of accepting any
+	// public Aliyun OSS bucket supplied by a compromised page or extension.
+	return strings.EqualFold(strings.TrimSpace(host), "ables1.oss-cn-shanghai.aliyuncs.com")
 }
 
 func isLocalOrPrivateHost(host string) bool {
@@ -1416,46 +1391,68 @@ func handleCleanPDF(req Request) error {
 	}
 	args := buildCleanerArgs(cleanerPath, path, summaryPath, req.Extra, preserveOriginal, timeoutSeconds)
 
-	// 临时调试日志：收集运行前的文件状态与请求载荷
-	reqJSON, _ := json.MarshalIndent(req, "", "  ")
-	filesBefore := listPrefixFiles(path)
+	debugEnabled := isCleanerDebugEnabled(req)
+	debugFile := "<redacted.pdf>"
+	if debugEnabled {
+		debugFile = filepath.Base(path)
+	}
+	debugRequest, _ := json.MarshalIndent(map[string]string{
+		"action":            req.Action,
+		"file":              debugFile,
+		"engine":            req.Extra["engine"],
+		"timeout_seconds":   req.Extra["timeout_seconds"],
+		"preserve_original": req.Extra["preserve_original"],
+	}, "", "  ")
+	filesBefore := "(omitted)"
+	if debugEnabled {
+		filesBefore = listPrefixFiles(path)
+	}
 
 	// 4. Set process timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds+5)*time.Second)
 	defer cancel()
 
 	// 5. Execute process
-	cmd := exec.CommandContext(ctx, cleanerPath, args...)
+	cmd := exec.Command(cleanerPath, args...)
 	cmd.Env = envWithCleanerToolDirs(cleanerPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | createNoWindow,
-	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &cappedBuffer{max: 64 * 1024}
+	stderr := &cappedBuffer{max: 32 * 1024}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
-	runErr := cmd.Run()
+	runErr := runHiddenCommand(ctx, cmd)
 
 	// 收集运行后的文件状态
-	filesAfter := listPrefixFiles(path)
+	filesAfter := "(omitted)"
+	if debugEnabled {
+		filesAfter = listPrefixFiles(path)
+	}
 
 	// 6. Check summary JSON
 	summaryData, readErr := os.ReadFile(summaryPath)
 	summaryLog := ""
 	if readErr == nil {
 		summaryLog = string(summaryData)
-		if isCleanerDebugEnabled(req) || runErr != nil {
-			_ = os.WriteFile(filepath.Join(os.TempDir(), "ablesci_cleaner_summary.json"), summaryData, 0644)
+		if debugEnabled {
+			_ = os.WriteFile(filepath.Join(os.TempDir(), "ablesci_cleaner_summary.json"), summaryData, 0600)
 		}
 	} else {
 		summaryLog = fmt.Sprintf("(Error reading summary file: %v)", readErr)
 	}
 
 	// 将详尽的调试日志追加写入临时文件，便于极其细致地排查
-	if isCleanerDebugEnabled(req) || runErr != nil || readErr != nil {
+	if debugEnabled || runErr != nil || readErr != nil {
+		argsLog := "(omitted)"
+		stdoutLog := "(omitted)"
+		stderrLog := "(omitted)"
+		summaryForLog := "(omitted)"
+		if debugEnabled {
+			argsLog = strings.Join(redactCleanerArgs(args), " ")
+			stdoutLog = redactLocalDebugText(stdout.String())
+			stderrLog = redactLocalDebugText(stderr.String())
+			summaryForLog = redactLocalDebugText(summaryLog)
+		}
 		debugLog := fmt.Sprintf("\n--- [NEW TEST] %s ---\n"+
 			"Request Payload:\n%s\n\n"+
 			"Executable:\n%s\n\n"+
@@ -1467,19 +1464,20 @@ func handleCleanPDF(req Request) error {
 			"Files AFTER clean:\n%s\n\n"+
 			"Summary Content:\n%s\n",
 			time.Now().Format("2006-01-02 15:04:05"),
-			string(reqJSON),
-			cleanerPath,
-			args,
+			string(debugRequest),
+			filepath.Base(cleanerPath),
+			argsLog,
 			filesBefore,
 			runErr,
-			stdout.String(),
-			stderr.String(),
+			stdoutLog,
+			stderrLog,
 			filesAfter,
-			summaryLog,
+			summaryForLog,
 		)
 		debugLogPath := filepath.Join(os.TempDir(), "ablesci_cleaner_debug.log")
+		removeDebugFileOlderThan(debugLogPath, 7*24*time.Hour)
 		rotateLogIfTooLarge(debugLogPath, maxDebugLogBytes)
-		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, _ := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if f != nil {
 			_, _ = f.WriteString(debugLog)
 			f.Close()
@@ -1515,6 +1513,16 @@ func handleCleanPDF(req Request) error {
 						resultPath = resolvedOutput
 					}
 				}
+			}
+			if preserveOriginal && summary.Status == "cleaned" {
+				backupPath := strings.TrimSpace(summary.BackupPath)
+				if backupPath == "" && summary.BackupCreated {
+					backupPath = strings.TrimSuffix(path, filepath.Ext(path)) + ".original.pdf"
+				}
+				// Metadata-only update: keep the cleaned PDF above its preserved
+				// .original.pdf backup when file pickers sort by modification time.
+				// This does not reopen or rewrite PDF contents.
+				_ = ensureCleanedFileSortsAfterBackup(resultPath, backupPath)
 			}
 			return writeResponse(Response{
 				OK:                 true,
@@ -1562,6 +1570,29 @@ func handleCleanPDF(req Request) error {
 		}(),
 		Error: errMsg,
 	})
+}
+
+func ensureCleanedFileSortsAfterBackup(cleanedPath, backupPath string) error {
+	cleanedPath = strings.TrimSpace(cleanedPath)
+	if cleanedPath == "" {
+		return errors.New("missing cleaned PDF path")
+	}
+	if err := ensureAllowedPDFPath(cleanedPath); err != nil {
+		return err
+	}
+	targetTime := time.Now()
+	if backupPath = strings.TrimSpace(backupPath); backupPath != "" {
+		backupAllowed := ensureAllowedPDFPath(backupPath) == nil
+		if backupInfo, err := os.Stat(backupPath); backupAllowed && err == nil {
+			// Keep a visible margin for file pickers/filesystems that display or
+			// compare modification times at whole-second precision.
+			minimumTime := backupInfo.ModTime().Add(2 * time.Second)
+			if targetTime.Before(minimumTime) {
+				targetTime = minimumTime
+			}
+		}
+	}
+	return os.Chtimes(cleanedPath, targetTime, targetTime)
 }
 
 func envWithCleanerToolDirs(cleanerPath string) []string {
@@ -1721,6 +1752,45 @@ func isCleanerDebugEnabled(req Request) bool {
 		return true
 	}
 	return false
+}
+
+func redactCleanerArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		value := strings.TrimSpace(arg)
+		if strings.ContainsAny(value, `/\`) || strings.EqualFold(filepath.Ext(value), ".pdf") || strings.EqualFold(filepath.Ext(value), ".json") {
+			ext := strings.ToLower(filepath.Ext(value))
+			if ext == "" {
+				ext = ".path"
+			}
+			value = "<redacted" + ext + ">"
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func redactLocalDebugText(value string) string {
+	out := value
+	for _, entry := range []struct{ path, replacement string }{
+		{os.Getenv("USERPROFILE"), "%USERPROFILE%"},
+		{os.TempDir(), "%TEMP%"},
+	} {
+		if strings.TrimSpace(entry.path) != "" {
+			out = strings.ReplaceAll(out, entry.path, entry.replacement)
+		}
+	}
+	return out
+}
+
+func removeDebugFileOlderThan(path string, maxAge time.Duration) {
+	if maxAge <= 0 {
+		return
+	}
+	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > maxAge {
+		_ = os.Remove(path)
+		_ = os.Remove(path + ".old")
+	}
 }
 
 // rotateLogIfTooLarge keeps an append-mode debug log from growing without bound.

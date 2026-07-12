@@ -260,7 +260,6 @@
   "disabled": "Auto watcher is disabled",
   "already_running": "Watcher is already running",
   "active_task": "Another assist task is currently active",
-  "outside_work_schedule": "Outside configured working hours",
   "assist_not_due": "Next check is not due yet",
   "daily_limit": "Reached daily assist limit",
   "session_size_zero": "Target session size is zero",

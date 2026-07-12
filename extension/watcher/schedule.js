@@ -14,7 +14,6 @@
       todayKey,
       dailyDownloadedFromState,
       quotaResetDelayMinutes,
-      nextWorkDelayMinutes,
       targetStateSnapshot,
       nextRateLimitClearDelayMinutes,
       calculateTargetState
@@ -154,7 +153,7 @@
       if (!opts?.watcherQuantSchedulerEnabled) return null;
       if (trigger === 'manual') return null;
       const reason = String(result?.reason || '');
-      if (/assist_not_due|outside_work_schedule|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
+      if (/assist_not_due|already_running|active_task|disabled|rate_limited/i.test(reason)) return null;
       const state = await getWatcherState();
       clearNextAssistSchedule(state);
       const plan = ensureNextAssistSchedule(opts, state, `after_${reason || 'run'}`);
@@ -182,8 +181,6 @@
       // fixed-interval fallback (watcherIntervalMinutes base ± jitter) was
       // unreachable and has been removed; quota holds are applied inside
       // ensureNextAssistSchedule -> targetDrivenAssistPlan.
-      const outsideDelay = nextWorkDelayMinutes(opts);
-      if (outsideDelay !== null) return Math.max(1, outsideDelay);
       const assistPlan = ensureNextAssistSchedule(opts, state, 'alarm_schedule');
       return Math.max(1, Number(assistPlan?.minutes || Number.POSITIVE_INFINITY));
     }

@@ -310,7 +310,7 @@
         'pdfCleanerStatus', 'pdfCleanerMatched', 'pdfCleanerEngine', 'pdfCleanerElapsedMs', 'pdfCleanerError', 'pdfCleanerOriginalPath', 'pdfCleanerCleanedPath',
         'titleValidationStatus', 'titleValidationScore', 'titleValidationReason', 'titleMatchedTokens',
         'publisher',
-        'range', 'absMove', 'sampleCount', 'validSampleCount', 'workTimeProgressRatio', 'expectedDone', 'actualDone',
+        'range', 'absMove', 'sampleCount', 'validSampleCount', 'calendarProgressRatio', 'expectedDone', 'actualDone',
         'targetError', 'activeTimeProgressRatio', 'availabilityFactor',
         'riskUsed', 'riskLimit',
         'score', 'estimatedSuccessRate',
@@ -326,7 +326,7 @@
         'pageFrontHit', 'pageAlpha', 'step', 'trigger', 'tabId', 'url', 'details'
       ];
       const baseReportFields = {
-        workTimeProgressRatio: state.workTimeProgressRatio || '',
+        calendarProgressRatio: state.calendarProgressRatio || '',
         expectedDone: state.expectedDone || '',
         actualDone: state.actualDone || state.monthDone || '',
         targetError: state.targetError || state.lag || '',

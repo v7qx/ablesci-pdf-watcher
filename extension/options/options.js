@@ -15,13 +15,6 @@ const {
   AUTO_WATCHER_TRACE_KEY,
   loadOptionsFromStorage
 } = globalThis.AblesciWatcherStorage;
-const {
-  normalizeWorkdaysSet,
-  normalizeWorkWindowsDetailed,
-  weekdayNumber,
-  beijingMinutesNow,
-  isInWorkSchedule
-} = globalThis.AblesciWatcherWorktime;
 const { createOptionsHelpersApi } = globalThis.AblesciOptionsHelpers;
 const { createOptionsStatusApi } = globalThis.AblesciOptionsStatus;
 const { createOptionsActionsApi } = globalThis.AblesciOptionsActions;
@@ -31,16 +24,12 @@ const {
   normalizeButtonPosition,
   formatBeijingDateTime,
   countdownText,
-  normalizeWorkdays,
-  normalizeWorkWindows,
   nextDisplaySchedule,
   todayKeyBeijing,
   sanitizeUrlForExport,
   watcherOptionSnapshot
 } = createOptionsHelpersApi({
   defaultOptions: DEFAULT_OPTIONS,
-  normalizeWorkdaysSet,
-  normalizeWorkWindowsDetailed,
   normalizeWatcherListUrls
 });
 const { createOptionsNativeApi } = globalThis.AblesciOptionsNative;
@@ -141,7 +130,6 @@ function t(msg) {
       "disabled": "低频值守未启用",
       "already_running": "值守检查已在运行中",
       "active_task": "存在其他活动中的应助任务",
-      "outside_work_schedule": "当前处于非工作时间段",
       "assist_not_due": "未到下一次检查时间点",
       "daily_limit": "已达到今日应助上限",
       "session_size_zero": "本次调度预计应助数为 0",
@@ -282,9 +270,6 @@ const {
 } = createOptionsStatusApi({
   chromeApi: chrome,
   autoWatcherStateKey: AUTO_WATCHER_STATE_KEY,
-  normalizeWorkdays,
-  normalizeWorkWindows,
-  isInWorkSchedule,
   formatBeijingDateTime,
   countdownText,
   nextDisplaySchedule,
@@ -349,7 +334,7 @@ document.addEventListener('visibilitychange', () => {
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
-  if (changes[AUTO_WATCHER_STATE_KEY] || changes.watcherWorkdays || changes.watcherWorkWindows || changes.watcherEnabled) {
+  if (changes[AUTO_WATCHER_STATE_KEY] || changes.watcherEnabled) {
     renderAdvancedWatcherStatus().catch(() => {});
   }
   if (changes[AUTO_WATCHER_STATE_KEY]) {

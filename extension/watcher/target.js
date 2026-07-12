@@ -8,8 +8,6 @@
       normalizeText,
       clampNumber,
       formatBeijingDateTime,
-      beijingMinutesNow,
-      weekdayNumber,
       riskSnapshot,
       publisherAlias
     } = config;
@@ -65,37 +63,6 @@
       return { ratio, elapsedMinutes, totalMinutes };
     }
 
-    function workMinutesForDay(opts) {
-      return opts.watcherWorkWindows.reduce((sum, win) => sum + Math.max(0, win.end - win.start), 0);
-    }
-
-    function workTimeProgressDetails(opts, date = new Date()) {
-      const key = todayKey();
-      const [year, month, day] = key.split('-').map(Number);
-      let total = 0;
-      let elapsed = 0;
-      const nowMinute = beijingMinutesNow(date);
-      const days = new Date(year, month, 0).getDate();
-      for (let d = 1; d <= days; d += 1) {
-        const current = new Date(year, month - 1, d, 12, 0, 0);
-        if (!opts.watcherWorkdays.has(weekdayNumber(current))) continue;
-        const dayMinutes = workMinutesForDay(opts);
-        total += dayMinutes;
-        if (d < day) elapsed += dayMinutes;
-        if (d === day) {
-          for (const win of opts.watcherWorkWindows) {
-            elapsed += Math.max(0, Math.min(nowMinute, win.end) - win.start);
-          }
-        }
-      }
-      const ratio = total > 0 ? Math.max(0, Math.min(1, elapsed / total)) : 0;
-      return { ratio, elapsedMinutes: elapsed, totalMinutes: total };
-    }
-
-    function workTimeProgressRatio(opts, date = new Date()) {
-      return workTimeProgressDetails(opts, date).ratio;
-    }
-
     function monthRunCount(state) {
       const prefix = monthKey() + '-';
       return Object.entries(state.daily || {})
@@ -104,7 +71,7 @@
     }
 
     function availabilitySnapshot(state, opts, progressDetails = null) {
-      const details = progressDetails || workTimeProgressDetails(opts);
+      const details = progressDetails || calendarProgressDetails();
       const elapsed = Number(details.elapsedMinutes || 0);
       const expectedInterval = Math.max(1, Number(opts.watcherMinIntervalMinutes || opts.watcherIntervalMinutes || 5));
       const expectedWakeCount = elapsed > 0
@@ -147,7 +114,7 @@
       const done = monthDone(state, opts);
       const monthlyTarget = Number(opts.watcherMonthlyTarget || 0);
       const effectiveTarget = effectiveMonthlyTarget(state, monthlyTarget);
-      const progress = opts?.watcherUseCalendarProgress ? calendarProgressDetails() : workTimeProgressDetails(opts);
+      const progress = calendarProgressDetails();
       const availability = availabilitySnapshot(state, opts, progress);
       const effectiveProgress = availability.enoughData ? availability.activeTimeProgressRatio : progress.ratio;
       const expectedDone = effectiveTarget;
@@ -160,16 +127,8 @@
       const key = todayKey();
       const [year, month, day] = key.split('-').map(Number);
       const daysInMonth = new Date(year, month, 0).getDate();
-      let remainingWorkdays = 0;
-      for (let d = 1; d <= daysInMonth; d += 1) {
-        const current = new Date(year, month - 1, d, 12, 0, 0);
-        if (opts.watcherWorkdays && opts.watcherWorkdays.has && opts.watcherWorkdays.has(weekdayNumber(current))) {
-          if (d >= day) {
-            remainingWorkdays += 1;
-          }
-        }
-      }
-      const calculatedTodayTarget = Math.max(0, Math.ceil((monthlyTarget - done) / Math.max(1, remainingWorkdays)));
+      const remainingCalendarDays = Math.max(1, daysInMonth - day + 1);
+      const calculatedTodayTarget = Math.max(0, Math.ceil((monthlyTarget - done) / remainingCalendarDays));
       const riskLimit = Number(opts.watcherRiskBudgetLimit || 10);
 
       if (monthlyTarget <= 0) {
@@ -181,7 +140,7 @@
           expectedDone: 0,
           lag: 0,
           speedMode,
-          workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
+          calendarProgressRatio: Number(progress.ratio.toFixed(4)),
           activeTimeProgressRatio: availability.activeTimeProgressRatio,
           availabilityFactor: availability.availabilityFactor,
           schedulerModelMode: 'calendar_target',
@@ -201,7 +160,7 @@
         lag,
         targetError: lag,
         speedMode,
-        workTimeProgressRatio: Number(progress.ratio.toFixed(4)),
+        calendarProgressRatio: Number(progress.ratio.toFixed(4)),
         activeTimeProgressRatio: availability.activeTimeProgressRatio,
         availabilityFactor: availability.availabilityFactor,
         todayTarget: calculatedTodayTarget,
@@ -218,10 +177,7 @@
       monthKey,
       monthDone,
       daysInCurrentMonth,
-      workMinutesForDay,
       calendarProgressDetails,
-      workTimeProgressDetails,
-      workTimeProgressRatio,
       monthRunCount,
       availabilitySnapshot,
       speedModeFromTarget,

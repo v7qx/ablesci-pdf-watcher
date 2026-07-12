@@ -272,8 +272,6 @@
             'watcherListUrls',
             'watcherSpeedMode',
             'watcherMonthlyTarget',
-            'watcherWorkdays',
-            'watcherWorkWindows',
             'watcherSchedulerMode',
             'watcherIntervalMinutes',
             'watcherMinIntervalMinutes',

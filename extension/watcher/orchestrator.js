@@ -15,7 +15,6 @@
       monthDone,
       appendWatcherTrace,
       recordCfChallenge,
-      isInWorkSchedule,
       formatBeijingDateTime,
       resetCfChallengeStreak,
       isAssistDue,
@@ -372,7 +371,7 @@
         todayTarget: 0,
         hourTarget: 0,
         targetError: targetState.targetError ?? targetState.lag ?? 0,
-        workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
+        calendarProgressRatio: targetState.calendarProgressRatio || 0,
         activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
         availabilityFactor: targetState.availabilityFactor || 1,
         riskUsed: targetState.riskUsed || 0,
@@ -390,7 +389,7 @@
         todayTarget: '',
         hourTarget: '',
         targetError: targetState.targetError || targetState.lag || '',
-        workTimeProgressRatio: targetState.workTimeProgressRatio || 0,
+        calendarProgressRatio: targetState.calendarProgressRatio || 0,
         activeTimeProgressRatio: targetState.activeTimeProgressRatio || 0,
         availabilityFactor: targetState.availabilityFactor || 1
       });
@@ -585,13 +584,6 @@
           return finish({ ok: false, reason: 'active_task' });
         }
 
-        if (opts.watcherQuantSchedulerEnabled && trigger === 'alarm' && !isInWorkSchedule(opts)) {
-          await appendWatcherTrace('run_skip_outside_work_schedule', {
-            reason: 'outside_work_schedule',
-            trigger
-          });
-          return finish({ ok: true, reason: 'outside_work_schedule' });
-        }
         const targetPhase = await prepareTargetPhase(run, opts);
         if (targetPhase.stopRun) return finish(targetPhase.result);
         const { stateForTargets, targetState } = targetPhase;
