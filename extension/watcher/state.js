@@ -1,6 +1,9 @@
 'use strict';
 
 (function () {
+  const publisherLimits = globalThis.AblesciWatcherPublisherLimits;
+  const publisherDailyLimitStopsKey = 'publisherDailyLimitStops';
+
   function createWatcherStateApi(config) {
     const {
       chromeApi,
@@ -20,10 +23,23 @@
     const EMERGENCY_PROCESSED_ENTRIES = 2000;
 
     async function getWatcherState() {
-      const stored = await chromeApi.storage.local.get(stateKey);
+      const stored = await chromeApi.storage.local.get([stateKey, publisherDailyLimitStopsKey]);
       const state = stored[stateKey] || { processed: {}, daily: {} };
       if (!state || typeof state !== 'object') return { processed: {}, daily: {}, _version: 0 };
       if (!Number.isFinite(Number(state._version))) state._version = 0;
+      const publisherDailyLimitStops = stored[publisherDailyLimitStopsKey] && typeof stored[publisherDailyLimitStopsKey] === 'object'
+        ? stored[publisherDailyLimitStopsKey]
+        : {};
+      delete state.publisherDailyLimitStops;
+      Object.defineProperty(state, 'publisherDailyLimitStops', {
+        value: publisherDailyLimitStops,
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+      if (publisherLimits?.pruneExpiredPublisherStops?.(state, Date.now())) {
+        await chromeApi.storage.local.set({ [publisherDailyLimitStopsKey]: publisherDailyLimitStops });
+      }
       return state;
     }
 

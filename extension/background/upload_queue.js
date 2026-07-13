@@ -5,6 +5,7 @@
 (function initBackgroundUploadQueue(globalThis) {
   function createBackgroundUploadQueueApi(deps = {}) {
     const {
+      chromeApi,
       // PRIVATE_WATCHER_ONLY
       pendingPublisherTabs,
       defaultOptions,
@@ -17,6 +18,7 @@
       handleUpload,
       classifyJournalAccessFailureReason,
       isDoiUrl,
+      isScienceDirectAssetPdfUrl,
       isLikelyRscPayload,
       saveErrorDiagnostic,
       appendDiagnosticTrace,
@@ -31,6 +33,23 @@
     let taskQueue = [];
     const activeTasks = new Map();
     let nextTaskId = 1;
+    const publisherDailyLimitStopsKey = 'publisherDailyLimitStops';
+
+    async function isPublisherDailyLimitStopped(publisher) {
+      const key = String(publisher || '').trim().toLowerCase();
+      if (!key || !chromeApi?.storage?.local) return false;
+      const stored = await chromeApi.storage.local.get(publisherDailyLimitStopsKey);
+      const stops = stored[publisherDailyLimitStopsKey] && typeof stored[publisherDailyLimitStopsKey] === 'object'
+        ? stored[publisherDailyLimitStopsKey]
+        : {};
+      const stop = stops[key];
+      if (!stop) return false;
+      const expiresAt = Number(stop.expiresAt || 0);
+      if (Number.isFinite(expiresAt) && expiresAt > Date.now()) return true;
+      delete stops[key];
+      await chromeApi.storage.local.set({ [publisherDailyLimitStopsKey]: stops });
+      return false;
+    }
 
     // PRIVATE_WATCHER_ONLY
     function hasSeenPublisherChallengeForTask(payload) {
@@ -100,10 +119,10 @@
       const explicit = String(payload.watcherPublisher || '').trim().toLowerCase();
       if (explicit) return explicit;
       try {
-        return String(new URL(payload.listUrl || '').searchParams.get('publisher') || '').trim().toLowerCase();
-      } catch (_) {
-        return '';
-      }
+        const listed = String(new URL(payload.listUrl || '').searchParams.get('publisher') || '').trim().toLowerCase();
+        if (listed) return listed;
+      } catch (_) {}
+      return isScienceDirectAssetPdfUrl?.(payload.pdfUrl) ? 'elsevier' : '';
     }
 
     function canStartTask(task) {
@@ -153,6 +172,11 @@
         let opts = null;
         let taskTimer = null;
         try {
+          if (task.publisher && await isPublisherDailyLimitStopped(task.publisher)) {
+            const err = new Error(`ScienceDirect 当日下载计数已达到上限，已取消排队中的 ${task.publisher} 任务；其他出版社继续。`);
+            err.failureReason = 'publisher_daily_limit';
+            throw err;
+          }
           opts = await getOptions();
           const taskTimeoutMs = Math.max(1000, Number(opts.watcherTaskTimeoutMinutes || defaultOptions.watcherTaskTimeoutMinutes) * 60 * 1000);
           taskTimer = setTimeout(() => {
@@ -178,6 +202,7 @@
             'invalid_landing_url',
             'no_access',
             'explicit_no_subscription',
+            'publisher_daily_limit',
             'empty_pdf_file',
             'assist_closed',
             'tab_drag_locked'
@@ -236,6 +261,18 @@
                 downloadOnly: true,
                 blocked: true,
                 skipReason: 'cf_challenge',
+                ...cleanerExtra
+              });
+            } else if (failureReason === 'publisher_daily_limit') {
+              const message = formatTaskError(err) || 'ScienceDirect 当日下载计数已达到 100，已暂停 ScienceDirect；其他出版社继续，次日自动恢复。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipped: true,
+                skipReason: 'publisher_daily_limit',
                 ...cleanerExtra
               });
             } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {

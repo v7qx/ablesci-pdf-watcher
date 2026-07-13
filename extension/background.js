@@ -205,6 +205,8 @@ const {
 });
 const {
   recordPublisherCfChallenge,
+  recordPublisherDailyLimit,
+  reserveScienceDirectAttempt,
   clearPublisherCfChallengeState
 } = createBackgroundUploadGuardsApi({
   chromeApi: chrome,
@@ -246,6 +248,8 @@ const {
   validatePublisherLanding,
   isExpectedPublisherPage,
   recordPublisherCfChallenge,
+  recordPublisherDailyLimit,
+  reserveScienceDirectAttempt,
   appendDiagnosticTrace
 });
 const { downloadPdf } = createBackgroundDownloadAgentApi({
@@ -301,10 +305,13 @@ const {
   getOptions,
   throwIfAborted,
   isDoiUrl,
+  isScienceDirectAssetPdfUrl,
   extractScienceDirectPii,
   cleanupOrphanPublisherTabs,
   post,
   downloadPdf,
+  recordPublisherDailyLimit,
+  reserveScienceDirectAttempt,
   clearPublisherCfChallengeState,
   sendNativeMessage,
   formatBytes,
@@ -350,7 +357,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 
 // AUTO_WATCHER
-  importScripts('watcher/auto_watcher_utils.js', 'watcher/state.js', 'watcher/report_i18n.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/list_scan_status.js', 'watcher/assist_sync.js', 'watcher/candidate_processor.js', 'watcher/publisher_counts.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
+  importScripts('watcher/auto_watcher_utils.js', 'watcher/publisher_limits.js', 'watcher/state.js', 'watcher/report_i18n.js', 'watcher/report.js', 'watcher/candidate.js', 'watcher/candidate_queue.js', 'watcher/list_fetcher.js', 'watcher/runner.js', 'watcher/target.js', 'watcher/market.js', 'watcher/session.js', 'watcher/notification.js', 'watcher/schedule.js', 'watcher/logging.js', 'watcher/runtime_helpers.js', 'watcher/bootstrap.js', 'watcher/list_scan_status.js', 'watcher/assist_sync.js', 'watcher/candidate_processor.js', 'watcher/publisher_counts.js', 'watcher/orchestrator.js', 'watcher/entry.js', 'watcher/auto_watcher.js');
 globalThis.initAutoWatcher({
   getOptions,
   enqueueUpload,

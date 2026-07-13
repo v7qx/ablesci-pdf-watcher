@@ -13,10 +13,13 @@
       getOptions,
       throwIfAborted,
       isDoiUrl,
+      isScienceDirectAssetPdfUrl,
       extractScienceDirectPii,
       cleanupOrphanPublisherTabs,
       post,
       downloadPdf,
+      recordPublisherDailyLimit,
+      reserveScienceDirectAttempt,
       clearPublisherCfChallengeState,
       sendNativeMessage,
       formatBytes,
@@ -500,6 +503,31 @@
 
       await saveDiagnostic({ ...diag, stage: 'picked' });
       post(port, 'progress', 'PDF URL：' + payload.pdfUrl);
+      if (isScienceDirectAssetPdfUrl?.(payload.pdfUrl)) {
+        const reservation = await reserveScienceDirectAttempt?.({ attemptKind: 'direct' });
+        if (!reservation || reservation.blocked) {
+          const result = reservation || {
+            reason: 'direct_counter_unavailable',
+            siteCount: null,
+            directAttempts: 0,
+            effectiveCount: 0,
+            limit: 100,
+            dateKey: '',
+            expiresAt: 0
+          };
+          await recordPublisherDailyLimit?.({
+            pageUrl: payload.pdfUrl,
+            publisher: payload.watcherPublisher || 'elsevier',
+            ...result
+          });
+          const err = new Error(result.reason === 'daily_count_reached'
+            ? `ScienceDirect 当日下载计数已达到 ${result.effectiveCount}/${result.limit}，当前任务已停止；其他出版社继续，次日自动恢复。`
+            : 'ScienceDirect 下载计数无法可靠读取或保存，当前任务已安全停止；其他出版社继续。');
+          err.failureReason = 'publisher_daily_limit';
+          throw err;
+        }
+        post(port, 'progress', `ScienceDirect 直链下载计数：${reservation.effectiveCount}/${reservation.limit}。`);
+      }
       const item = await downloadPdf(payload.pdfUrl, payload.suggestedFilename || 'paper.pdf', { ...opts, payloadContext: payload }, port, signal);
       throwIfAborted(signal);
       if (!item.filename) throw new Error('下载完成但没有得到本地文件路径');
@@ -830,6 +858,7 @@
       hasActiveTask,
       hasPublisherTask
     } = createBackgroundUploadQueueApi({
+      chromeApi,
       // PRIVATE_WATCHER_ONLY
       pendingPublisherTabs,
       defaultOptions,
@@ -842,6 +871,7 @@
       handleUpload,
       classifyJournalAccessFailureReason,
       isDoiUrl,
+      isScienceDirectAssetPdfUrl,
       isLikelyRscPayload,
       saveErrorDiagnostic,
       appendDiagnosticTrace,

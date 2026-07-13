@@ -33,6 +33,8 @@
       validatePublisherLanding,
       isExpectedPublisherPage,
       recordPublisherCfChallenge,
+      recordPublisherDailyLimit,
+      reserveScienceDirectAttempt,
       appendDiagnosticTrace
     } = deps;
 
@@ -247,6 +249,25 @@
       const tabId = sender.tab && sender.tab.id;
       const pending = tabId != null ? pendingPublisherTabs.get(tabId) : null;
 
+      if (msg?.type === 'ablesciScienceDirectReserveDownload') {
+        if (!pending) {
+          sendResponse({ blocked: true, reason: 'direct_counter_unavailable' });
+          return false;
+        }
+        const trusted = validateTrustedPublisherSender(pending, sender, msg);
+        if (!trusted.ok || msg.publisher !== 'sciencedirect') {
+          sendResponse({ blocked: true, reason: 'direct_counter_unavailable' });
+          return false;
+        }
+        Promise.resolve(reserveScienceDirectAttempt?.({
+          attemptKind: msg.attemptKind,
+          observedSiteCount: msg.observedSiteCount
+        }))
+          .then(result => sendResponse(result || { blocked: true, reason: 'direct_counter_unavailable' }))
+          .catch(() => sendResponse({ blocked: true, reason: 'direct_counter_unavailable' }));
+        return true;
+      }
+
       if (msg?.type === 'ablesciPublisherCanControl') {
         postDebugLog(`ablesciPublisherCanControl: tabId=${tabId} msg.publisher=${msg.publisher} pending=${!!pending} pending.publisher=${pending?.publisher || '(none)'} pageUrl=${shortUrl(msg.pageUrl)}`);
         if (!pending) return sendResponse({ ok: false, reason: 'no pending publisher task for this tab' });
@@ -311,6 +332,52 @@
           diagnostics: msg.diagnostics || null
         });
         sendResponse({ ok: true, action: 'publisher_diagnostic_recorded' });
+        return false;
+      }
+
+      if (msg.publisher === 'sciencedirect' && msg.publisherDailyLimit) {
+        if (pending.publisherDailyLimitSeen) {
+          sendResponse({ ok: true, ignored: true, reason: 'same publisher daily limit already handled' });
+          return false;
+        }
+        pending.publisherDailyLimitSeen = true;
+        const effectiveCount = Math.max(0, Number(msg.effectiveCount || 0));
+        const limit = Math.max(1, Number(msg.dailyLimit || 100));
+        const reason = String(msg.dailyLimitReason || 'daily_count_reached');
+        tracePublisherStep(pending, 'publisher-daily-limit', {
+          publisher: msg.publisher,
+          articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
+          source: msg.source || '',
+          reason,
+          effectiveCount,
+          limit,
+          dateKey: msg.dateKey || ''
+        });
+        Promise.resolve(recordPublisherDailyLimit?.({
+          pageUrl: msg.pageUrl || msg.articleUrl || pending.articleUrl || pending.pdfUrl || '',
+          publisher: pending.payloadSummary?.watcherPublisher || 'elsevier',
+          reason,
+          siteCount: msg.siteCount,
+          directAttempts: msg.directAttempts,
+          effectiveCount,
+          limit,
+          dateKey: msg.dateKey,
+          expiresAt: msg.expiresAt
+        }))
+          .catch(err => {
+            console.warn('[Ablesci PDF Watcher] record publisher daily limit failed', err);
+          })
+          .finally(() => {
+            const message = reason === 'daily_bulk_download_limit_dialog'
+              ? 'ScienceDirect 已显示当日下载限制弹窗，当前任务已停止；其他出版社继续，次日自动恢复。'
+              : (/counter_unavailable/.test(reason)
+                  ? 'ScienceDirect 下载计数无法可靠读取或保存，当前任务已安全停止；其他出版社继续。'
+                  : `ScienceDirect 当日下载计数已达到 ${effectiveCount}/${limit}，当前任务已停止；其他出版社继续，次日自动恢复。`);
+            const err = new Error(message);
+            err.failureReason = 'publisher_daily_limit';
+            pending.finishError(err);
+          });
+        sendResponse({ ok: true, action: 'science_direct_daily_limit' });
         return false;
       }
 

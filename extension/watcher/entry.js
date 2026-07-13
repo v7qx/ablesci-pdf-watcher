@@ -2,6 +2,8 @@
 
 // Responsibility: register Chrome listeners and expose watcher init entry.
 (function () {
+  const publisherLimits = globalThis.AblesciWatcherPublisherLimits;
+
   function createWatcherEntryApi(config) {
     const {
       chromeApi,
@@ -93,7 +95,13 @@
         return;
       }
       const state = await getWatcherState();
-      const delay = Math.max(0.5, Number(randomIntervalMinutes(opts, state) || 1) + initialOffsetMinutes);
+      const resumeAt = lane === 'elsevier'
+        ? Number(publisherLimits?.resumeAtForPublisher?.(state, 'elsevier', Date.now()) || 0)
+        : 0;
+      const delay = resumeAt > Date.now()
+        ? Math.max(0.5, (resumeAt - Date.now()) / 60000 + 0.1)
+        : Math.max(0.5, Number(randomIntervalMinutes(opts, state) || 1) + initialOffsetMinutes);
+      const scheduleReason = resumeAt > Date.now() ? 'publisher_daily_limit_resume' : reason;
       await chromeApi.alarms.create(alarm, { delayInMinutes: delay });
       const scheduled = await chromeApi.alarms.get(alarm).catch(() => null);
       const current = await getWatcherState();
@@ -103,10 +111,10 @@
       current.parallelLaneSchedules[lane] = {
         scheduledAt: scheduled?.scheduledTime || Date.now() + delay * 60 * 1000,
         delayMinutes: delay,
-        reason
+        reason: scheduleReason
       };
       await saveWatcherState(current);
-      await appendWatcherTrace('parallel_lane_scheduled', { lane, reason, delayMinutes: Number(delay.toFixed(2)) });
+      await appendWatcherTrace('parallel_lane_scheduled', { lane, reason: scheduleReason, delayMinutes: Number(delay.toFixed(2)) });
     }
 
     async function refreshAllWatcherAlarms(reason = 'refresh') {
@@ -130,16 +138,17 @@
         const configured = configuredPublishers(opts);
         const state = await getWatcherState();
         const paused = state.pausedPublisherLanes && typeof state.pausedPublisherLanes === 'object' ? state.pausedPublisherLanes : {};
+        const dailyStopped = publisherLimits?.activePublisherStops?.(state, Date.now()) || {};
         const lastStarted = state.parallelPublisherLastStarted && typeof state.parallelPublisherLastStarted === 'object'
           ? { ...state.parallelPublisherLastStarted }
           : {};
         let selection = null;
         if (lane === 'elsevier') {
           const candidate = configured.find(item => item.publisher === 'elsevier');
-          if (candidate && !paused.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selection = candidate;
+          if (candidate && !paused.elsevier && !dailyStopped.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selection = candidate;
         } else {
           selection = configured
-            .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
+            .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !dailyStopped[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
             .sort((a, b) => Number(lastStarted[a.publisher] || 0) - Number(lastStarted[b.publisher] || 0))[0] || null;
         }
         let result = { ok: true, reason: 'parallel_lane_busy' };
@@ -178,11 +187,12 @@
       const paused = initialState.pausedPublisherLanes && typeof initialState.pausedPublisherLanes === 'object'
         ? initialState.pausedPublisherLanes
         : {};
+      const dailyStopped = publisherLimits?.activePublisherStops?.(initialState, Date.now()) || {};
       const selections = [];
       const elsevier = configured.find(item => item.publisher === 'elsevier');
-      if (elsevier && !paused.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selections.push(elsevier);
+      if (elsevier && !paused.elsevier && !dailyStopped.elsevier && !depsRef.hasPublisherTask?.('elsevier')) selections.push(elsevier);
       const secondary = configured
-        .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
+        .filter(item => item.publisher !== 'elsevier' && !paused[item.publisher] && !dailyStopped[item.publisher] && !depsRef.hasPublisherTask?.(item.publisher))
         .sort((a, b) => Number(lastStarted[a.publisher] || 0) - Number(lastStarted[b.publisher] || 0))
         .slice(0, 2);
       selections.push(...secondary);

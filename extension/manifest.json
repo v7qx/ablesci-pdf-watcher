@@ -95,6 +95,7 @@
       "js": [
         "common/publisher_capabilities.js",
         "content/publishers_common.js",
+        "content/sciencedirect_download_guard.js",
         "content/publisher_sciencedirect.js",
         "content/publisher_direct_pdf.js",
         "content/publisher_rsc.js",

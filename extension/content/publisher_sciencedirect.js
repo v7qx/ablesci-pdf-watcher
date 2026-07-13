@@ -3,13 +3,16 @@
 
   const common = window.AblesciPublisherCommon;
   const capability = globalThis.AblesciPublisherCapabilities?.forPublisher?.('sciencedirect') || null;
-  if (!common || !capability) return;
+  const downloadGuard = globalThis.AblesciScienceDirectDownloadGuard;
+  if (!common || !capability || !downloadGuard) return;
 
   let viewPdfTriggered = false;
   let observer = null;
   let stopTimer = null;
   let loginPrompted = false;
   let challengePrompted = false;
+  let dailyLimitReported = false;
+  let postClickFallbackTimer = null;
   let skipBookChapter = true;
   const pdfClickGuardMs = 30000;
 
@@ -180,6 +183,71 @@
       clearTimeout(stopTimer);
       stopTimer = null;
     }
+    if (postClickFallbackTimer) {
+      clearTimeout(postClickFallbackTimer);
+      postClickFallbackTimer = null;
+    }
+  }
+
+  function inspectDownloadSafety() {
+    return downloadGuard.inspectDownloadSafety({
+      siteStorage: localStorage,
+      extensionStorage: chrome.storage.local,
+      document
+    });
+  }
+
+  function reserveDirectAttempt() {
+    return downloadGuard.reserveDirectAttempt({
+      siteStorage: localStorage,
+      extensionStorage: chrome.storage.local,
+      document,
+      reserveExtensionAttempt
+    });
+  }
+
+  function reserveSiteClickAttempt() {
+    return downloadGuard.reserveSiteClickAttempt({
+      siteStorage: localStorage,
+      extensionStorage: chrome.storage.local,
+      document,
+      reserveExtensionAttempt
+    });
+  }
+
+  function reserveExtensionAttempt(details) {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage({
+        type: 'ablesciScienceDirectReserveDownload',
+        publisher: 'sciencedirect',
+        pageUrl: location.href,
+        ...details
+      }, response => {
+        const runtimeError = chrome.runtime.lastError;
+        resolve(runtimeError || !response
+          ? { blocked: true, reason: 'direct_counter_unavailable' }
+          : response);
+      });
+    });
+  }
+
+  function reportDailyLimit(result, articleUrl, source) {
+    if (dailyLimitReported) return;
+    dailyLimitReported = true;
+    viewPdfTriggered = true;
+    sendScienceDirectMessage({
+      articleUrl: articleUrl || makeScienceDirectArticleUrl() || location.href,
+      publisherDailyLimit: true,
+      dailyLimitReason: result.reason,
+      siteCount: result.siteCount,
+      directAttempts: result.directAttempts,
+      effectiveCount: result.effectiveCount,
+      dailyLimit: result.limit,
+      dateKey: result.dateKey,
+      expiresAt: result.expiresAt,
+      source
+    });
+    stopObserver();
   }
 
   async function notifyReady() {
@@ -259,10 +327,18 @@
       }
       return;
     }
+    const safety = await inspectDownloadSafety();
+    if (safety.modalDetected || (!viewPdfTriggered && safety.blocked)) {
+      reportDailyLimit(
+        safety,
+        articleUrl,
+        safety.modalDetected ? 'sciencedirect_daily_limit_dialog' : 'sciencedirect_daily_count_preflight'
+      );
+      return;
+    }
     if (viewPdfTriggered) return;
     const button = findViewPdfButton();
     if (button) {
-      viewPdfTriggered = true;
       const buttonHref = button.getAttribute?.('href') || button.href || '';
       const pdfUrl = common.normalizeUrl(buttonHref, location.href) || '';
       if (recentlyTriedPdfClick(pii, pdfUrl)) {
@@ -276,6 +352,12 @@
         stopObserver();
         return;
       }
+      const reservation = await reserveSiteClickAttempt();
+      if (reservation.blocked) {
+        reportDailyLimit(reservation, articleUrl, 'native_view_pdf_button_daily_limit');
+        return;
+      }
+      viewPdfTriggered = true;
       writePdfClickGuard(pii, { pdfUrl, source: 'native_view_pdf_button' });
       sendScienceDirectMessage({
         articleUrl,
@@ -294,27 +376,39 @@
           button.click();
         } catch (_) {}
         if (pdfUrl) {
-          setTimeout(() => {
+          postClickFallbackTimer = setTimeout(async () => {
+            postClickFallbackTimer = null;
+            const postClickSafety = await inspectDownloadSafety();
+            if (postClickSafety.modalDetected) {
+              reportDailyLimit(
+                postClickSafety,
+                articleUrl,
+                'sciencedirect_daily_limit_dialog_after_click'
+              );
+              return;
+            }
             if (location.href === beforeUrl) {
               sendScienceDirectMessage({
                 articleUrl,
                 pdfUrl,
                 publisherDiagnostic: true,
-                source: 'native_view_pdf_button_location_fallback',
-                diagnostics: { reason: 'button_click_no_navigation' }
+                source: 'native_view_pdf_button_no_navigation',
+                diagnostics: { reason: 'button_click_no_navigation_direct_fallback_disabled' }
               });
-              writePdfClickGuard(pii, { pdfUrl, source: 'native_view_pdf_button_location_fallback' });
-              location.assign(pdfUrl);
             }
           }, 1200);
         }
       }, 0);
-      stopObserver();
       return;
     }
     const nativePdfHref = findNativePdfHref();
     if (nativePdfHref) {
       viewPdfTriggered = true;
+      const reservation = await reserveDirectAttempt();
+      if (reservation.blocked) {
+        reportDailyLimit(reservation, articleUrl, 'native_view_pdf_href_daily_limit');
+        return;
+      }
       sendScienceDirectMessage({
         articleUrl,
         pdfUrl: nativePdfHref,
@@ -347,6 +441,11 @@
     const constructedPdfUrl = makeScienceDirectPdfUrl();
     if (constructedPdfUrl) {
       viewPdfTriggered = true;
+      const reservation = await reserveDirectAttempt();
+      if (reservation.blocked) {
+        reportDailyLimit(reservation, articleUrl, 'constructed_pdf_daily_limit');
+        return;
+      }
       sendScienceDirectMessage({
         articleUrl,
         pdfUrl: constructedPdfUrl,

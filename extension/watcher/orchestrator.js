@@ -2,6 +2,8 @@
 
 // Responsibility: top-level auto watcher run orchestration without changing scheduling behavior.
 (function () {
+  const publisherLimits = globalThis.AblesciWatcherPublisherLimits;
+
   function createWatcherOrchestratorApi(config) {
     const {
       depsRef,
@@ -592,7 +594,18 @@
         if (sessionPhase.stopRun) return finish(sessionPhase.result);
         const { targetSessionSize } = sessionPhase;
 
-        const configuredListUrls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls.slice() : [];
+        const rawConfiguredListUrls = Array.isArray(opts.watcherListUrls) ? opts.watcherListUrls.slice() : [];
+        const dailyEligibleListUrls = publisherLimits?.filterStoppedPublisherUrls
+          ? publisherLimits.filterStoppedPublisherUrls(rawConfiguredListUrls, initialState, Date.now())
+          : rawConfiguredListUrls;
+        const dailyStoppedPublisherCount = rawConfiguredListUrls.length - dailyEligibleListUrls.length;
+        const pausedPublisherLanes = initialState.pausedPublisherLanes && typeof initialState.pausedPublisherLanes === 'object'
+          ? initialState.pausedPublisherLanes
+          : {};
+        const configuredListUrls = dailyEligibleListUrls.filter(url => {
+          const publisher = pageRangeMetaFromUrl(url)?.publisher || '';
+          return !publisher || !pausedPublisherLanes[publisher];
+        });
         const publisherCountThreshold = Math.max(0, Number(opts.watcherMinNonSdSeekingCount || 0));
         const publisherPool = await preparePublisherPool({
           urls: configuredListUrls,
@@ -607,6 +620,11 @@
         });
         const singleRunListUrls = listUrlsForRun({ ...opts, watcherListUrls: publisherPool.eligible });
         const singleListUrl = singleRunListUrls[0] || '';
+        const noSourceReason = !rawConfiguredListUrls.length
+          ? 'no_list_url'
+          : (configuredListUrls.length === 0 && dailyStoppedPublisherCount > 0
+              ? 'publisher_daily_limit_stopped'
+              : 'no_eligible_publisher_count');
         await setCurrentListScan?.(buildCurrentListScan({
           trigger,
           listUrl: singleListUrl,
@@ -615,11 +633,12 @@
           status: 'running'
         })).catch(() => {});
         await appendWatcherTrace('random_single_assist_source', {
-          reason: singleListUrl ? 'single_random_source_selected' : 'no_list_url',
+          reason: singleListUrl ? 'single_random_source_selected' : noSourceReason,
           phase: 'single_random_run',
           trigger,
           runId: run.runId,
           configuredUrlCount: configuredListUrls.length,
+          excludedStoppedPublisherCount: dailyStoppedPublisherCount,
           eligibleUrlCount: singleRunListUrls.length,
           excludedPublishers: publisherPool.excluded.map(item => `${item.publisher}:${item.count}`),
           publisherCountCacheFresh: publisherPool.cacheFresh === true,
@@ -629,12 +648,14 @@
           await appendWatcherLog({
             trigger,
             status: 'skipped',
-            reason: configuredListUrls.length ? 'no_eligible_publisher_count' : 'no_list_url',
-            message: configuredListUrls.length
-              ? 'random single-assist run: all enabled non-SD publishers are below the configured request-count threshold.'
-              : 'random single-assist run: no valid list URL configured.'
+            reason: noSourceReason,
+            message: noSourceReason === 'publisher_daily_limit_stopped'
+              ? 'ScienceDirect reached its daily limit; stopped publisher sources were skipped while other publishers remain eligible.'
+              : (rawConfiguredListUrls.length
+                  ? 'random single-assist run: all enabled non-SD publishers are below the configured request-count threshold.'
+                  : 'random single-assist run: no valid list URL configured.')
           });
-          return finish({ ok: true, reason: configuredListUrls.length ? 'no_eligible_publisher_count' : 'no_list_url' });
+          return finish({ ok: true, reason: noSourceReason });
         }
 
         const singleBlacklistedIds = await readBlacklistedIds(opts, trigger);

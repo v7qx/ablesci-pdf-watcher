@@ -24,6 +24,14 @@ test('loads publisher capabilities before both content adapters', () => {
     publisherScripts.indexOf('common/publisher_capabilities.js') < publisherScripts.indexOf('content/publisher_sciencedirect.js'),
     'publisher pages must load capabilities before the ScienceDirect adapter'
   );
+  assert.ok(
+    publisherScripts.includes('content/sciencedirect_download_guard.js'),
+    'publisher pages must include the ScienceDirect download guard'
+  );
+  assert.ok(
+    publisherScripts.indexOf('content/sciencedirect_download_guard.js') < publisherScripts.indexOf('content/publisher_sciencedirect.js'),
+    'publisher pages must load the ScienceDirect download guard before the adapter'
+  );
 });
 
 test('loads publisher capabilities before background publisher adapters', () => {
@@ -33,5 +41,13 @@ test('loads publisher capabilities before background publisher adapters', () => 
     backgroundSource.indexOf("'common/publisher_capabilities.js'") <
       backgroundSource.indexOf("'background/publishers.js'"),
     'background must load publisher capabilities before publisher adapters'
+  );
+  assert.ok(
+    backgroundSource.includes("'watcher/publisher_limits.js'"),
+    'background must load publisher daily-limit helpers'
+  );
+  assert.ok(
+    backgroundSource.indexOf("'watcher/publisher_limits.js'") < backgroundSource.indexOf("'watcher/state.js'"),
+    'publisher daily-limit helpers must load before watcher state'
   );
 });
