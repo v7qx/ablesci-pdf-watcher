@@ -101,7 +101,39 @@ if (!(Get-Command go -ErrorAction SilentlyContinue)) {
 
 $OutDir = Split-Path -Parent $Output
 if (!(Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-if (Test-Path $Output) { Remove-Item -LiteralPath $Output -Force }
+if (Test-Path -LiteralPath $Output) {
+  try {
+    Remove-Item -LiteralPath $Output -Force -ErrorAction Stop
+  } catch {
+    $runningHelper = @(Get-Process -Name "ablesci_pdf_helper" -ErrorAction SilentlyContinue)
+    $processHint = "未检测到同名 Helper 进程；也可能是杀毒软件、索引程序或文件权限暂时阻止了删除。"
+    if ($runningHelper.Count -gt 0) {
+      $processIds = ($runningHelper | ForEach-Object { $_.Id }) -join ", "
+      $processHint = "检测到正在运行的 ablesci_pdf_helper 进程，PID：$processIds。"
+    }
+
+    $outputBase = [System.IO.Path]::GetFileNameWithoutExtension($Output)
+    $outputExtension = [System.IO.Path]::GetExtension($Output)
+    $alternateOutput = Join-Path $OutDir "$outputBase.next$outputExtension"
+    $message = @(
+      "无法覆盖已有 Helper：$Output",
+      "该文件可能正在被 Chrome/Edge Native Messaging、手动启动的 Helper 或安全软件占用，也可能缺少当前目录的修改权限。",
+      $processHint,
+      "",
+      "请依次尝试：",
+      "1. 关闭使用该扩展的 Chrome/Edge 窗口。",
+      "2. 查看占用进程：Get-CimInstance Win32_Process | Where-Object Name -eq 'ablesci_pdf_helper.exe' | Select-Object ProcessId, ExecutablePath, CommandLine",
+      "3. 确认可以结束后执行：Get-Process ablesci_pdf_helper -ErrorAction SilentlyContinue | Stop-Process -Force",
+      "4. 重新运行本构建命令。",
+      "",
+      "如需保留旧文件，可先编译到备用路径：",
+      "& `"$PSCommandPath`" -TargetOS $TargetOS -TargetArch $TargetArch -Output `"$alternateOutput`"",
+      "",
+      "原始错误：$($_.Exception.Message)"
+    ) -join [Environment]::NewLine
+    throw $message
+  }
+}
 
 $VersionText = Resolve-VersionString $Version
 $Commit = Get-GitValue -Args @("rev-parse", "--short=12", "HEAD") -Fallback ""
