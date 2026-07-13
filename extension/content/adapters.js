@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  const scienceDirectCapability = globalThis.AblesciPublisherCapabilities?.forPublisher?.('sciencedirect') || null;
+
   function safeDecode(s) {
     try { return decodeURIComponent(String(s)); } catch (_) { return String(s || ''); }
   }
@@ -86,9 +88,13 @@
     // injects and maintains.
     if (!isSupportedPublisherUrl(url)) return null;
 
-    const sd = url.match(/^(https?:\/\/(?:www\.)?sciencedirect\.com\/science\/article\/pii\/([^/?#]+))(?:\/(?:pdfft|pdf)(?:[?#].*)?|[?#].*)?$/i);
-    if (sd) {
-      return sd[1];
+    const scienceDirectUrl = scienceDirectCapability?.inspectUrl?.(url);
+    if (['article_page', 'pdf_landing'].includes(scienceDirectUrl?.kind) && scienceDirectUrl.identity) {
+      try {
+        return scienceDirectUrl.identity.articleUrl.replace('https://www.sciencedirect.com', new URL(url).origin);
+      } catch (_) {
+        return scienceDirectUrl.identity.articleUrl;
+      }
     }
 
     if (/^https?:\/\/(?:www\.)?frontiersin\.org\/articles\/10\.\d{4,9}\/[^?#]+\/pdf(?:[?#].*)?$/i.test(url)) {

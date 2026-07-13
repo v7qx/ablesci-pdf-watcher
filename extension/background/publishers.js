@@ -1,39 +1,43 @@
 'use strict';
 
 (function () {
+  const scienceDirectCapability = globalThis.AblesciPublisherCapabilities?.forPublisher?.('sciencedirect') || null;
+
+  function inspectScienceDirectUrl(url) {
+    const inspected = scienceDirectCapability?.inspectUrl?.(url) || {
+      publisher: 'sciencedirect',
+      kind: 'unknown',
+      related: false,
+      piis: [],
+      identity: null
+    };
+    const publisherPage = ['publisher_page', 'article_page', 'chapter_page', 'pdf_landing'].includes(inspected.kind);
+    return {
+      ...inspected,
+      recognized: inspected.related,
+      relatedHost: inspected.related,
+      publisherPage,
+      articlePage: ['article_page', 'chapter_page', 'pdf_landing'].includes(inspected.kind),
+      articleKind: inspected.kind === 'chapter_page'
+        ? 'chapter'
+        : (['article_page', 'pdf_landing'].includes(inspected.kind) ? 'article' : ''),
+      pdfLanding: inspected.kind === 'pdf_landing',
+      assetPdf: inspected.kind === 'asset_pdf' || inspected.kind === 'direct_asset_pdf',
+      directAssetPdf: inspected.kind === 'direct_asset_pdf'
+    };
+  }
+
   function isScienceDirectUrl(url) {
     // PRIVATE_WATCHER_ONLY
-    const s = String(url || '');
-    return /:\/\/(?:www\.)?sciencedirect\.com\//i.test(s) || /:\/\/(?:linkinghub\.)?elsevier\.com\//i.test(s);
+    return inspectScienceDirectUrl(url).publisherPage;
   }
 
   function extractScienceDirectPii(url) {
-    const s = String(url || '');
-    let match = s.match(/\/pii\/([A-Z0-9]+)/i);
-    if (match) return match[1].toUpperCase();
-    match = s.match(/1-s2\.0-([A-Z0-9]+)/i);
-    if (match) return match[1].toUpperCase();
-    match = s.match(/\b([SB][A-Z0-9]{16,23})\b/i);
-    if (match) return match[1].toUpperCase();
-    return '';
+    return inspectScienceDirectUrl(url).piis[0] || '';
   }
 
   function extractAllScienceDirectPiis(url) {
-    const s = String(url || '');
-    const piis = [];
-    const piiMatches = s.matchAll(/\/pii\/([A-Z0-9]+)/gi);
-    for (const match of piiMatches) {
-      piis.push(match[1].toUpperCase());
-    }
-    const s2Matches = s.matchAll(/1-s2\.0-([A-Z0-9]+)/gi);
-    for (const match of s2Matches) {
-      piis.push(match[1].toUpperCase());
-    }
-    const rawMatches = s.matchAll(/\b([SB][A-Z0-9]{16,23})\b/gi);
-    for (const match of rawMatches) {
-      piis.push(match[1].toUpperCase());
-    }
-    return Array.from(new Set(piis.filter(Boolean)));
+    return inspectScienceDirectUrl(url).piis;
   }
 
   function isDoiHost(host) {
@@ -294,7 +298,7 @@
   }
 
   function isScienceDirectPdfUrl(url) {
-    return /:\/\/pdf\.sciencedirectassets\.com\//i.test(String(url || ''));
+    return inspectScienceDirectUrl(url).directAssetPdf;
   }
 
   function isDoiUrl(url) {
@@ -320,7 +324,6 @@
   }
 
   const PUBLISHER_LANDING_ALLOWLIST = {
-    sciencedirect: ['sciencedirect.com', 'linkinghub.elsevier.com'],
     nature: ['nature.com'],
     springer: ['link.springer.com'],
     rsc: ['pubs.rsc.org'],
@@ -355,7 +358,7 @@
     const doiMatch = decodeURIComponent(text).match(/(10\.\d{4,9}\/[^?#\s"']+)/i);
     const doi = (doiMatch ? doiMatch[1] : text).toLowerCase();
     if (!doi) return '';
-    if (/^10\.1016\//.test(doi)) return 'sciencedirect';
+    if (scienceDirectCapability?.identifyArticle?.({ doi }).ok) return 'sciencedirect';
     if (/^10\.1038\//.test(doi)) return 'nature';
     if (/^10\.1007\//.test(doi)) return 'springer';
     if (/^10\.1039\//.test(doi)) return 'rsc';
@@ -371,6 +374,7 @@
   }
 
   function isAllowedLandingForPublisher(publisher, finalUrl) {
+    if (inspectScienceDirectUrl(finalUrl).publisherPage) return true;
     const host = getNormalizedHost(finalUrl);
     return SHARED_LANDING_ALLOWLIST.some(allowedHost => hostMatchesAllowedHost(host, allowedHost));
   }
@@ -425,8 +429,7 @@
 
   function isScienceDirectRelatedHost(h) {
     // PRIVATE_WATCHER_ONLY
-    const s = String(h || '');
-    return /(^|\.)sciencedirect\.com$/i.test(s) || /(^|\.)sciencedirectassets\.com$/i.test(s) || /(^|\.)elsevier\.com$/i.test(s);
+    return inspectScienceDirectUrl(h).relatedHost;
   }
 
   function isOxfordRelatedDownloadHost(h) {
@@ -448,11 +451,7 @@
   }
 
   function isScienceDirectAssetPdfUrl(url) {
-    try {
-      return /(^|\.)sciencedirectassets\.com$/i.test(new URL(String(url || '')).hostname);
-    } catch (_) {
-      return false;
-    }
+    return inspectScienceDirectUrl(url).assetPdf;
   }
 
   function natureArticleUrlFromPdfUrl(url) {
@@ -504,9 +503,7 @@
   }
 
   function scienceDirectArticleUrlFromPdfUrl(url) {
-    const pii = extractScienceDirectPii(url);
-    if (!pii) return '';
-    return `https://www.sciencedirect.com/science/article/pii/${pii}`;
+    return inspectScienceDirectUrl(url).identity?.articleUrl || '';
   }
 
   function cnpeArticleUrlFromPdfUrl(url) {
@@ -564,6 +561,35 @@
 
     if (!pdfLike) {
       return { ok: false, reason: `pdfLike_check_failed (filename: "${filename}", mime: "${mime}", looksLikeUrl: ${looksLikePdfDownloadUrl(url)}, looksLikeSource: ${looksLikePdfDownloadUrl(sourceUrl)})` };
+    }
+
+    const sourceScienceDirect = inspectScienceDirectUrl(sourceUrl);
+    const expectedScienceDirect = inspectScienceDirectUrl(expectedHost);
+    const finalScienceDirect = inspectScienceDirectUrl(url);
+    const scienceDirectIdentity = scienceDirectCapability?.identifyArticle?.({
+      url: sourceUrl,
+      doi: sourceUrl
+    });
+    const useScienceDirectCapability = sourceScienceDirect.publisherPage ||
+      expectedScienceDirect.publisherPage ||
+      (scienceDirectIdentity?.ok && finalScienceDirect.relatedHost);
+    if (useScienceDirectCapability && scienceDirectIdentity?.ok) {
+      const decision = scienceDirectCapability.decideDownloadOwnership({
+        identity: scienceDirectIdentity.identity,
+        expectedHost,
+        sourceUrl,
+        item
+      });
+      if (decision.ok) return { ok: true };
+      if (decision.reasonCode === 'sciencedirect_pii_mismatch' || decision.reasonCode === 'sciencedirect_pii_missing') {
+        return { ok: false, reason: `pii_mismatch (sourcePiis: "${sourcePiis.join(',')}", actualPiis: "${actualPiis.join(',')}")` };
+      }
+      if (decision.reasonCode === 'article_identity_evidence_missing') {
+        return { ok: false, reason: 'sciencedirect_download_ownership_not_established' };
+      }
+      if (sourceScienceDirect.publisherPage || expectedScienceDirect.publisherPage) {
+        return { ok: false, reason: `host_mismatch (expected: "${expected}", finalHost: "${finalHost}", sourceHost: "${sourceHost}", itemHost: "${itemHost}", finalUrlIsBlob: ${/^blob:/i.test(finalUrl)})` };
+      }
     }
     if (sourcePiis.length > 0 && actualPiis.length > 0) {
       let matched = false;
@@ -633,7 +659,7 @@
     }
 
     if (expected && finalHost.toLowerCase() === expected) return { ok: true };
-    if (expected && /sciencedirect/i.test(expected) && isScienceDirectRelatedHost(finalHost)) return { ok: true };
+    if (inspectScienceDirectUrl(expected).publisherPage && isScienceDirectRelatedHost(finalHost)) return { ok: true };
     if (expected === 'academic.oup.com' && isOxfordRelatedDownloadHost(finalHost)) return { ok: true };
     if ((expected === 'pubs.aip.org' || expected === 'aip.scitation.org') && isAipRelatedDownloadHost(finalHost)) return { ok: true };
     if (expected === 'pubs.rsc.org' &&

@@ -2,7 +2,8 @@
   'use strict';
 
   const common = window.AblesciPublisherCommon;
-  if (!common) return;
+  const capability = globalThis.AblesciPublisherCapabilities?.forPublisher?.('sciencedirect') || null;
+  if (!common || !capability) return;
 
   let viewPdfTriggered = false;
   let observer = null;
@@ -18,25 +19,37 @@
     }
   });
 
+  function inspectCurrentArticle() {
+    const inspected = capability.inspectUrl(location.href);
+    return ['article_page', 'chapter_page', 'pdf_landing'].includes(inspected.kind)
+      ? inspected
+      : null;
+  }
+
   function getScienceDirectPii() {
-    const m = location.pathname.match(/\/(?:science\/article|science\/chapter)\/(?:abs\/)?pii\/([^/?#]+)/i);
-    return m ? m[1] : null;
+    return inspectCurrentArticle()?.identity?.pii || null;
   }
 
   function makeScienceDirectArticleUrl() {
-    const pii = getScienceDirectPii();
-    if (!pii) return null;
-    return location.origin + '/science/article/pii/' + pii;
+    const identity = inspectCurrentArticle()?.identity;
+    if (!identity) return null;
+    return identity.articleUrl.replace('https://www.sciencedirect.com', location.origin);
   }
 
   function makeScienceDirectPdfUrl() {
-    const pii = getScienceDirectPii();
-    if (!pii) return null;
-    return location.origin + '/science/article/pii/' + pii + '/pdf';
+    const identity = inspectCurrentArticle()?.identity;
+    if (!identity) return null;
+    const articleUrl = identity.articleUrl.replace('https://www.sciencedirect.com', location.origin);
+    const result = capability.createPdfCandidate({
+      identity,
+      url: articleUrl + '/pdf',
+      source: 'constructed_current_pii_pdf'
+    });
+    return result.ok ? result.candidate.url : null;
   }
 
   function isScienceDirectPdfLandingPage() {
-    return /\/science\/article\/pii\/[^/?#]+\/(?:pdf|pdfft)(?:[/?#]|$)/i.test(location.pathname + location.search);
+    return capability.inspectUrl(location.href).kind === 'pdf_landing';
   }
 
   function hasScienceDirectContentError() {
@@ -45,23 +58,23 @@
   }
 
   function collectNativePdfLinks() {
-    const currentPii = getScienceDirectPii();
+    const identity = capability.inspectUrl(location.href).identity;
     return Array.from(document.querySelectorAll('a[href*="/pdfft"], a[href*="/pdf"]'))
       .map(a => {
         const href = common.decodeHtmlUrl(a.getAttribute('href') || a.href);
         const text = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
         const classes = a.className || '';
-        const piiMatch = href.match(/\/science\/article\/pii\/([^/?#]+)\/(?:pdf|pdfft)/i);
-        const sameArticle = !!currentPii && !!piiMatch && (
-          piiMatch[1] === currentPii ||
-          (piiMatch[1].substring(0, 10) === currentPii.substring(0, 10))
-        );
+        const candidate = capability.createPdfCandidate({
+          identity,
+          url: href,
+          source: 'native_view_pdf_link'
+        });
         const looksLikeNativeViewPdf = /View PDF|Download PDF/i.test(text) ||
           /accessbar|utility|link-button|ViewPDF/i.test(`${classes} ${a.id || ''}`) ||
           /View PDF/i.test(a.getAttribute('aria-label') || '');
-        return { a, href, sameArticle, looksLikeNativeViewPdf };
+        return { a, href, sameArticle: candidate.ok, looksLikeNativeViewPdf };
       })
-      .filter(item => item.href && (!currentPii || item.sameArticle));
+      .filter(item => item.href && item.sameArticle);
   }
 
   function findNativePdfLink() {

@@ -2,11 +2,13 @@
   'use strict';
 
   const host = location.hostname.toLowerCase();
+  const scienceDirectCapability = globalThis.AblesciPublisherCapabilities?.forPublisher?.('sciencedirect') || null;
   let canControlPromise = null;
 
   function isScienceDirect() {
     // PRIVATE_WATCHER_ONLY
-    return /(^|\.)sciencedirect\.com$/i.test(host) || /(^|\.)elsevier\.com$/i.test(host);
+    const kind = scienceDirectCapability?.inspectUrl?.(location.href).kind;
+    return ['publisher_page', 'article_page', 'chapter_page', 'pdf_landing'].includes(kind);
   }
 
   function isNature() {

@@ -63,6 +63,7 @@
         "https://ablesci.com/assist/detail*"
       ],
       "js": [
+        "common/publisher_capabilities.js",
         "content/adapters.js",
         "content/content_ablesci_ui.js",
         "content/content_ablesci_i18n.js",
@@ -92,6 +93,7 @@
         "https://iopscience.iop.org/*"
       ],
       "js": [
+        "common/publisher_capabilities.js",
         "content/publishers_common.js",
         "content/publisher_sciencedirect.js",
         "content/publisher_direct_pdf.js",
