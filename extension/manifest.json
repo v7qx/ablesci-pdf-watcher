@@ -101,6 +101,7 @@
         "content/publisher_nature.js",
         "content/publisher_sage_cnpe.js",
         "content/publisher_iop.js",
+        "content/publisher_registry.js",
         "content/content_publishers.js"
       ],
       "run_at": "document_idle"
