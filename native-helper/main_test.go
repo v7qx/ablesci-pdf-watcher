@@ -296,7 +296,19 @@ func TestBuildCleanerArgsKeepsLegacyAccessCleanerFlags(t *testing.T) {
 }
 
 func TestEnsureCleanedFileSortsAfterBackupOnlyChangesTimes(t *testing.T) {
-	dir := t.TempDir()
+	// GitHub's Windows runner may expose its test temp root through a junction.
+	// Create the fixture below the same resolved temp root used by
+	// allowedPDFDirs, otherwise the production path guard can correctly reject
+	// the unresolved t.TempDir path before this test reaches the mtime behavior.
+	tempRoot := cleanOptionalDir(os.TempDir())
+	if tempRoot == "" {
+		t.Fatal("resolve OS temp directory")
+	}
+	dir, err := os.MkdirTemp(tempRoot, "ablesci-clean-sort-*")
+	if err != nil {
+		t.Fatalf("create allowed temp directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	cleanedPath := filepath.Join(dir, "paper.pdf")
 	backupPath := filepath.Join(dir, "paper.original.pdf")
 	cleanedContent := []byte("%PDF-1.4\ncleaned-content")
