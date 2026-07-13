@@ -137,6 +137,8 @@
     'between_candidates': '候选任务间延迟等待',
     'session_completed': '本轮会话已圆满完成',
     'quota_reset': '限额重置',
+    'ablesci_service_error': '科研通服务临时故障',
+    'ablesci_service_error_continue': '科研通服务临时故障，约 5 分钟后检查其他求助',
     'rate_limited_': '触发滑动窗口频控限制(将快速重试)',
     'rate_limited_retry': '触发滑动窗口频控限制(将快速重试)'
   };
@@ -175,6 +177,8 @@
     'between_candidates': 'Cooldown delay between candidates',
     'session_completed': 'Session completed successfully',
     'quota_reset': 'Quota reset',
+    'ablesci_service_error': 'Temporary Ablesci service failure',
+    'ablesci_service_error_continue': 'Temporary Ablesci service failure; check other assists in about 5 minutes',
     'rate_limited_': 'Rate limit triggered (will retry soon)',
     'rate_limited_retry': 'Rate limit triggered (will retry soon)',
     '上传成功': 'Upload Successful',

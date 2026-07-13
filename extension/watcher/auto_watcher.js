@@ -335,6 +335,7 @@
     appendWatcherLog: entry => appendWatcherLog(entry),
     writeDailyReports,
     updateProcessed,
+    updateWatcherState,
     incrementDaily,
     recordRiskEvent,
     notifyWatcherNeedsAttention,

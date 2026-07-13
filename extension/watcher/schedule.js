@@ -272,6 +272,36 @@
     async function refreshAlarmAfterRun(opts, result, attempt, trigger) {
       if (trigger !== 'alarm') return null;
       const reason = String(result?.reason || '');
+      if (reason === 'ablesci_service_error') {
+        const delay = 5;
+        const state = await getWatcherState();
+        const retryAt = Date.now() + delay * 60 * 1000;
+        state.nextAssistRunAt = new Date(retryAt).toISOString();
+        state.nextAssistReason = 'ablesci_service_error_continue';
+        state.nextAssistStrategy = 'service_error_backoff';
+        state.nextAssistDelayMinutes = delay;
+        state.nextAssistPlannedAt = new Date().toISOString();
+        state.nextScheduledAt = retryAt;
+        state.lastAlarmRefreshReason = 'ablesci_service_error_continue';
+        await saveWatcherState(state);
+        await chromeApi.alarms.clear(alarmName);
+        await chromeApi.alarms.create(alarmName, { delayInMinutes: delay });
+        const alarm = await chromeApi.alarms.get(alarmName).catch(() => null);
+        if (alarm?.scheduledTime) {
+          state.chromeAlarmScheduledAt = new Date(alarm.scheduledTime).toISOString();
+          state.nextScheduledAt = alarm.scheduledTime;
+          await saveWatcherState(state);
+        }
+        updateActionBadge(state).catch(() => {});
+        await appendWatcherTrace('alarm_scheduled_service_error_continue', {
+          reason: 'ablesci_service_error_continue',
+          delayMinutes: delay,
+          failureTotal: Number(state.ablesciUploadServiceFailures?.total || 0),
+          failureConsecutive: Number(state.ablesciUploadServiceFailures?.consecutive || 0),
+          nextScheduledAt: new Date(state.nextScheduledAt).toISOString()
+        });
+        return delay;
+      }
       if (reason.startsWith('rate_limited_')) {
         const state = await getWatcherState();
         const rateLimit = result?.rateLimit && typeof result.rateLimit === 'object'

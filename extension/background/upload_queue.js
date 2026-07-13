@@ -321,6 +321,7 @@
               );
               post(port, 'error', formatTaskError(err), {
                 failureReason: failureReason || 'failed',
+                responseMeta: err?.responseMeta || null,
                 ...cleanerExtra
               });
             }

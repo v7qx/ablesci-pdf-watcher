@@ -13,6 +13,7 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
       appendWatcherLog,
       writeDailyReports,
       updateProcessed,
+      updateWatcherState,
       incrementDaily,
       recordRiskEvent,
       notifyWatcherNeedsAttention,
@@ -313,6 +314,36 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
         return isNativeHostMissingMessage(message) || /upload-request|OSS|Aliyun|阿里云|Native Helper|upload_oss/i.test(String(message || ''));
       }
 
+      function isTransientAblesciServiceFailure(msg) {
+        const status = Number(msg?.responseMeta?.status || 0);
+        return msg?.failureReason === 'ablesci_service_error' ||
+          (status >= 500 && status <= 504) ||
+          /(?:upload-request[^\n]*(?:HTTP\s*)?(?:500|502|503|504)|(?:500|502|503|504)[^\n]*upload-request|Gateway Time-?out|Bad Gateway|Service Unavailable)/i.test(String(msg?.message || ''));
+      }
+
+      async function recordTransientAblesciFailure(msg) {
+        let snapshot = { total: 1, consecutive: 1 };
+        await updateWatcherState?.(state => {
+          const previous = state.ablesciUploadServiceFailures && typeof state.ablesciUploadServiceFailures === 'object'
+            ? state.ablesciUploadServiceFailures
+            : {};
+          snapshot = {
+            total: Number(previous.total || 0) + 1,
+            consecutive: Number(previous.consecutive || 0) + 1,
+            lastAt: new Date().toISOString(),
+            lastStatus: Number(msg?.responseMeta?.status || 0) || '',
+            lastAssistId: String(context.key || '')
+          };
+          state.ablesciUploadServiceFailures = snapshot;
+        });
+        console.warn(
+          `[Ablesci PDF Watcher] 科研通 upload-request 临时故障：累计 ${snapshot.total} 次，连续 ${snapshot.consecutive} 次；` +
+          `本次 HTTP ${snapshot.lastStatus || '未知'}，值守保持开启，将在约 5 分钟后继续检查其他求助。`,
+          { assistId: context.key, detailUrl: context.detailUrl, responseMeta: msg?.responseMeta || null }
+        );
+        return snapshot;
+      }
+
       async function pauseWatcherForInfrastructureFailure(message) {
         if (!isInfrastructureUploadFailure(message)) return false;
         const reason = isNativeHostMissingMessage(message) ? 'native_helper_unavailable' : 'upload_infrastructure_error';
@@ -353,7 +384,13 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
           if (context.settled) return;
           if (msg.type === 'error') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
-            const paused = await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
+            const transientServiceFailure = isTransientAblesciServiceFailure(msg);
+            const serviceFailureSnapshot = transientServiceFailure
+              ? await recordTransientAblesciFailure(msg)
+              : null;
+            const paused = transientServiceFailure
+              ? false
+              : await pauseWatcherForInfrastructureFailure(msg.message || 'upload_failed');
             await Promise.allSettled([
               appendWatcherTrace('queue_message_error', {
               reason: msg.message || 'upload_failed',
@@ -362,15 +399,33 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
               assistId: context.key,
               durationMs,
               paused,
+              transientServiceFailure,
+              serviceFailureTotal: serviceFailureSnapshot?.total || 0,
+              serviceFailureConsecutive: serviceFailureSnapshot?.consecutive || 0,
+              responseStatus: msg?.responseMeta?.status || '',
               pdfCleanerResult: msg.pdfCleanerResult || null,
               titleValidation: msg.titleValidation || context.payload?.titleValidation || null
               }),
-              updateProcessed(context.key, 'failed', msg.message || 'upload_failed', processedMeta(context.candidate, context.payload)),
+              updateProcessed(
+                context.key,
+                'failed',
+                transientServiceFailure ? 'ablesci_service_error' : (msg.message || 'upload_failed'),
+                processedMeta(context.candidate, context.payload)
+              ),
               incrementDaily('failed', context.trigger),
               recordRiskEvent(context.opts || {}, msg.message || 'upload_failed', 'failed'),
               appendWatcherLog(buildWatcherLogEntry(context, msg, 'failed', msg.message || 'upload_failed')).then(writeDailyReports)
             ]);
-            settle({ ok: false, reason: msg.message || 'upload_failed', durationMs, stopRun: true, paused });
+            settle({
+              ok: false,
+              reason: transientServiceFailure ? 'ablesci_service_error' : (msg.message || 'upload_failed'),
+              durationMs,
+              stopRun: true,
+              paused,
+              transientServiceFailure,
+              serviceFailureTotal: serviceFailureSnapshot?.total || 0,
+              serviceFailureConsecutive: serviceFailureSnapshot?.consecutive || 0
+            });
           }
           if (msg.type === 'done' && msg.blocked) {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
@@ -417,6 +472,12 @@ const AUTO_UPLOAD_SUCCESS_CLOSE_DELAY_MS = 2000;
             settle({ ok: false, reason: msg.message || 'blocked', durationMs, stopRun: !isDoiFailure, paused: false });
           } else if (msg.type === 'done') {
             const durationMs = Date.now() - Number(context.startedAt || Date.now());
+            await updateWatcherState?.(state => {
+              if (state.ablesciUploadServiceFailures && typeof state.ablesciUploadServiceFailures === 'object') {
+                state.ablesciUploadServiceFailures.consecutive = 0;
+                state.ablesciUploadServiceFailures.lastSuccessAt = new Date().toISOString();
+              }
+            }).catch(() => {});
             let cleanReason = msg.message || 'done';
             if (msg.uploadConfirmed === true || cleanReason.includes('上传成功') || cleanReason.includes('已成功') || cleanReason.includes('应助成功')) {
               cleanReason = '上传成功';
