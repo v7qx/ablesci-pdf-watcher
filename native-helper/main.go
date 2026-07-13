@@ -1485,35 +1485,8 @@ func handleCleanPDF(req Request) error {
 	}
 
 	if readErr == nil {
-		// Parse summary
-		type Summary struct {
-			SchemaVersion int      `json:"schema_version"`
-			Status        string   `json:"status"`
-			Source        string   `json:"source"`
-			Output        string   `json:"output"`
-			Engine        string   `json:"engine"`
-			EngineVersion string   `json:"engine_version"`
-			RulesVersion  string   `json:"rules_version"`
-			Matched       int      `json:"matched"`
-			PageCount     int      `json:"page_count"`
-			RemovedCalls  int      `json:"removed_calls"`
-			Rules         []string `json:"rules"`
-			ElapsedMs     int64    `json:"elapsed_ms"`
-			ErrorCode     string   `json:"error_code"`
-			Error         string   `json:"error"`
-			BackupPath    string   `json:"backup_path"`
-			BackupCreated bool     `json:"backup_created"`
-		}
-		var summary Summary
-		if json.Unmarshal(summaryData, &summary) == nil {
-			resultPath := path
-			if summary.Status == "cleaned" && strings.TrimSpace(summary.Output) != "" {
-				if resolvedOutput, outputErr := cleanExistingPath(summary.Output); outputErr == nil {
-					if allowedErr := ensureAllowedPDFPath(resolvedOutput); allowedErr == nil {
-						resultPath = resolvedOutput
-					}
-				}
-			}
+		if result, interpretErr := interpretCleanerSummary(summaryData, path, resolveAllowedCleanerOutput); interpretErr == nil {
+			summary := result.Summary
 			if preserveOriginal && summary.Status == "cleaned" {
 				backupPath := strings.TrimSpace(summary.BackupPath)
 				if backupPath == "" && summary.BackupCreated {
@@ -1522,24 +1495,9 @@ func handleCleanPDF(req Request) error {
 				// Metadata-only update: keep the cleaned PDF above its preserved
 				// .original.pdf backup when file pickers sort by modification time.
 				// This does not reopen or rewrite PDF contents.
-				_ = ensureCleanedFileSortsAfterBackup(resultPath, backupPath)
+				_ = ensureCleanedFileSortsAfterBackup(result.Path, backupPath)
 			}
-			return writeResponse(Response{
-				OK:                 true,
-				Action:             "clean_pdf",
-				Path:               resultPath,
-				CleanStatus:        summary.Status,
-				CleanOutput:        summary.Output,
-				CleanErrorCode:     summary.ErrorCode,
-				CleanMatched:       summary.Matched,
-				CleanRules:         summary.Rules,
-				CleanEngine:        summary.Engine,
-				CleanElapsedMs:     summary.ElapsedMs,
-				CleanPageCount:     summary.PageCount,
-				CleanBackupPath:    summary.BackupPath,
-				CleanBackupCreated: summary.BackupCreated,
-				Error:              summary.Error,
-			})
+			return writeResponse(cleanerResponse(result))
 		}
 	}
 
