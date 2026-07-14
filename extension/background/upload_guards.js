@@ -98,6 +98,15 @@
 
     async function recordPublisherDailyLimit(details = {}) {
       // PRIVATE_WATCHER_ONLY
+      const reason = String(details.reason || 'daily_count_reached');
+      if (/counter_unavailable/.test(reason)) {
+        return {
+          paused: false,
+          temporary: true,
+          publisher: String(details.publisher || 'elsevier').trim().toLowerCase() || 'elsevier',
+          reason
+        };
+      }
       const stored = await chromeApi.storage.local.get(PUBLISHER_DAILY_LIMIT_STOPS_KEY);
       const stops = stored[PUBLISHER_DAILY_LIMIT_STOPS_KEY] && typeof stored[PUBLISHER_DAILY_LIMIT_STOPS_KEY] === 'object'
         ? stored[PUBLISHER_DAILY_LIMIT_STOPS_KEY]
@@ -109,7 +118,7 @@
       const now = new Date();
       const nextLocalDayAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
       stops[publisherKey] = {
-        reason: String(details.reason || 'daily_count_reached'),
+        reason,
         siteCount: Number.isFinite(Number(details.siteCount)) ? Number(details.siteCount) : null,
         directAttempts: Math.max(0, Number(details.directAttempts || 0)),
         effectiveCount,
@@ -120,11 +129,9 @@
         pageUrl: urlHostPath(details.pageUrl || '')
       };
       await chromeApi.storage.local.set({ [PUBLISHER_DAILY_LIMIT_STOPS_KEY]: stops });
-      const message = details.reason === 'daily_bulk_download_limit_dialog'
+      const message = reason === 'daily_bulk_download_limit_dialog'
         ? 'ScienceDirect 已显示当日下载限制弹窗，已暂停 ScienceDirect；其他出版社继续。次日自动恢复。'
-        : (/counter_unavailable/.test(String(details.reason || ''))
-            ? 'ScienceDirect 下载计数无法可靠读取或保存，已安全暂停 ScienceDirect；其他出版社继续。次日自动恢复。'
-            : `ScienceDirect 当日下载计数已达到 ${effectiveCount}/${limit}，已暂停 ScienceDirect；其他出版社继续。次日自动恢复。`);
+        : `ScienceDirect 当日下载计数已达到 ${effectiveCount}/${limit}，已暂停 ScienceDirect；其他出版社继续。次日自动恢复。`;
       await notifyAccessEnvironmentAnomaly(message);
       return {
         paused: true,

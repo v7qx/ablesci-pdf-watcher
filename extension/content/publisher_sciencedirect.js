@@ -235,6 +235,14 @@
     if (dailyLimitReported) return;
     dailyLimitReported = true;
     viewPdfTriggered = true;
+    const counterUnavailable = /counter_unavailable/.test(String(result.reason || ''));
+    console.warn(
+      `[Ablesci PDF Watcher] ScienceDirect 下载计数保护：reason=${result.reason || 'unknown'}；` +
+      `站点计数=${result.siteCount ?? '不可用'}；扩展直连次数=${result.directAttempts ?? '不可用'}；` +
+      `有效计数=${result.effectiveCount ?? '不可用'}/${result.limit ?? '不可用'}；` +
+      (counterUnavailable ? '仅停止当前任务，出版社槽位保持开启。' : '已停止 ScienceDirect 当日槽位。'),
+      { source: source || '' }
+    );
     sendScienceDirectMessage({
       articleUrl: articleUrl || makeScienceDirectArticleUrl() || location.href,
       publisherDailyLimit: true,
@@ -337,6 +345,25 @@
       return;
     }
     if (viewPdfTriggered) return;
+    // Prefer the native href once it has passed the current-article PII check.
+    // ScienceDirect's React click handler can leave the article page unchanged;
+    // waiting for that click made a valid /pdfft link stall until task timeout.
+    const nativePdfHref = findNativePdfHref();
+    if (nativePdfHref) {
+      viewPdfTriggered = true;
+      const reservation = await reserveDirectAttempt();
+      if (reservation.blocked) {
+        reportDailyLimit(reservation, articleUrl, 'native_view_pdf_href_daily_limit');
+        return;
+      }
+      sendScienceDirectMessage({
+        articleUrl,
+        pdfUrl: nativePdfHref,
+        source: 'native_view_pdf_href'
+      });
+      stopObserver();
+      return;
+    }
     const button = findViewPdfButton();
     if (button) {
       const buttonHref = button.getAttribute?.('href') || button.href || '';
@@ -399,22 +426,6 @@
           }, 1200);
         }
       }, 0);
-      return;
-    }
-    const nativePdfHref = findNativePdfHref();
-    if (nativePdfHref) {
-      viewPdfTriggered = true;
-      const reservation = await reserveDirectAttempt();
-      if (reservation.blocked) {
-        reportDailyLimit(reservation, articleUrl, 'native_view_pdf_href_daily_limit');
-        return;
-      }
-      sendScienceDirectMessage({
-        articleUrl,
-        pdfUrl: nativePdfHref,
-        source: 'native_view_pdf_href'
-      });
-      stopObserver();
       return;
     }
     if (hasScienceDirectNoSubscriptionAccess()) {

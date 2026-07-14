@@ -515,15 +515,18 @@
             dateKey: '',
             expiresAt: 0
           };
-          await recordPublisherDailyLimit?.({
-            pageUrl: payload.pdfUrl,
-            publisher: payload.watcherPublisher || 'elsevier',
-            ...result
-          });
+          const counterUnavailable = /counter_unavailable/.test(String(result.reason || ''));
+          if (!counterUnavailable) {
+            await recordPublisherDailyLimit?.({
+              pageUrl: payload.pdfUrl,
+              publisher: payload.watcherPublisher || 'elsevier',
+              ...result
+            });
+          }
           const err = new Error(result.reason === 'daily_count_reached'
             ? `ScienceDirect 当日下载计数已达到 ${result.effectiveCount}/${result.limit}，当前任务已停止；其他出版社继续，次日自动恢复。`
-            : 'ScienceDirect 下载计数无法可靠读取或保存，当前任务已安全停止；其他出版社继续。');
-          err.failureReason = 'publisher_daily_limit';
+            : `ScienceDirect 下载计数暂时不可用（${result.reason || 'direct_counter_unavailable'}），仅停止当前任务；ScienceDirect 槽位保持开启，其他出版社继续。`);
+          err.failureReason = counterUnavailable ? 'publisher_counter_unavailable' : 'publisher_daily_limit';
           throw err;
         }
         post(port, 'progress', `ScienceDirect 直链下载计数：${reservation.effectiveCount}/${reservation.limit}。`);

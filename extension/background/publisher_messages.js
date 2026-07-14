@@ -35,7 +35,8 @@
       recordPublisherCfChallenge,
       recordPublisherDailyLimit,
       reserveScienceDirectAttempt,
-      appendDiagnosticTrace
+      appendDiagnosticTrace,
+      appendWatcherTrace
     } = deps;
 
     // 调试日志：转发到 publisher tab 的 content script，使其出现在页面 F12 中
@@ -344,6 +345,7 @@
         const effectiveCount = Math.max(0, Number(msg.effectiveCount || 0));
         const limit = Math.max(1, Number(msg.dailyLimit || 100));
         const reason = String(msg.dailyLimitReason || 'daily_count_reached');
+        const counterUnavailable = /counter_unavailable/.test(reason);
         tracePublisherStep(pending, 'publisher-daily-limit', {
           publisher: msg.publisher,
           articleUrl: msg.articleUrl || msg.pageUrl || pending.articleUrl || '',
@@ -353,7 +355,19 @@
           limit,
           dateKey: msg.dateKey || ''
         });
-        Promise.resolve(recordPublisherDailyLimit?.({
+        if (counterUnavailable) {
+          appendWatcherTrace?.('publisher_counter_unavailable', {
+            reason,
+            publisher: pending.payloadSummary?.watcherPublisher || 'elsevier',
+            assistId: pending.payloadSummary?.assistId || '',
+            siteCount: msg.siteCount,
+            directAttempts: msg.directAttempts,
+            effectiveCount,
+            limit,
+            source: msg.source || ''
+          });
+        }
+        const recordPromise = counterUnavailable ? Promise.resolve({ paused: false, temporary: true }) : Promise.resolve(recordPublisherDailyLimit?.({
           pageUrl: msg.pageUrl || msg.articleUrl || pending.articleUrl || pending.pdfUrl || '',
           publisher: pending.payloadSummary?.watcherPublisher || 'elsevier',
           reason,
@@ -363,18 +377,19 @@
           limit,
           dateKey: msg.dateKey,
           expiresAt: msg.expiresAt
-        }))
+        }));
+        recordPromise
           .catch(err => {
             console.warn('[Ablesci PDF Watcher] record publisher daily limit failed', err);
           })
           .finally(() => {
             const message = reason === 'daily_bulk_download_limit_dialog'
               ? 'ScienceDirect 已显示当日下载限制弹窗，当前任务已停止；其他出版社继续，次日自动恢复。'
-              : (/counter_unavailable/.test(reason)
-                  ? 'ScienceDirect 下载计数无法可靠读取或保存，当前任务已安全停止；其他出版社继续。'
+              : (counterUnavailable
+                  ? `ScienceDirect 下载计数暂时不可用（${reason}），仅停止当前任务；ScienceDirect 槽位保持开启，其他出版社继续。`
                   : `ScienceDirect 当日下载计数已达到 ${effectiveCount}/${limit}，当前任务已停止；其他出版社继续，次日自动恢复。`);
             const err = new Error(message);
-            err.failureReason = 'publisher_daily_limit';
+            err.failureReason = counterUnavailable ? 'publisher_counter_unavailable' : 'publisher_daily_limit';
             pending.finishError(err);
           });
         sendResponse({ ok: true, action: 'science_direct_daily_limit' });

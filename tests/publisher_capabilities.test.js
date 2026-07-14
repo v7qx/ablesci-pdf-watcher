@@ -111,6 +111,29 @@ test('accepts a matching ScienceDirect asset download for the article identity',
   });
 });
 
+test('accepts a ScienceDirect asset path containing a parent PII before the matching article PII', () => {
+  const capability = forPublisher('sciencedirect');
+  const identity = capability.identifyArticle({
+    url: 'https://www.sciencedirect.com/science/article/pii/S1078588425009050'
+  }).identity;
+
+  const result = capability.decideDownloadOwnership({
+    identity,
+    expectedHost: 'www.sciencedirect.com',
+    sourceUrl: 'https://www.sciencedirect.com/science/article/pii/S1078588425009050/pdf',
+    item: {
+      finalUrl: 'https://pdf.sciencedirectassets.com/272423/1-s2.0-S1078588426X20044/1-s2.0-S1078588425009050/main.pdf',
+      filename: 'main.pdf',
+      mime: 'application/pdf'
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    reasonCode: 'sciencedirect_related_pdf'
+  });
+});
+
 test('rejects a ScienceDirect download whose PII belongs to another article', () => {
   const capability = forPublisher('sciencedirect');
   const identity = capability.identifyArticle({

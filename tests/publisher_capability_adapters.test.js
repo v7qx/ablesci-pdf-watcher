@@ -34,6 +34,20 @@ test('background publisher adapter preserves ScienceDirect download acceptance',
   assert.deepEqual(result, { ok: true });
 });
 
+test('background publisher adapter accepts a parent PII before the matching article PII', () => {
+  const result = publishers.isLikelyTargetDownload(
+    {
+      finalUrl: 'https://pdf.sciencedirectassets.com/272423/1-s2.0-S1078588426X20044/1-s2.0-S1078588425009050/main.pdf',
+      filename: 'main.pdf',
+      mime: 'application/pdf'
+    },
+    'www.sciencedirect.com',
+    'https://www.sciencedirect.com/science/article/pii/S1078588425009050/pdf'
+  );
+
+  assert.deepEqual(result, { ok: true });
+});
+
 test('background publisher adapter preserves the ScienceDirect PII mismatch reason', () => {
   const result = publishers.isLikelyTargetDownload(
     {

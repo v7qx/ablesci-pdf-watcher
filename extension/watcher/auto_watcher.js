@@ -485,6 +485,7 @@
     incrementDaily,
     getWatcherState,
     saveWatcherState,
-    updateWatcherState
+    updateWatcherState,
+    appendWatcherTrace
   };
 })();

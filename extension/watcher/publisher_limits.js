@@ -13,6 +13,7 @@
     const stops = state.publisherDailyLimitStops;
     if (!stops || typeof stops !== 'object' || Array.isArray(stops)) return {};
     return Object.fromEntries(Object.entries(stops).filter(([, stop]) => {
+      if (/counter_unavailable/.test(String(stop?.reason || ''))) return false;
       const expiresAt = Number(stop?.expiresAt || 0);
       return Number.isFinite(expiresAt) && expiresAt > now;
     }));
@@ -24,7 +25,7 @@
     let changed = false;
     for (const [publisher, stop] of Object.entries(stops)) {
       const expiresAt = Number(stop?.expiresAt || 0);
-      if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      if (/counter_unavailable/.test(String(stop?.reason || '')) || !Number.isFinite(expiresAt) || expiresAt <= now) {
         delete stops[publisher];
         changed = true;
       }

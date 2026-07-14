@@ -171,7 +171,7 @@
     const pdfLike = /\.pdf$/i.test(filename) || /pdf/i.test(mime) ||
       /\/(?:pdf|pdfft)(?:[/?#]|$)|\.pdf(?:[?#]|$)/i.test(finalUrl) ||
       /\/(?:pdf|pdfft)(?:[/?#]|$)|\.pdf(?:[?#]|$)/i.test(sourceUrl);
-    const actualPii = extractScienceDirectPii(finalUrl);
+    const actualPiis = extractAllScienceDirectPiis(finalUrl);
     const finalInspection = inspectScienceDirectUrl(finalUrl);
 
     if (identity.publisher !== SCIENCEDIRECT || !pdfLike) {
@@ -179,10 +179,11 @@
     }
     const finalIsAsset = finalInspection.kind === URL_KIND.ASSET_PDF ||
       finalInspection.kind === URL_KIND.DIRECT_ASSET_PDF;
-    if (identity.pii && finalIsAsset && !actualPii) {
+    if (identity.pii && finalIsAsset && actualPiis.length === 0) {
       return { ok: false, reasonCode: 'sciencedirect_pii_missing' };
     }
-    if (identity.pii && actualPii && !sameScienceDirectDownload(identity.pii, actualPii)) {
+    if (identity.pii && actualPiis.length > 0 &&
+        !actualPiis.some(actualPii => sameScienceDirectDownload(identity.pii, actualPii))) {
       return { ok: false, reasonCode: 'sciencedirect_pii_mismatch' };
     }
     if (!identity.pii && identity.doi) {

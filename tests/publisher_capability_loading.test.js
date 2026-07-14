@@ -51,3 +51,19 @@ test('loads publisher capabilities before background publisher adapters', () => 
     'publisher daily-limit helpers must load before watcher state'
   );
 });
+
+test('ScienceDirect prefers a validated native PDF href before clicking the page button', () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, 'extension/content/publisher_sciencedirect.js'),
+    'utf8'
+  );
+  const directHrefBranch = source.indexOf('const nativePdfHref = findNativePdfHref();');
+  const clickBranch = source.indexOf('const button = findViewPdfButton();');
+
+  assert.ok(directHrefBranch >= 0, 'ScienceDirect adapter must inspect the native PDF href');
+  assert.ok(clickBranch >= 0, 'ScienceDirect adapter must retain the page-button fallback');
+  assert.ok(
+    directHrefBranch < clickBranch,
+    'a PII-validated /pdfft href must be used before the React click fallback'
+  );
+});

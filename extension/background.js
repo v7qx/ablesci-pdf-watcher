@@ -250,7 +250,8 @@ const {
   recordPublisherCfChallenge,
   recordPublisherDailyLimit,
   reserveScienceDirectAttempt,
-  appendDiagnosticTrace
+  appendDiagnosticTrace,
+  appendWatcherTrace: (step, details) => globalThis.AblesciWatcherState?.appendWatcherTrace?.(step, details)
 });
 const { downloadPdf } = createBackgroundDownloadAgentApi({
   chromeApi: chrome,

@@ -44,6 +44,11 @@
         : {};
       const stop = stops[key];
       if (!stop) return false;
+      if (/counter_unavailable/.test(String(stop.reason || ''))) {
+        delete stops[key];
+        await chromeApi.storage.local.set({ [publisherDailyLimitStopsKey]: stops });
+        return false;
+      }
       const expiresAt = Number(stop.expiresAt || 0);
       if (Number.isFinite(expiresAt) && expiresAt > Date.now()) return true;
       delete stops[key];
@@ -203,6 +208,7 @@
             'no_access',
             'explicit_no_subscription',
             'publisher_daily_limit',
+            'publisher_counter_unavailable',
             'empty_pdf_file',
             'assist_closed',
             'tab_drag_locked'
@@ -273,6 +279,18 @@
                 blocked: true,
                 skipped: true,
                 skipReason: 'publisher_daily_limit',
+                ...cleanerExtra
+              });
+            } else if (failureReason === 'publisher_counter_unavailable') {
+              const message = formatTaskError(err) || 'ScienceDirect 下载计数暂时不可用，仅停止当前任务；出版社槽位保持开启。';
+              post(port, 'done', message, {
+                html: escapeHtml(message),
+                recomend: false,
+                reload: false,
+                downloadOnly: true,
+                blocked: true,
+                skipped: true,
+                skipReason: 'publisher_counter_unavailable',
                 ...cleanerExtra
               });
             } else if (failureReason === 'no_access' || failureReason === 'explicit_no_subscription') {

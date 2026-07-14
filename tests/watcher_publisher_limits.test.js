@@ -42,3 +42,22 @@ test('removes expired daily stops so Elsevier becomes eligible again', () => {
     [elsevierUrl, rscUrl]
   );
 });
+
+test('removes legacy counter-unavailable stops instead of closing Elsevier for the day', () => {
+  const now = 1_700_000_000_000;
+  const state = {
+    publisherDailyLimitStops: {
+      elsevier: {
+        reason: 'direct_counter_unavailable',
+        expiresAt: now + 60_000
+      }
+    }
+  };
+
+  assert.deepEqual(
+    filterStoppedPublisherUrls([elsevierUrl, rscUrl], state, now),
+    [elsevierUrl, rscUrl]
+  );
+  assert.equal(pruneExpiredPublisherStops(state, now), true);
+  assert.deepEqual(state.publisherDailyLimitStops, {});
+});

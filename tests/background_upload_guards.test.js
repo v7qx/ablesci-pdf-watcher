@@ -77,6 +77,23 @@ test('records a ScienceDirect daily stop without disabling other publisher lanes
   assert.match(harness.notifications[0].message, /其他出版社继续/);
 });
 
+test('does not turn a temporary ScienceDirect counter failure into a day-long publisher stop', async () => {
+  const harness = createHarness({ watcherMultiPublisherEnabled: true });
+
+  const result = await harness.api.recordPublisherDailyLimit({
+    publisher: 'elsevier',
+    reason: 'direct_counter_unavailable',
+    effectiveCount: 0,
+    limit: 100,
+    expiresAt: Date.now() + 60_000
+  });
+
+  assert.equal(result.paused, false);
+  assert.equal(result.temporary, true);
+  assert.deepEqual(harness.data.publisherDailyLimitStops, {});
+  assert.equal(harness.notifications.length, 0);
+});
+
 test('allows the one-hundredth background ScienceDirect direct download and blocks the next one', async () => {
   const harness = createHarness({
     scienceDirectDownloadGuardState: {
