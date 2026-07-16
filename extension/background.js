@@ -5,6 +5,7 @@ importScripts(
   'common/common_storage.js',
   'common/common_logging.js',
   'common/common_worktime.js',
+  'common/assist_system_warnings.js',
   'common/publisher_capabilities.js',
   'background/publishers.js',
   'background/port_utils.js',

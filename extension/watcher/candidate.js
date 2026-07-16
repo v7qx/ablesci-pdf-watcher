@@ -876,12 +876,8 @@
           }
         }
       }
-      if (opts.watcherSkipRiskText && flags.systemPromptSupplementDoi) {
-        return { ok: false, reason: 'detail_system_prompt_si' };
-      }
-      if (opts.watcherSkipRiskText && flags.systemPromptAbnormalAssist) {
-        return { ok: false, reason: 'detail_system_prompt_abnormal' };
-      }
+      const systemPromptBlock = globalThis.AblesciAssistSystemWarnings?.hardBlockFromPayload(payload);
+      if (systemPromptBlock?.blocked) return { ok: false, reason: systemPromptBlock.skipReason };
       if (opts.watcherSkipRiskText && (flags.systemRisk || /特殊文件|指定版本|不是全文|网页即可阅读|CAJ|epub/i.test(textValue))) {
         return { ok: false, reason: 'detail_risk_text' };
       }

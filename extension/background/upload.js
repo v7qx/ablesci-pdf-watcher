@@ -375,6 +375,34 @@
       const opts = optsOverride || await getOptions();
       const diag = makeDiagnosticBase(payload, opts);
 
+      // Site-generated system warnings are authoritative. Enforce this again in
+      // the background so a stale UI, watcher option, or queue state cannot turn
+      // an explicitly warned request into an upload.
+      const systemPromptBlock = globalThis.AblesciAssistSystemWarnings?.hardBlockFromPayload(payload);
+      if (!literatureDownload && !debugSimulation && systemPromptBlock?.blocked) {
+        console.warn('[Ablesci PDF Watcher] blocked by site system warning', {
+          assistId: String(payload?.assistId || '').slice(0, 80),
+          skipReason: systemPromptBlock.skipReason
+        });
+        await saveDiagnostic({
+          ...diag,
+          stage: 'skipped-site-system-warning',
+          error: systemPromptBlock.message,
+          skipReason: systemPromptBlock.skipReason
+        });
+        post(port, 'done', systemPromptBlock.message, {
+          html: escapeHtml(systemPromptBlock.message),
+          recomend: false,
+          reload: false,
+          downloadOnly: true,
+          blocked: true,
+          skipped: true,
+          skipReason: systemPromptBlock.skipReason,
+          message: systemPromptBlock.message
+        });
+        return;
+      }
+
       // 1. 校验更正类求助
       if (!literatureDownload && opts.watcherSkipCorrigendum && payload?.title && isLikelyCorrigendumTitle(payload.title)) {
         if (debugSimulation) {

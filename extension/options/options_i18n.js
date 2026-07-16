@@ -123,6 +123,7 @@
 
   "候选筛选": "Candidate Filter",
   "出版社快捷选择": "Quick Publisher Select",
+  "ScienceDirect 有当日下载限额；达到限额后会自动停止 SD 槽位，其他出版社继续，次日自动恢复。": "ScienceDirect has a daily download limit. When reached, only the SD lane stops; other publishers continue, and SD resumes the next day.",
   "勾选要值守的出版社后点\"生成\"，会写入下方列表 URL（每个出版社一行，运行时随机翻页）。若某出版社在科研通的 slug 不同，可直接编辑下方 URL。": "Tick the publishers to watch, then click Generate to fill the list URLs below (one per publisher, random page each run). If a publisher's Ablesci slug differs, edit the URL below directly.",
   "生成到列表 URL": "Generate List URLs",
   "列表 URL": "List URLs",

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ablesci PDF Watcher",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Browser extension for Ablesci PDF assist workflow.",
   "icons": {
     "16": "icons/icon16.png",
@@ -63,6 +63,7 @@
         "https://ablesci.com/assist/detail*"
       ],
       "js": [
+        "common/assist_system_warnings.js",
         "common/publisher_capabilities.js",
         "content/adapters.js",
         "content/content_ablesci_ui.js",

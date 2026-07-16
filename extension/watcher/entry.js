@@ -254,7 +254,11 @@
 
       chromeApi.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== 'local') return;
-        const watcherKeys = Object.keys(changes).filter(key => key.startsWith('watcher'));
+        const watcherKeys = Object.keys(changes).filter(key =>
+          key.startsWith('watcher') ||
+          key === autoWatcherStateKey ||
+          key === 'publisherDailyLimitStops'
+        );
         if (watcherKeys.length) {
           applyStorageWatcherTraceLevel(changes);
           const changedKeys = watcherKeys.slice(0, 12).join(',');

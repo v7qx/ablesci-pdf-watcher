@@ -26,6 +26,7 @@
     } = config;
 
     let badgeRefreshTimer = null;
+    let badgeUpdatePromise = Promise.resolve();
     let traceBuffer = [];
     let traceFlushTimer = null;
     let traceFlushPromise = Promise.resolve();
@@ -65,10 +66,15 @@
       };
     }
 
-    async function updateActionBadge(state = null) {
+    async function performActionBadgeUpdate(state = null) {
       try {
-        const current = state || await getWatcherState();
         const opts = depsRef?.getOptions ? normalizeOptions(await depsRef.getOptions()) : {};
+        // Parallel lanes update independently. A state object supplied by one lane
+        // can omit a newer schedule written by another lane, so always re-read the
+        // merged state before choosing the badge countdown in multi-publisher mode.
+        const current = opts.watcherMultiPublisherEnabled
+          ? await getWatcherState()
+          : (state || await getWatcherState());
         if (opts.watcherEnabled !== true) {
           await chromeApi.action.setBadgeText({ text: '' });
           await chromeApi.action.setTitle({ title: 'Ablesci PDF Watcher' });
@@ -94,6 +100,13 @@
           : 'Ablesci PDF Watcher';
         await chromeApi.action.setTitle({ title });
       } catch (_) {}
+    }
+
+    function updateActionBadge(state = null) {
+      const operation = () => performActionBadgeUpdate(state);
+      const next = badgeUpdatePromise.then(operation, operation);
+      badgeUpdatePromise = next.catch(() => {});
+      return next;
     }
 
     function normalizeTraceLevel(value) {

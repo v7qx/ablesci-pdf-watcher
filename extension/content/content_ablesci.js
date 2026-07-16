@@ -521,27 +521,15 @@
       reasons.push('当前求助被网站标记为涉嫌违规或正在被举报。');
     }
 
-    // System risk: only trust the site's own warning blocks (`.special-assist-alert`,
-    // which is injected only for flagged requests, or an alert element that actually
-    // contains a 系统提示 marker), then require a recognized risk keyword. Do NOT scan
-    // the whole .assist-detail container: every page carries boilerplate such as
-    // "科研通『学术中心』是文献索引库…", so a wholesale keyword scan plus a catch-all
-    // skip false-flags every normal request.
-    const systemAlertTexts = Array.from(document.querySelectorAll('.special-assist-alert, .assist-detail .alert-warning, .assist-detail .layui-alert, .assist-detail .layui-card-body'))
+    // Only inspect authoritative site warning containers. Do not scan the whole
+    // detail page because normal pages also contain generic "索引库" boilerplate.
+    const systemAlertItems = Array.from(document.querySelectorAll('.special-assist-alert, .assist-detail .alert-warning, .assist-detail .layui-alert, .assist-detail .layui-card-body'))
       .map(el => ({ text: visibleText(el), special: el.classList?.contains('special-assist-alert') }))
-      .filter(item => item.text && (item.special || /系统提示|提醒：由于doi是数字文件的唯一标识/i.test(item.text)))
-      .map(item => item.text);
-    const systemWarnings = systemAlertTexts.filter(t => /Supplementary|补充材料|supporting information|并非全文|不是全文|该doi的文献可能是补充材料/i.test(t));
-    const abnormalSystemWarnings = systemAlertTexts.filter(t => /索引库|类似于搜索引擎|准确性不能保证|建议填写原始官方链接|无全文|没有全文|并非全文|不是全文/i.test(t));
-    if (systemWarnings.length > 0 || abnormalSystemWarnings.length > 0) {
-      flags.systemRisk = true;
-      if (systemWarnings.length > 0) {
-        flags.systemPromptSupplementDoi = true;
-        reasons.push('网站系统提示该 DOI 可能对应补充材料或并非全文，已按异常情况跳过。');
-      } else {
-        flags.systemPromptAbnormalAssist = true;
-        reasons.push('网站系统提示该求助可能是索引库链接、无全文或信息不准确，已按异常情况跳过。');
-      }
+      .filter(item => item.text);
+    const systemWarning = globalThis.AblesciAssistSystemWarnings.classifyAlertItems(systemAlertItems);
+    if (systemWarning.blocked) {
+      Object.assign(flags, systemWarning.flags);
+      reasons.push(systemWarning.message);
     }
 
     const remarkInfo = extractRemarkInfo();
@@ -708,6 +696,10 @@
     let payload;
     try {
       payload = collectPayload();
+      const systemPromptBlock = globalThis.AblesciAssistSystemWarnings.hardBlockFromPayload(payload);
+      if (systemPromptBlock.blocked) {
+        throw new Error(systemPromptBlock.message);
+      }
       if (pageOptions.watcherSkipCorrigendum && payload.title && isLikelyCorrigendumTitle(payload.title)) {
         throw new Error(isEn ? 'Skipped correction/erratum requests.' : '已按设置跳过更正类求助');
       }

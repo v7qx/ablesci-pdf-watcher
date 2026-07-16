@@ -72,9 +72,21 @@ test('records a ScienceDirect daily stop without disabling other publisher lanes
   assert.equal(harness.clearedAlarms.length, 0);
   assert.equal(harness.data.publisherDailyLimitStops.elsevier.effectiveCount, 100);
   assert.equal(harness.notifications.length, 1);
-  assert.equal(harness.notifications[0].requireInteraction, true);
+  assert.equal(harness.notifications[0].requireInteraction, false);
   assert.match(harness.notifications[0].message, /100\/100/);
   assert.match(harness.notifications[0].message, /其他出版社继续/);
+});
+
+test('keeps publisher challenge notifications visible for manual handling', async () => {
+  const harness = createHarness({ watcherMultiPublisherEnabled: true });
+
+  await harness.api.recordPublisherCfChallenge(
+    'https://www.sciencedirect.com/science/article/pii/S0000000000000000',
+    'elsevier'
+  );
+
+  assert.equal(harness.notifications.length, 1);
+  assert.equal(harness.notifications[0].requireInteraction, true);
 });
 
 test('does not turn a temporary ScienceDirect counter failure into a day-long publisher stop', async () => {

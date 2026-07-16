@@ -26,7 +26,7 @@
       return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
     }
 
-    async function notifyAccessEnvironmentAnomaly(message) {
+    async function notifyAccessEnvironmentAnomaly(message, options = {}) {
       try {
         await chromeApi.notifications.create({
           type: 'basic',
@@ -34,7 +34,7 @@
           title: 'Ablesci PDF Watcher',
           message,
           priority: 2,
-          requireInteraction: true
+          requireInteraction: options.requireInteraction === true
         });
       } catch (err) {
         console.warn('[Ablesci PDF Watcher] anomaly notification failed', err);
@@ -84,7 +84,7 @@
               ? `${publisherKey} 连续 ${streak} 次遇到出版商验证页，已暂停该出版社通道。`
               : `连续 ${streak} 次遇到出版商验证页，已暂停低频值守。请完成验证后手动重新开启。`)
           : `检测到出版商验证页（第 ${streak} 次）。请恢复浏览器窗口并完成验证；达到 ${threshold} 次后会自动暂停值守。`;
-        await notifyAccessEnvironmentAnomaly(message);
+        await notifyAccessEnvironmentAnomaly(message, { requireInteraction: true });
         notified = true;
       }
       return {
